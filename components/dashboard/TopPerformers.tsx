@@ -33,7 +33,7 @@ const performers = [
   },
 ];
 
-export default function TopPerformers(): JSX.Element {
+export default function TopPerformers() {
   return (
     <div
       style={{
