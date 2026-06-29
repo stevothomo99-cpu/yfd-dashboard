@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navItems = [
-  { label: "Overview", href: "/dashboard" },
-  { label: "Leaderboard", href: "/dashboard/leaderboard" },
-  { label: "Timesheets", href: "/dashboard/timesheets" },
-  { label: "Karbon Tasks", href: "/dashboard/tasks" },
-  { label: "BAS Status", href: "/dashboard/bas" },
-  { label: "Clients", href: "/dashboard/clients" },
+  { label: "Overview", href: "/" },
+  { label: "Leaderboard", href: "/leaderboard" },
+  { label: "Timesheets", href: "/timesheets" },
+  { label: "Karbon Tasks", href: "/tasks" },
+  { label: "BAS Status", href: "/bas" },
+  { label: "Clients", href: "/clients" },
+  { label: "Settings", href: "/settings" },
 ];
 
 export default function TopNav() {
@@ -63,7 +64,10 @@ export default function TopNav() {
           overflow: "auto",
         }}>
           {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            const isActive =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname === item.href || pathname.startsWith(item.href + "/");
             return (
               <Link key={item.href} href={item.href}>
                 <div style={{
