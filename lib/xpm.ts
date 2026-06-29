@@ -3,6 +3,7 @@ import type { XpmStaff } from "@/types/xpm";
 
 const TOKEN_KEY = "xpm:access-token";
 const REFRESH_KEY = "xpm:refresh-token";
+const REFRESHED_AT_KEY = "xpm:refresh-rotated-at";
 const STAFF_KEY = (partner: string) => `xpm:staff:${partner}`;
 
 const STAFF_TTL = 24 * 60 * 60;
@@ -33,7 +34,21 @@ export function isXpmConfigured(): boolean {
 
 async function currentRefreshToken(): Promise<string> {
   const stored = await cacheGet<string>(REFRESH_KEY);
-  return stored ?? (process.env.XPM_REFRESH_TOKEN as string);
+  if (stored) return stored;
+
+  // Xero rotates the refresh token on every successful exchange. If KV ever
+  // held a rotated token and is now empty, the env-var token has been
+  // invalidated and the next refresh attempt will fail. Surface this loudly
+  // so an operator notices in Vercel logs before the user does.
+  const lastRotatedAt = await cacheGet<string>(REFRESHED_AT_KEY);
+  if (lastRotatedAt) {
+    console.error(
+      `[xpm] WARNING: stored refresh token missing but a rotation was recorded at ${lastRotatedAt}. ` +
+        `Falling back to XPM_REFRESH_TOKEN env var, which Xero has almost certainly invalidated. ` +
+        `Re-do Xero OAuth consent and update XPM_REFRESH_TOKEN before next sync.`,
+    );
+  }
+  return process.env.XPM_REFRESH_TOKEN as string;
 }
 
 interface XeroTokenResponse {
@@ -71,6 +86,7 @@ async function refreshAccessToken(): Promise<string> {
   const data = (await res.json()) as XeroTokenResponse;
 
   await cacheSet(REFRESH_KEY, data.refresh_token);
+  await cacheSet(REFRESHED_AT_KEY, new Date().toISOString());
   const accessTtl = Math.max(data.expires_in - 5 * 60, 60);
   await cacheSet(TOKEN_KEY, data.access_token, accessTtl);
   return data.access_token;
@@ -177,6 +193,3 @@ export async function getXpmStaff(
   return fresh;
 }
 
-export async function bustXpmStaffCache(partnerName: string): Promise<void> {
-  await cacheSet(STAFF_KEY(partnerName), null, 1);
-}

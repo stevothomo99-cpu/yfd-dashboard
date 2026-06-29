@@ -12,10 +12,18 @@ export default function LoginPage() {
   );
 }
 
+function safeCallback(raw: string | null): string {
+  if (!raw) return "/";
+  // Only accept relative paths starting with a single "/" — reject "//evil"
+  // (schemaless URL) and any absolute http(s):// to prevent open redirect.
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  return "/";
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/";
+  const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

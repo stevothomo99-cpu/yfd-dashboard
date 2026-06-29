@@ -1,10 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  bustXpmStaffCache,
-  getXpmStaff,
-  isXpmConfigured,
-  XpmNotConfiguredError,
-} from "@/lib/xpm";
+import { getXpmStaff, isXpmConfigured, XpmNotConfiguredError } from "@/lib/xpm";
 import { getSettings } from "@/lib/settings";
 import { STAFF } from "@/lib/mock";
 import type { XpmStaff } from "@/types/xpm";
@@ -51,7 +46,6 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
   }
 
   try {
-    if (forceRefresh) await bustXpmStaffCache(settings.partnerName);
     const staff = await getXpmStaff(settings.partnerName, { forceRefresh });
     return NextResponse.json({
       mode: "live",
