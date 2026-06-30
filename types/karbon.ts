@@ -23,4 +23,5 @@ export interface KarbonWorkItem {
   status: KarbonWorkStatus;
   dueDate: string;
   assigneeId: string;
+  assigneeName: string;
 }

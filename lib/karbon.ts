@@ -158,6 +158,7 @@ export async function fetchKarbonWorkItems(): Promise<KarbonWorkItem[]> {
     status: mapWorkStatus(w.PrimaryStatus),
     dueDate: dateOnly(w.DueDate),
     assigneeId: pickStr(w, ["AssigneeKey", "AssigneeEmailAddress"]),
+    assigneeName: pickStr(w, ["AssigneeName"]),
   }));
 }
 

@@ -279,6 +279,7 @@ export const WORK_ITEMS: KarbonWorkItem[] = CLIENT_SEEDS.map((c, i) => ({
         : "notStarted",
   dueDate: "2026-06-28",
   assigneeId: c.managerId,
+  assigneeName: STAFF.find((s) => s.id === c.managerId)!.name,
 }));
 
 export const CLIENT_TILES: ClientTile[] = CLIENT_SEEDS.map((c) => {

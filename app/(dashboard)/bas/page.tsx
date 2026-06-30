@@ -1,126 +1,60 @@
-"use client";
+import BasPageClient from "./BasPageClient";
+import {
+  getKarbonWorkItems,
+  isKarbonConfigured,
+  KarbonNotConfiguredError,
+} from "@/lib/karbon";
+import { getSettings } from "@/lib/settings";
+import { WORK_ITEMS } from "@/lib/mock";
+import type { KarbonWorkItem } from "@/types/karbon";
 
-import { useState } from "react";
-import PageHeader from "@/components/dashboard/PageHeader";
-import KpiCard from "@/components/dashboard/KpiCard";
-import BasStatusBadge from "@/components/dashboard/BasStatusBadge";
-import StaffAvatar from "@/components/dashboard/StaffAvatar";
-import StaffSlicer from "@/components/layout/StaffSlicer";
-import { includedStaff, CLIENT_TILES, findStaff } from "@/lib/mock";
-import type { BasStatus } from "@/types/dashboard";
-
-const STATUS_ORDER: Record<BasStatus, number> = {
-  "not-started": 0,
-  "in-progress": 1,
-  lodged: 2,
-};
-
-function formatDue(d: string) {
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+export interface BasSnapshot {
+  mode: "live" | "mock";
+  workItems: KarbonWorkItem[];
+  syncedAt: string;
+  basWorkTypeFilter: string | null;
+  message?: string;
 }
 
-export default function BasPage() {
-  const staff = includedStaff();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+async function loadSnapshot(): Promise<BasSnapshot> {
+  const settings = await getSettings();
+  const excluded = settings.excludedStaffIds;
+  const basWorkTypeFilter = process.env.KARBON_BAS_WORK_TYPE ?? null;
 
-  const includedIds = new Set(staff.map((s) => s.id));
+  if (!isKarbonConfigured()) {
+    return {
+      mode: "mock",
+      workItems: WORK_ITEMS.filter((w) => !excluded.includes(w.assigneeId)),
+      syncedAt: new Date().toISOString(),
+      basWorkTypeFilter,
+      message: "Showing mock data because KARBON_API_KEY is not set.",
+    };
+  }
 
-  const rows = CLIENT_TILES.filter(
-    (c) => includedIds.has(c.managerId) && (!selectedId || c.managerId === selectedId),
-  ).sort(
-    (a, b) => STATUS_ORDER[a.basStatus] - STATUS_ORDER[b.basStatus] || a.name.localeCompare(b.name),
-  );
+  try {
+    const workItems = await getKarbonWorkItems(excluded);
+    return { mode: "live", workItems, syncedAt: new Date().toISOString(), basWorkTypeFilter };
+  } catch (err) {
+    if (err instanceof KarbonNotConfiguredError) {
+      return {
+        mode: "mock",
+        workItems: WORK_ITEMS.filter((w) => !excluded.includes(w.assigneeId)),
+        syncedAt: new Date().toISOString(),
+        basWorkTypeFilter,
+        message: err.message,
+      };
+    }
+    return {
+      mode: "live",
+      workItems: [],
+      syncedAt: new Date().toISOString(),
+      basWorkTypeFilter,
+      message: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+}
 
-  const counts = {
-    lodged: rows.filter((c) => c.basStatus === "lodged").length,
-    inProgress: rows.filter((c) => c.basStatus === "in-progress").length,
-    notStarted: rows.filter((c) => c.basStatus === "not-started").length,
-  };
-
-  return (
-    <div>
-      <PageHeader title="BAS Status" subtitle="Quarterly Business Activity Statements · current period" />
-
-      <StaffSlicer staff={staff} selectedId={selectedId} onChange={setSelectedId} />
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: "14px",
-          marginBottom: "14px",
-        }}
-      >
-        <KpiCard label="Lodged" value={String(counts.lodged)} valueColor="#1baf7a" sub="Complete" />
-        <KpiCard label="In progress" value={String(counts.inProgress)} valueColor="#eda100" sub="Started, not lodged" />
-        <KpiCard
-          label="Not started"
-          value={String(counts.notStarted)}
-          valueColor={counts.notStarted > 0 ? "#e24b4a" : "#111111"}
-          sub="Work to begin"
-        />
-      </div>
-
-      <div
-        style={{
-          background: "white",
-          border: "0.5px solid #e1e0d9",
-          borderRadius: "14px",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1.4fr 1fr 110px 130px",
-            padding: "12px 16px",
-            background: "#fafaf8",
-            borderBottom: "0.5px solid #e1e0d9",
-            fontSize: "11px",
-            fontWeight: 500,
-            color: "#888780",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-          }}
-        >
-          <div>Client</div>
-          <div>Assigned</div>
-          <div>Status</div>
-          <div style={{ textAlign: "right" }}>Due</div>
-        </div>
-
-        {rows.map((c, i) => {
-          const mgr = findStaff(c.managerId);
-          return (
-            <div
-              key={c.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1.4fr 1fr 110px 130px",
-                padding: "14px 16px",
-                alignItems: "center",
-                borderBottom: i < rows.length - 1 ? "0.5px solid #e1e0d9" : "none",
-              }}
-            >
-              <div style={{ fontSize: "13px", color: "#111111", fontWeight: 500 }}>{c.name}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                {mgr ? <StaffAvatar initials={mgr.initials} size={26} /> : null}
-                <span style={{ fontSize: "12px", color: "#444441" }}>{c.managerName}</span>
-              </div>
-              <div>
-                <BasStatusBadge status={c.basStatus} />
-              </div>
-              <div style={{ textAlign: "right", fontSize: "12px", color: "#444441" }}>
-                {formatDue("2026-06-28")}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+export default async function BasPage() {
+  const snapshot = await loadSnapshot();
+  return <BasPageClient initial={snapshot} />;
 }
