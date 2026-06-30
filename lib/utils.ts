@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { StaffMember } from "@/types/dashboard";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -46,4 +47,32 @@ export function fyRange(fyYear: number): { start: Date; end: Date } {
     start: new Date(Date.UTC(fyYear - 1, 6, 1)),
     end: new Date(Date.UTC(fyYear, 5, 30, 23, 59, 59)),
   };
+}
+
+// Builds a minimal display-only StaffMember list from anything carrying an
+// assigneeId/assigneeName — used to drive StaffSlicer on pages backed by
+// live Karbon data, where full XPM-derived staff stats aren't available.
+export function staffFromAssignees<T extends { assigneeId: string; assigneeName: string }>(
+  items: T[],
+): StaffMember[] {
+  const seen = new Map<string, StaffMember>();
+  for (const item of items) {
+    if (!item.assigneeId || seen.has(item.assigneeId)) continue;
+    seen.set(item.assigneeId, {
+      id: item.assigneeId,
+      name: item.assigneeName || "Unassigned",
+      initials: initialsOf(item.assigneeName || "??"),
+      xpmRole: "Manager",
+      score: 0,
+      billableHours: 0,
+      nonBillableHours: 0,
+      billablePct: 0,
+      tasksDone: 0,
+      tasksOverdue: 0,
+      basOverdue: 0,
+      dailyHours: [],
+      included: true,
+    });
+  }
+  return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

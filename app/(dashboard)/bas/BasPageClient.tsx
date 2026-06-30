@@ -6,9 +6,9 @@ import KpiCard from "@/components/dashboard/KpiCard";
 import BasStatusBadge from "@/components/dashboard/BasStatusBadge";
 import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import StaffSlicer from "@/components/layout/StaffSlicer";
-import { initialsOf } from "@/lib/utils";
-import type { BasStatus, StaffMember } from "@/types/dashboard";
-import type { KarbonWorkItem, KarbonWorkStatus } from "@/types/karbon";
+import { initialsOf, staffFromAssignees } from "@/lib/utils";
+import type { BasStatus } from "@/types/dashboard";
+import type { KarbonWorkStatus } from "@/types/karbon";
 import type { BasSnapshot } from "./page";
 
 const STATUS_ORDER: Record<BasStatus, number> = {
@@ -30,29 +30,6 @@ function formatDue(d: string) {
     month: "short",
     year: "numeric",
   });
-}
-
-function staffFromWorkItems(items: KarbonWorkItem[]): StaffMember[] {
-  const seen = new Map<string, StaffMember>();
-  for (const w of items) {
-    if (!w.assigneeId || seen.has(w.assigneeId)) continue;
-    seen.set(w.assigneeId, {
-      id: w.assigneeId,
-      name: w.assigneeName || "Unassigned",
-      initials: initialsOf(w.assigneeName || "??"),
-      xpmRole: "Manager",
-      score: 0,
-      billableHours: 0,
-      nonBillableHours: 0,
-      billablePct: 0,
-      tasksDone: 0,
-      tasksOverdue: 0,
-      basOverdue: 0,
-      dailyHours: [],
-      included: true,
-    });
-  }
-  return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default function BasPageClient({ initial }: { initial: BasSnapshot }) {
@@ -77,7 +54,7 @@ export default function BasPageClient({ initial }: { initial: BasSnapshot }) {
   }
 
   const items = data.workItems;
-  const staff = staffFromWorkItems(items);
+  const staff = staffFromAssignees(items);
 
   const rows = items
     .filter((w) => !selectedId || w.assigneeId === selectedId)
