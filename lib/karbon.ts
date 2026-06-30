@@ -5,6 +5,7 @@ const TASKS_KEY = "karbon:tasks";
 const WORK_KEY = "karbon:work";
 const TASKS_TTL = 5 * 60;
 const WORK_TTL = 10 * 60;
+const PAGE_SIZE = 100;
 
 function baseUrl(): string {
   return process.env.KARBON_BASE_URL ?? "https://api.karbonhq.com/v3";
@@ -21,31 +22,45 @@ export function isKarbonConfigured(): boolean {
   return Boolean(process.env.KARBON_API_KEY);
 }
 
-export async function karbonFetch<T>(path: string, init?: RequestInit): Promise<T> {
+// Accepts either a path ("/WorkItems?...") or an absolute URL, since Karbon's
+// OData @odata.nextLink is returned as a full URL for pagination.
+async function karbonFetch<T>(pathOrUrl: string, init?: RequestInit): Promise<T> {
   if (!isKarbonConfigured()) throw new KarbonNotConfiguredError();
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${process.env.KARBON_API_KEY}`);
   headers.set("Accept", "application/json");
-  // Karbon's v3 API also expects an AccessKey header. Set if provided so the
-  // same client works against both v1 and v3 without code changes.
+  // Karbon v3 also requires an AccessKey header alongside the bearer token.
   if (process.env.KARBON_ACCESS_KEY) {
     headers.set("AccessKey", process.env.KARBON_ACCESS_KEY);
   }
-  const res = await fetch(baseUrl() + path, { ...init, headers });
+  const url = pathOrUrl.startsWith("http") ? pathOrUrl : baseUrl() + pathOrUrl;
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Karbon ${path} failed: ${res.status} ${body}`);
+    throw new Error(`Karbon ${pathOrUrl} failed: ${res.status} ${body}`);
   }
   return (await res.json()) as T;
 }
 
-function unwrapList<T>(data: unknown, path: string): T[] {
-  if (Array.isArray(data)) return data as T[];
-  if (data && typeof data === "object" && "value" in data) {
-    const v = (data as { value: unknown }).value;
-    if (Array.isArray(v)) return v as T[];
+interface ODataList<T> {
+  value: T[];
+  "@odata.nextLink"?: string;
+}
+
+// Karbon v3 has a single work-tracking resource (/WorkItems) — there is no
+// separate Tasks endpoint. Both "tasks" and "BAS work" views in this app are
+// derived from WorkItems, optionally narrowed by an OData $filter.
+async function fetchAllWorkItems(filter?: string): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+  let next: string | undefined =
+    `/WorkItems?$top=${PAGE_SIZE}` + (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
+  while (next) {
+    const url: string = next;
+    const page: ODataList<Record<string, unknown>> = await karbonFetch(url);
+    rows.push(...page.value);
+    next = page["@odata.nextLink"];
   }
-  throw new Error(`Karbon ${path}: expected array or { value: [...] }, got ${typeof data}`);
+  return rows;
 }
 
 function todayIsoDate(): string {
@@ -57,22 +72,6 @@ function dateOnly(value: unknown): string {
   return value.slice(0, 10);
 }
 
-function mapTaskStatus(raw: unknown): KarbonTaskStatus {
-  if (typeof raw !== "string") return "todo";
-  const norm = raw.toLowerCase();
-  if (norm.includes("complete") || norm === "done" || norm === "closed") return "complete";
-  if (norm.includes("progress") || norm === "doing") return "inProgress";
-  return "todo";
-}
-
-function mapWorkStatus(raw: unknown): KarbonWorkStatus {
-  if (typeof raw !== "string") return "notStarted";
-  const norm = raw.toLowerCase();
-  if (norm.includes("complete") || norm === "closed") return "complete";
-  if (norm.includes("progress") || norm === "active") return "inProgress";
-  return "notStarted";
-}
-
 function pickStr(obj: Record<string, unknown>, keys: string[], fallback = ""): string {
   for (const k of keys) {
     const v = obj[k];
@@ -81,23 +80,42 @@ function pickStr(obj: Record<string, unknown>, keys: string[], fallback = ""): s
   return fallback;
 }
 
+// PrimaryStatus enum values are "Planned" | "ReadyToStart" | "InProgress" |
+// "Waiting" | "Completed", but Karbon's own docs note the API sometimes
+// renders these with spaces ("Ready To Start"). Normalize before matching.
+function normalizeStatus(raw: unknown): string {
+  return typeof raw === "string" ? raw.toLowerCase().replace(/\s+/g, "") : "";
+}
+
+function mapTaskStatus(raw: unknown): KarbonTaskStatus {
+  const norm = normalizeStatus(raw);
+  if (norm === "completed") return "complete";
+  if (norm === "inprogress" || norm === "waiting") return "inProgress";
+  return "todo";
+}
+
+function mapWorkStatus(raw: unknown): KarbonWorkStatus {
+  const norm = normalizeStatus(raw);
+  if (norm === "completed") return "complete";
+  if (norm === "inprogress" || norm === "waiting") return "inProgress";
+  return "notStarted";
+}
+
 export async function fetchKarbonTasks(): Promise<KarbonTask[]> {
-  const data = await karbonFetch<unknown>("/Tasks");
-  const rows = unwrapList<Record<string, unknown>>(data, "/Tasks");
+  const rows = await fetchAllWorkItems();
   const today = todayIsoDate();
 
-  return rows.map((t) => {
-    const id = pickStr(t, ["Id", "TaskId", "Key"]);
-    const status = mapTaskStatus(t.Status ?? t.StatusKey);
-    const dueDate = dateOnly(t.DueDate);
+  return rows.map((w) => {
+    const dueDate = dateOnly(w.DueDate);
+    const status = mapTaskStatus(w.PrimaryStatus);
     return {
-      id,
-      title: pickStr(t, ["Title", "Name", "Description"]),
-      assigneeId: pickStr(t, ["AssigneeId", "AssigneeKey", "AssignedToId"]),
-      assigneeName: pickStr(t, ["AssigneeName", "AssignedTo"]),
-      clientId: pickStr(t, ["ClientId", "ClientKey", "WorkItemId"]),
-      clientName: pickStr(t, ["ClientName", "Client", "WorkItemName"]),
-      category: pickStr(t, ["Category", "WorkType", "WorkItemTypeName"]),
+      id: pickStr(w, ["WorkItemKey"]),
+      title: pickStr(w, ["Title"]),
+      assigneeId: pickStr(w, ["AssigneeKey", "AssigneeEmailAddress"]),
+      assigneeName: pickStr(w, ["AssigneeName"]),
+      clientId: pickStr(w, ["ClientKey"]),
+      clientName: pickStr(w, ["ClientName"]),
+      category: pickStr(w, ["WorkType"]),
       dueDate,
       status,
       isOverdue: dueDate !== "" && dueDate < today && status !== "complete",
@@ -105,18 +123,23 @@ export async function fetchKarbonTasks(): Promise<KarbonTask[]> {
   });
 }
 
+// Narrows WorkItems to a specific WorkType (e.g. BAS lodgements). The exact
+// label is tenant-specific — set KARBON_BAS_WORK_TYPE to match what's
+// configured in Karbon's Work Type settings. Falls back to returning all
+// WorkItems when unset.
 export async function fetchKarbonWorkItems(): Promise<KarbonWorkItem[]> {
-  const data = await karbonFetch<unknown>("/Work");
-  const rows = unwrapList<Record<string, unknown>>(data, "/Work");
+  const workType = process.env.KARBON_BAS_WORK_TYPE;
+  const filter = workType ? `WorkType eq '${workType}'` : undefined;
+  const rows = await fetchAllWorkItems(filter);
 
   return rows.map((w) => ({
-    id: pickStr(w, ["Id", "WorkItemId", "Key"]),
-    clientId: pickStr(w, ["ClientId", "ClientKey"]),
-    clientName: pickStr(w, ["ClientName", "Client"]),
-    type: pickStr(w, ["WorkItemTypeName", "WorkType", "Type"]),
-    status: mapWorkStatus(w.Status ?? w.StatusKey),
+    id: pickStr(w, ["WorkItemKey"]),
+    clientId: pickStr(w, ["ClientKey"]),
+    clientName: pickStr(w, ["ClientName"]),
+    type: pickStr(w, ["WorkType"]),
+    status: mapWorkStatus(w.PrimaryStatus),
     dueDate: dateOnly(w.DueDate),
-    assigneeId: pickStr(w, ["AssigneeId", "AssigneeKey", "AssignedToId"]),
+    assigneeId: pickStr(w, ["AssigneeKey", "AssigneeEmailAddress"]),
   }));
 }
 
