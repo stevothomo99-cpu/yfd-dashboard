@@ -6,6 +6,10 @@ const WORK_KEY = "karbon:work";
 const TASKS_TTL = 5 * 60;
 const WORK_TTL = 10 * 60;
 const PAGE_SIZE = 100;
+// Without a date bound, /WorkItems pages through the tenant's full history
+// (back to 2021). Karbon's OData $filter only supports ge/le on StartDate,
+// so we scope every fetch to a recent rolling window.
+const RECENT_WINDOW_DAYS = 90;
 
 function baseUrl(): string {
   return process.env.KARBON_BASE_URL ?? "https://api.karbonhq.com/v3";
@@ -67,6 +71,17 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Karbon's OpenAPI spec gives unquoted date literals, e.g. "StartDate ge 2024-01-01".
+function recentWindowFilter(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - RECENT_WINDOW_DAYS);
+  return `StartDate ge ${d.toISOString().slice(0, 10)}`;
+}
+
+function combineFilters(...filters: (string | undefined)[]): string {
+  return filters.filter((f): f is string => Boolean(f)).join(" and ");
+}
+
 function dateOnly(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.slice(0, 10);
@@ -102,7 +117,7 @@ function mapWorkStatus(raw: unknown): KarbonWorkStatus {
 }
 
 export async function fetchKarbonTasks(): Promise<KarbonTask[]> {
-  const rows = await fetchAllWorkItems();
+  const rows = await fetchAllWorkItems(recentWindowFilter());
   const today = todayIsoDate();
 
   return rows.map((w) => {
@@ -129,7 +144,10 @@ export async function fetchKarbonTasks(): Promise<KarbonTask[]> {
 // WorkItems when unset.
 export async function fetchKarbonWorkItems(): Promise<KarbonWorkItem[]> {
   const workType = process.env.KARBON_BAS_WORK_TYPE;
-  const filter = workType ? `WorkType eq '${workType}'` : undefined;
+  const filter = combineFilters(
+    recentWindowFilter(),
+    workType ? `WorkType eq '${workType}'` : undefined,
+  );
   const rows = await fetchAllWorkItems(filter);
 
   return rows.map((w) => ({
