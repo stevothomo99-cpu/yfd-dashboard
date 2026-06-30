@@ -7,7 +7,7 @@ const TASKS_TTL = 5 * 60;
 const WORK_TTL = 10 * 60;
 
 function baseUrl(): string {
-  return process.env.KARBON_BASE_URL ?? "https://app.karbon.com/api/v1";
+  return process.env.KARBON_BASE_URL ?? "https://api.karbonhq.com/v3";
 }
 
 export class KarbonNotConfiguredError extends Error {
