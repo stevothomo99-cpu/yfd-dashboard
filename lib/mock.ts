@@ -1,5 +1,7 @@
 import type { StaffMember, ClientTile, BasStatus, KpiData } from "@/types/dashboard";
-import type { KarbonTask, KarbonWorkItem } from "@/types/karbon";
+import type { KarbonTask, KarbonWorkItem, KarbonUser } from "@/types/karbon";
+import type { XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
+import { fyYearFor } from "./utils";
 
 export const STAFF: StaffMember[] = [
   {
@@ -93,6 +95,15 @@ export const STAFF: StaffMember[] = [
     included: false,
   },
 ];
+
+// Same email convention as the /api/xpm/staff mock fallback (`${id}@yfd.example`)
+// so the two mock rosters link up by email out of the box, demonstrating the
+// Karbon<->XPM join without needing live data from either system.
+export const KARBON_USERS: KarbonUser[] = STAFF.map((s) => ({
+  id: s.id,
+  name: s.name,
+  email: `${s.id}@yfd.example`,
+}));
 
 interface ClientSeed {
   id: string;
@@ -279,6 +290,7 @@ export const WORK_ITEMS: KarbonWorkItem[] = CLIENT_SEEDS.map((c, i) => ({
         : "notStarted",
   dueDate: "2026-06-28",
   assigneeId: c.managerId,
+  assigneeName: STAFF.find((s) => s.id === c.managerId)!.name,
 }));
 
 export const CLIENT_TILES: ClientTile[] = CLIENT_SEEDS.map((c) => {
@@ -322,3 +334,46 @@ export const includedStaff = (): StaffMember[] => STAFF.filter((s) => s.included
 
 export const findStaff = (id: string): StaffMember | undefined =>
   STAFF.find((s) => s.id === id);
+
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+// One billable + one non-billable row per staff member per weekday over the
+// last 5 days, split using their mock billablePct — enough to exercise the
+// /api/xpm/timesheets shape without real XPM data.
+export const TIMESHEETS: XpmTimesheet[] = STAFF.flatMap((s) => {
+  const client = CLIENT_SEEDS.find((c) => c.managerId === s.id);
+  if (!client) return [];
+  return Array.from({ length: 5 }, (_, i) => i).flatMap((daysAgo): XpmTimesheet[] => {
+    const hours = s.dailyHours[daysAgo] ?? 0;
+    if (hours <= 0) return [];
+    const billableHours = Math.round(hours * (s.billablePct / 100) * 10) / 10;
+    const nonBillableHours = Math.round((hours - billableHours) * 10) / 10;
+    const date = isoDaysAgo(daysAgo);
+    const rows: XpmTimesheet[] = [];
+    if (billableHours > 0) {
+      rows.push({ staffId: s.id, date, hours: billableHours, billable: true, clientId: client.id, jobId: `${client.id}-job` });
+    }
+    if (nonBillableHours > 0) {
+      rows.push({ staffId: s.id, date, hours: nonBillableHours, billable: false, clientId: client.id, jobId: `${client.id}-job` });
+    }
+    return rows;
+  });
+});
+
+const CURRENT_FY = fyYearFor(new Date());
+
+export const INVOICES: XpmInvoice[] = CLIENT_SEEDS.flatMap((c, ci) =>
+  c.revenueBreakdown.map((b, bi) => ({
+    id: `INV-${ci}-${bi}`,
+    clientId: c.id,
+    clientName: c.name,
+    amount: b.value,
+    date: isoDaysAgo(10 + bi),
+    serviceType: b.label as XpmServiceType,
+    fyYear: CURRENT_FY,
+  })),
+);

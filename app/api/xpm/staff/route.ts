@@ -12,14 +12,21 @@ interface ResponseBody {
   message?: string;
 }
 
-const mockStaff = (): XpmStaff[] =>
-  STAFF.map((s) => ({
-    id: s.id,
-    name: s.name,
-    email: `${s.id}@yfd.example`,
-    role: "Manager" as const,
-    included: s.included,
-  }));
+function applyExclusions(staff: XpmStaff[], excludedStaffIds: string[]): XpmStaff[] {
+  return staff.map((s) => ({ ...s, included: !excludedStaffIds.includes(s.id) }));
+}
+
+const mockStaff = (excludedStaffIds: string[]): XpmStaff[] =>
+  applyExclusions(
+    STAFF.map((s) => ({
+      id: s.id,
+      name: s.name,
+      email: `${s.id}@yfd.example`,
+      role: "Manager" as const,
+      included: true,
+    })),
+    excludedStaffIds,
+  );
 
 async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>> {
   const settings = await getSettings();
@@ -28,7 +35,7 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
     return NextResponse.json({
       mode: "mock",
       partnerName: settings.partnerName,
-      staff: mockStaff(),
+      staff: mockStaff(settings.excludedStaffIds),
       syncedAt: new Date().toISOString(),
       message:
         "Returned mock data because XPM_CLIENT_ID, XPM_CLIENT_SECRET, XPM_REFRESH_TOKEN, or XPM_TENANT_ID are not set.",
@@ -50,7 +57,7 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
     return NextResponse.json({
       mode: "live",
       partnerName: settings.partnerName,
-      staff,
+      staff: applyExclusions(staff, settings.excludedStaffIds),
       syncedAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -58,7 +65,7 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
       return NextResponse.json({
         mode: "mock",
         partnerName: settings.partnerName,
-        staff: mockStaff(),
+        staff: mockStaff(settings.excludedStaffIds),
         syncedAt: new Date().toISOString(),
         message: err.message,
       });
