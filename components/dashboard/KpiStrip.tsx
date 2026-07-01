@@ -1,30 +1,8 @@
-const kpis = [
-  {
-    label: "Billable hrs today",
-    value: "86.5",
-    delta: "↑ 76% of target",
-    deltaType: "up",
-  },
-  {
-    label: "Tasks overdue",
-    value: "7",
-    delta: "⚠ 3 critical",
-    deltaType: "down",
-    valueColor: "#e24b4a",
-  },
-  {
-    label: "BAS lodged",
-    value: "9/12",
-    delta: "3 pending",
-    deltaType: "muted",
-  },
-  {
-    label: "Team utilisation",
-    value: "76%",
-    delta: "↑ +6% vs last wk",
-    deltaType: "up",
-  },
-];
+interface KpiStripProps {
+  tasksOverdue: number;
+  basLodged: number;
+  basTotal: number;
+}
 
 const deltaColors: Record<string, string> = {
   up: "#1baf7a",
@@ -33,7 +11,36 @@ const deltaColors: Record<string, string> = {
   muted: "#888780",
 };
 
-export default function KpiStrip() {
+export default function KpiStrip({ tasksOverdue, basLodged, basTotal }: KpiStripProps) {
+  const basPending = basTotal - basLodged;
+  const kpis = [
+    {
+      label: "Billable hrs today",
+      value: "—",
+      delta: "Pending XPM",
+      deltaType: "muted",
+    },
+    {
+      label: "Tasks overdue",
+      value: String(tasksOverdue),
+      delta: tasksOverdue > 0 ? "⚠ needs attention" : "All clear",
+      deltaType: tasksOverdue > 0 ? "down" : "up",
+      valueColor: tasksOverdue > 0 ? "#e24b4a" : undefined,
+    },
+    {
+      label: "BAS lodged",
+      value: `${basLodged}/${basTotal}`,
+      delta: basPending > 0 ? `${basPending} pending` : "All lodged",
+      deltaType: "muted",
+    },
+    {
+      label: "Team utilisation",
+      value: "—",
+      delta: "Pending XPM",
+      deltaType: "muted",
+    },
+  ];
+
   return (
     <div style={{
       display: "grid",
