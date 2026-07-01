@@ -32,6 +32,15 @@ function formatDue(d: string) {
   });
 }
 
+type StatusFilter = "all" | BasStatus;
+
+const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "not-started", label: "Not started" },
+  { key: "in-progress", label: "In progress" },
+  { key: "lodged", label: "Lodged" },
+];
+
 export default function BasPageClient({
   initial,
   staff: karbonUsers,
@@ -43,6 +52,7 @@ export default function BasPageClient({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -64,9 +74,12 @@ export default function BasPageClient({
     karbonUsers.map((u) => ({ assigneeId: u.id, assigneeName: u.name })),
   );
 
-  const rows = items
+  const staffFiltered = items
     .filter((w) => !selectedId || w.assigneeId === selectedId)
-    .map((w) => ({ ...w, basStatus: WORK_STATUS_TO_BAS[w.status] }))
+    .map((w) => ({ ...w, basStatus: WORK_STATUS_TO_BAS[w.status] }));
+
+  const rows = staffFiltered
+    .filter((w) => statusFilter === "all" || w.basStatus === statusFilter)
     .sort(
       (a, b) =>
         STATUS_ORDER[a.basStatus] - STATUS_ORDER[b.basStatus] ||
@@ -74,9 +87,9 @@ export default function BasPageClient({
     );
 
   const counts = {
-    lodged: rows.filter((c) => c.basStatus === "lodged").length,
-    inProgress: rows.filter((c) => c.basStatus === "in-progress").length,
-    notStarted: rows.filter((c) => c.basStatus === "not-started").length,
+    lodged: staffFiltered.filter((c) => c.basStatus === "lodged").length,
+    inProgress: staffFiltered.filter((c) => c.basStatus === "in-progress").length,
+    notStarted: staffFiltered.filter((c) => c.basStatus === "not-started").length,
   };
 
   return (
@@ -174,6 +187,31 @@ export default function BasPageClient({
         />
       </div>
 
+      <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
+        {STATUS_FILTERS.map((f) => {
+          const active = statusFilter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStatusFilter(f.key)}
+              style={{
+                fontSize: "12px",
+                fontWeight: 500,
+                padding: "6px 14px",
+                borderRadius: "999px",
+                background: active ? "#111111" : "white",
+                color: active ? "white" : "#444441",
+                border: "0.5px solid " + (active ? "#111111" : "#e1e0d9"),
+                cursor: "pointer",
+              }}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div
         style={{
           background: "white",
@@ -205,7 +243,7 @@ export default function BasPageClient({
 
         {rows.length === 0 ? (
           <div style={{ padding: "24px 16px", fontSize: "12px", color: "#888780" }}>
-            No work items found.
+            {statusFilter === "all" ? "No work items found." : "Nothing matches this filter."}
           </div>
         ) : (
           rows.map((w, i) => (

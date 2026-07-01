@@ -15,8 +15,15 @@ const WORK_TTL = 10 * 60;
 const USERS_TTL = 24 * 60 * 60;
 const PAGE_SIZE = 100;
 // Without a date bound, /WorkItems pages through the tenant's full history
-// (back to 2021). Karbon's OData $filter only supports ge/le on StartDate,
-// so we scope every fetch to a recent rolling window.
+// (back to 2021), so we scope every fetch to a recent rolling window.
+//
+// This filters on DueDate, not StartDate: work that hasn't started yet
+// typically has no StartDate set at all, so a StartDate-based filter
+// silently excludes exactly the "not started" items this dashboard most
+// needs to surface (confirmed live: a StartDate filter produced 100/0/0
+// lodged/in-progress/not-started, and zero tasks at all on /tasks).
+// DueDate is populated regardless of status and already drives this app's
+// overdue/due-today/due-this-week logic, so it's the right anchor.
 const RECENT_WINDOW_DAYS = 90;
 
 function baseUrl(): string {
@@ -98,11 +105,13 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Karbon's OpenAPI spec gives unquoted date literals, e.g. "StartDate ge 2024-01-01".
+// Karbon's OpenAPI spec gives unquoted date literals, e.g. "DueDate ge 2024-01-01".
+// No upper bound — future-dated work (due next week, next quarter, etc.)
+// should still show up.
 function recentWindowFilter(): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - RECENT_WINDOW_DAYS);
-  return `StartDate ge ${d.toISOString().slice(0, 10)}`;
+  return `DueDate ge ${d.toISOString().slice(0, 10)}`;
 }
 
 function combineFilters(...filters: (string | undefined)[]): string {
