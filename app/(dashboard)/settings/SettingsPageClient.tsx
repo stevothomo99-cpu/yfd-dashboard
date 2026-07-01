@@ -4,13 +4,54 @@ import { useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import { initialsOf } from "@/lib/utils";
-import type { StaffSnapshot } from "./page";
+import { linkKarbonToXpmByEmail } from "@/lib/staffLink";
+import type { XpmStaff } from "@/types/xpm";
+import type { SettingsSnapshot } from "./page";
 
-export default function SettingsPageClient({ initialStaff }: { initialStaff: StaffSnapshot }) {
-  const [partnerName, setPartnerName] = useState(initialStaff.partnerName);
-  const [snapshot, setSnapshot] = useState(initialStaff);
+interface XpmStaffResponse {
+  mode: "live" | "mock";
+  partnerName: string;
+  staff: XpmStaff[];
+  syncedAt: string;
+  message?: string;
+}
+
+export default function SettingsPageClient({ initial }: { initial: SettingsSnapshot }) {
+  const [partnerName, setPartnerName] = useState(initial.partnerName);
+  const [snapshot, setSnapshot] = useState(initial);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function persistExclusions(roster: SettingsSnapshot["roster"]) {
+    const excludedStaffIds = roster
+      .filter((r) => !r.included)
+      .flatMap((r) => (r.xpmId ? [r.karbonId, r.xpmId] : [r.karbonId]));
+
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ excludedStaffIds }),
+    });
+    if (!res.ok) throw new Error("Failed to save.");
+  }
+
+  async function handleToggle(karbonId: string) {
+    const nextRoster = snapshot.roster.map((r) =>
+      r.karbonId === karbonId ? { ...r, included: !r.included } : r,
+    );
+    setSnapshot({ ...snapshot, roster: nextRoster });
+    setError(null);
+
+    try {
+      await persistExclusions(nextRoster);
+    } catch {
+      setSnapshot((prev) => ({
+        ...prev,
+        roster: prev.roster.map((r) => (r.karbonId === karbonId ? { ...r, included: !r.included } : r)),
+      }));
+      setError("Couldn't save that change — try again.");
+    }
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -22,9 +63,28 @@ export default function SettingsPageClient({ initialStaff }: { initialStaff: Sta
         body: JSON.stringify({ partnerName }),
       });
       const res = await fetch("/api/xpm/staff", { method: "POST" });
-      const body: StaffSnapshot = await res.json();
+      const body: XpmStaffResponse = await res.json();
       if (!res.ok) throw new Error(body.message ?? "Sync failed.");
-      setSnapshot(body);
+
+      // Re-link the existing Karbon roster against fresh XPM data, carrying
+      // each person's current included/excluded state across the re-sync.
+      const includedByKarbonId = new Map(snapshot.roster.map((r) => [r.karbonId, r.included]));
+      const relinked = linkKarbonToXpmByEmail(
+        snapshot.roster.map((r) => ({ id: r.karbonId, name: r.name, email: r.email })),
+        body.staff,
+      );
+      const nextRoster = relinked.map((l) => ({
+        ...l,
+        included: includedByKarbonId.get(l.karbonId) ?? true,
+      }));
+
+      setSnapshot({
+        ...snapshot,
+        xpmMode: body.mode,
+        xpmMessage: body.message,
+        roster: nextRoster,
+        syncedAt: body.syncedAt,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
     } finally {
@@ -32,30 +92,7 @@ export default function SettingsPageClient({ initialStaff }: { initialStaff: Sta
     }
   }
 
-  async function handleToggle(id: string) {
-    const nextStaff = snapshot.staff.map((s) => (s.id === id ? { ...s, included: !s.included } : s));
-    setSnapshot({ ...snapshot, staff: nextStaff });
-    setError(null);
-
-    const excludedStaffIds = nextStaff.filter((s) => !s.included).map((s) => s.id);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ excludedStaffIds }),
-      });
-      if (!res.ok) throw new Error("Failed to save.");
-    } catch {
-      // Revert the optimistic toggle if the save didn't stick.
-      setSnapshot((prev) => ({
-        ...prev,
-        staff: prev.staff.map((s) => (s.id === id ? { ...s, included: !s.included } : s)),
-      }));
-      setError("Couldn't save that change — try again.");
-    }
-  }
-
-  const includedCount = snapshot.staff.filter((s) => s.included).length;
+  const includedCount = snapshot.roster.filter((r) => r.included).length;
 
   return (
     <div>
@@ -64,53 +101,19 @@ export default function SettingsPageClient({ initialStaff }: { initialStaff: Sta
         subtitle="Configure the XPM Partner filter and which staff appear across the dashboard"
       />
 
-      {snapshot.mode === "mock" ? (
-        <div
-          style={{
-            fontSize: "12px",
-            color: "#633806",
-            background: "#FAEEDA",
-            border: "0.5px solid #f0d9a8",
-            borderRadius: "10px",
-            padding: "8px 12px",
-            marginBottom: "12px",
-          }}
-        >
-          Showing mock data — {snapshot.message ?? "XPM is not configured."}
-        </div>
+      {snapshot.karbonMode === "mock" ? (
+        <Banner tone="warn">Karbon roster: showing mock data — {snapshot.karbonMessage ?? "Karbon is not configured."}</Banner>
       ) : null}
 
-      {snapshot.mode === "live" && snapshot.message ? (
-        <div
-          style={{
-            fontSize: "12px",
-            color: "#0C447C",
-            background: "#E6F1FB",
-            border: "0.5px solid #b9d8f2",
-            borderRadius: "10px",
-            padding: "8px 12px",
-            marginBottom: "12px",
-          }}
-        >
-          {snapshot.message}
-        </div>
+      {snapshot.xpmMode === "mock" ? (
+        <Banner tone="warn">XPM staff: showing mock data — {snapshot.xpmMessage ?? "XPM is not configured."}</Banner>
       ) : null}
 
-      {error ? (
-        <div
-          style={{
-            fontSize: "12px",
-            color: "#501313",
-            background: "#FCEBEB",
-            border: "0.5px solid #f0b8b8",
-            borderRadius: "10px",
-            padding: "8px 12px",
-            marginBottom: "12px",
-          }}
-        >
-          {error}
-        </div>
+      {snapshot.xpmMode === "live" && snapshot.xpmMessage ? (
+        <Banner tone="info">{snapshot.xpmMessage}</Banner>
       ) : null}
+
+      {error ? <Banner tone="error">{error}</Banner> : null}
 
       <div
         style={{
@@ -126,7 +129,7 @@ export default function SettingsPageClient({ initialStaff }: { initialStaff: Sta
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
           Only jobs where Partner = this exact name are included. Staff returned with Manager role on
-          those jobs become the YFD team.
+          those jobs are matched to the Karbon roster below by email.
         </div>
 
         <div style={{ display: "flex", gap: "10px", alignItems: "stretch", flexWrap: "wrap" }}>
@@ -190,56 +193,73 @@ export default function SettingsPageClient({ initialStaff }: { initialStaff: Sta
         >
           <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Included staff</div>
           <div style={{ fontSize: "11px", color: "#888780" }}>
-            {includedCount} of {snapshot.staff.length} active
+            {includedCount} of {snapshot.roster.length} active
           </div>
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
-          Toggle who appears in dashboards and slicers. Excluded staff are hidden everywhere.
+          Roster comes from Karbon. Toggle who appears in dashboards and slicers — excluded staff are
+          hidden everywhere. &ldquo;Linked&rdquo; means a Karbon and XPM record share the same email.
         </div>
 
-        {snapshot.staff.length === 0 ? (
+        {snapshot.roster.length === 0 ? (
           <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>
-            No staff yet — set a Partner name and sync.
+            No staff found in Karbon.
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column" }}>
-            {snapshot.staff.map((s, i) => (
+            {snapshot.roster.map((r, i) => (
               <div
-                key={s.id}
+                key={r.karbonId}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "12px",
                   padding: "12px 0",
-                  borderBottom: i < snapshot.staff.length - 1 ? "0.5px solid #e1e0d9" : "none",
+                  borderBottom: i < snapshot.roster.length - 1 ? "0.5px solid #e1e0d9" : "none",
                 }}
               >
-                <StaffAvatar initials={initialsOf(s.name)} size={32} />
+                <StaffAvatar initials={initialsOf(r.name)} size={32} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{s.name}</div>
-                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>{s.role}</div>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{r.name}</div>
+                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
+                    {r.email || "No email on file"}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontSize: "10px",
+                    padding: "3px 9px",
+                    borderRadius: "8px",
+                    fontWeight: 500,
+                    background: r.xpmId ? "#EAF3DE" : "#f5f4f0",
+                    color: r.xpmId ? "#27500A" : "#888780",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {r.xpmId ? `Linked · ${r.xpmName}` : "Not linked to XPM"}
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleToggle(s.id)}
-                  aria-pressed={s.included}
+                  onClick={() => handleToggle(r.karbonId)}
+                  aria-pressed={r.included}
                   style={{
                     position: "relative",
                     width: "40px",
                     height: "22px",
                     borderRadius: "999px",
-                    background: s.included ? "#1baf7a" : "#d3d2cb",
+                    background: r.included ? "#1baf7a" : "#d3d2cb",
                     border: "none",
                     cursor: "pointer",
                     padding: 0,
                     transition: "background 0.15s",
+                    flexShrink: 0,
                   }}
                 >
                   <span
                     style={{
                       position: "absolute",
                       top: "2px",
-                      left: s.included ? "20px" : "2px",
+                      left: r.included ? "20px" : "2px",
                       width: "18px",
                       height: "18px",
                       borderRadius: "50%",
@@ -254,6 +274,29 @@ export default function SettingsPageClient({ initialStaff }: { initialStaff: Sta
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function Banner({ tone, children }: { tone: "warn" | "info" | "error"; children: React.ReactNode }) {
+  const styles = {
+    warn: { color: "#633806", background: "#FAEEDA", border: "#f0d9a8" },
+    info: { color: "#0C447C", background: "#E6F1FB", border: "#b9d8f2" },
+    error: { color: "#501313", background: "#FCEBEB", border: "#f0b8b8" },
+  }[tone];
+  return (
+    <div
+      style={{
+        fontSize: "12px",
+        color: styles.color,
+        background: styles.background,
+        border: `0.5px solid ${styles.border}`,
+        borderRadius: "10px",
+        padding: "8px 12px",
+        marginBottom: "12px",
+      }}
+    >
+      {children}
     </div>
   );
 }

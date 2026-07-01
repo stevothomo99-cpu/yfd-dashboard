@@ -1,5 +1,5 @@
 import type { StaffMember, ClientTile, BasStatus, KpiData } from "@/types/dashboard";
-import type { KarbonTask, KarbonWorkItem } from "@/types/karbon";
+import type { KarbonTask, KarbonWorkItem, KarbonUser } from "@/types/karbon";
 import type { XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
 import { fyYearFor } from "./utils";
 
@@ -95,6 +95,15 @@ export const STAFF: StaffMember[] = [
     included: false,
   },
 ];
+
+// Same email convention as the /api/xpm/staff mock fallback (`${id}@yfd.example`)
+// so the two mock rosters link up by email out of the box, demonstrating the
+// Karbon<->XPM join without needing live data from either system.
+export const KARBON_USERS: KarbonUser[] = STAFF.map((s) => ({
+  id: s.id,
+  name: s.name,
+  email: `${s.id}@yfd.example`,
+}));
 
 interface ClientSeed {
   id: string;

@@ -1,7 +1,12 @@
 import TasksPageClient from "./TasksPageClient";
-import { getKarbonTasks, isKarbonConfigured, KarbonNotConfiguredError } from "@/lib/karbon";
+import {
+  getKarbonTasks,
+  isKarbonConfigured,
+  KarbonNotConfiguredError,
+  loadKarbonUsersSnapshot,
+} from "@/lib/karbon";
 import { getSettings } from "@/lib/settings";
-import { TASKS } from "@/lib/mock";
+import { TASKS, KARBON_USERS } from "@/lib/mock";
 import type { KarbonTask } from "@/types/karbon";
 
 export interface TasksSnapshot {
@@ -56,8 +61,14 @@ async function loadSnapshot(): Promise<TasksSnapshot> {
 }
 
 export default async function TasksPage() {
-  const snapshot = await loadSnapshot();
+  const settings = await getSettings();
+  const [snapshot, staff] = await Promise.all([
+    loadSnapshot(),
+    loadKarbonUsersSnapshot(settings.excludedStaffIds, KARBON_USERS),
+  ]);
   const today = todayIso();
   const weekEnd = addDays(today, 7);
-  return <TasksPageClient initial={snapshot} today={today} weekEnd={weekEnd} />;
+  return (
+    <TasksPageClient initial={snapshot} staff={staff.users} today={today} weekEnd={weekEnd} />
+  );
 }

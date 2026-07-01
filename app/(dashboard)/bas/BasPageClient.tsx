@@ -8,7 +8,7 @@ import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import StaffSlicer from "@/components/layout/StaffSlicer";
 import { initialsOf, staffFromAssignees } from "@/lib/utils";
 import type { BasStatus } from "@/types/dashboard";
-import type { KarbonWorkStatus } from "@/types/karbon";
+import type { KarbonUser, KarbonWorkStatus } from "@/types/karbon";
 import type { BasSnapshot } from "./page";
 
 const STATUS_ORDER: Record<BasStatus, number> = {
@@ -32,7 +32,13 @@ function formatDue(d: string) {
   });
 }
 
-export default function BasPageClient({ initial }: { initial: BasSnapshot }) {
+export default function BasPageClient({
+  initial,
+  staff: karbonUsers,
+}: {
+  initial: BasSnapshot;
+  staff: KarbonUser[];
+}) {
   const [data, setData] = useState(initial);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +60,9 @@ export default function BasPageClient({ initial }: { initial: BasSnapshot }) {
   }
 
   const items = data.workItems;
-  const staff = staffFromAssignees(items);
+  const staff = staffFromAssignees(
+    karbonUsers.map((u) => ({ assigneeId: u.id, assigneeName: u.name })),
+  );
 
   const rows = items
     .filter((w) => !selectedId || w.assigneeId === selectedId)

@@ -11,7 +11,14 @@ interface MemoryEntry {
   expiresAt: number | null;
 }
 
-const memory = new Map<string, MemoryEntry>();
+// Dev-only fallback for when no real KV store is attached. Pinned to
+// globalThis so it survives Turbopack/webpack re-instantiating this module
+// across separate route/page bundles in the same process — without this, a
+// PATCH via a route handler and a read from a page Server Component could
+// each see their own independent Map and silently disagree.
+const globalForCache = globalThis as unknown as { __yfdCacheMemory?: Map<string, MemoryEntry> };
+const memory = globalForCache.__yfdCacheMemory ?? new Map<string, MemoryEntry>();
+globalForCache.__yfdCacheMemory = memory;
 
 function nsKey(key: string): string {
   return NAMESPACE + key;

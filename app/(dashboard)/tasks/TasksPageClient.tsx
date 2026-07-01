@@ -6,16 +6,22 @@ import KpiCard from "@/components/dashboard/KpiCard";
 import TaskRow from "@/components/dashboard/TaskRow";
 import StaffSlicer from "@/components/layout/StaffSlicer";
 import { staffFromAssignees } from "@/lib/utils";
-import type { KarbonTask } from "@/types/karbon";
+import type { KarbonTask, KarbonUser } from "@/types/karbon";
 import type { TasksSnapshot } from "./page";
 
 interface TasksPageClientProps {
   initial: TasksSnapshot;
+  staff: KarbonUser[];
   today: string;
   weekEnd: string;
 }
 
-export default function TasksPageClient({ initial, today, weekEnd }: TasksPageClientProps) {
+export default function TasksPageClient({
+  initial,
+  staff: karbonUsers,
+  today,
+  weekEnd,
+}: TasksPageClientProps) {
   const [data, setData] = useState(initial);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +42,9 @@ export default function TasksPageClient({ initial, today, weekEnd }: TasksPageCl
     }
   }
 
-  const staff = staffFromAssignees(data.tasks);
+  const staff = staffFromAssignees(
+    karbonUsers.map((u) => ({ assigneeId: u.id, assigneeName: u.name })),
+  );
   const visible = data.tasks.filter((t) => !selectedId || t.assigneeId === selectedId);
   const weekAgo = addDays(today, -7);
 

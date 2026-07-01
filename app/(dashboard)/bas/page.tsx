@@ -3,9 +3,10 @@ import {
   getKarbonWorkItems,
   isKarbonConfigured,
   KarbonNotConfiguredError,
+  loadKarbonUsersSnapshot,
 } from "@/lib/karbon";
 import { getSettings } from "@/lib/settings";
-import { WORK_ITEMS } from "@/lib/mock";
+import { WORK_ITEMS, KARBON_USERS } from "@/lib/mock";
 import type { KarbonWorkItem } from "@/types/karbon";
 
 export interface BasSnapshot {
@@ -55,6 +56,10 @@ async function loadSnapshot(): Promise<BasSnapshot> {
 }
 
 export default async function BasPage() {
-  const snapshot = await loadSnapshot();
-  return <BasPageClient initial={snapshot} />;
+  const settings = await getSettings();
+  const [snapshot, staff] = await Promise.all([
+    loadSnapshot(),
+    loadKarbonUsersSnapshot(settings.excludedStaffIds, KARBON_USERS),
+  ]);
+  return <BasPageClient initial={snapshot} staff={staff.users} />;
 }
