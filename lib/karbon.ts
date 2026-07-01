@@ -169,6 +169,7 @@ export async function fetchKarbonTasks(): Promise<KarbonTask[]> {
       category: pickStr(w, ["WorkType"]),
       dueDate,
       status,
+      rawStatus: pickStr(w, ["PrimaryStatus"]),
       isOverdue: dueDate !== "" && dueDate < today && status !== "complete",
     } satisfies KarbonTask;
   });
@@ -192,6 +193,7 @@ export async function fetchKarbonWorkItems(): Promise<KarbonWorkItem[]> {
     clientName: pickStr(w, ["ClientName"]),
     type: pickStr(w, ["WorkType"]),
     status: mapWorkStatus(w.PrimaryStatus),
+    rawStatus: pickStr(w, ["PrimaryStatus"]),
     dueDate: dateOnly(w.DueDate),
     assigneeId: pickStr(w, ["AssigneeKey", "AssigneeEmailAddress"]),
     assigneeName: pickStr(w, ["AssigneeName"]),
