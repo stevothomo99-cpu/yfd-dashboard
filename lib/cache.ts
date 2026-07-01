@@ -1,9 +1,9 @@
-import { kv } from "@vercel/kv";
+import Redis from "ioredis";
 
 const NAMESPACE = "yfd:";
 
 function isConfigured(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return Boolean(process.env.REDIS_URL);
 }
 
 interface MemoryEntry {
@@ -11,14 +11,27 @@ interface MemoryEntry {
   expiresAt: number | null;
 }
 
-// Dev-only fallback for when no real KV store is attached. Pinned to
-// globalThis so it survives Turbopack/webpack re-instantiating this module
-// across separate route/page bundles in the same process — without this, a
-// PATCH via a route handler and a read from a page Server Component could
-// each see their own independent Map and silently disagree.
-const globalForCache = globalThis as unknown as { __yfdCacheMemory?: Map<string, MemoryEntry> };
+// Dev-only fallback for when no real Redis is attached (e.g. REDIS_URL
+// unset locally). Pinned to globalThis so it survives Turbopack/webpack
+// re-instantiating this module across separate route/page bundles in the
+// same process — without this, a PATCH via a route handler and a read from
+// a page Server Component could each see their own independent Map and
+// silently disagree.
+const globalForCache = globalThis as unknown as {
+  __yfdCacheMemory?: Map<string, MemoryEntry>;
+  __yfdRedisClient?: Redis;
+};
 const memory = globalForCache.__yfdCacheMemory ?? new Map<string, MemoryEntry>();
 globalForCache.__yfdCacheMemory = memory;
+
+function client(): Redis {
+  if (!globalForCache.__yfdRedisClient) {
+    globalForCache.__yfdRedisClient = new Redis(process.env.REDIS_URL as string, {
+      maxRetriesPerRequest: 3,
+    });
+  }
+  return globalForCache.__yfdRedisClient;
+}
 
 function nsKey(key: string): string {
   return NAMESPACE + key;
@@ -35,7 +48,8 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
     }
     return entry.value as T;
   }
-  return (await kv.get<T>(k)) ?? null;
+  const raw = await client().get(k);
+  return raw === null ? null : (JSON.parse(raw) as T);
 }
 
 export async function cacheSet<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
@@ -47,10 +61,11 @@ export async function cacheSet<T>(key: string, value: T, ttlSeconds?: number): P
     });
     return;
   }
+  const raw = JSON.stringify(value);
   if (ttlSeconds && ttlSeconds > 0) {
-    await kv.set(k, value, { ex: ttlSeconds });
+    await client().set(k, raw, "EX", ttlSeconds);
   } else {
-    await kv.set(k, value);
+    await client().set(k, raw);
   }
 }
 
@@ -60,7 +75,7 @@ export async function cacheDelete(key: string): Promise<void> {
     memory.delete(k);
     return;
   }
-  await kv.del(k);
+  await client().del(k);
 }
 
 export async function cached<T>(
