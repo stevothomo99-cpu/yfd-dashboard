@@ -242,6 +242,7 @@ function makeTask(
 ): KarbonTask {
   const staff = STAFF.find((s) => s.id === assigneeId)!;
   const client = CLIENT_SEEDS.find((c) => c.id === clientId)!;
+  const rawStatus = { todo: "Planned", inProgress: "In Progress", complete: "Completed" }[status];
   return {
     id: "T" + nextTaskId++,
     title,
@@ -252,6 +253,7 @@ function makeTask(
     category,
     dueDate,
     status,
+    rawStatus,
     isOverdue,
   };
 }
@@ -288,6 +290,8 @@ export const WORK_ITEMS: KarbonWorkItem[] = CLIENT_SEEDS.map((c, i) => ({
       : c.basStatus === "in-progress"
         ? "inProgress"
         : "notStarted",
+  rawStatus:
+    c.basStatus === "lodged" ? "Completed" : c.basStatus === "in-progress" ? "In Progress" : "Planned",
   dueDate: "2026-06-28",
   assigneeId: c.managerId,
   assigneeName: STAFF.find((s) => s.id === c.managerId)!.name,

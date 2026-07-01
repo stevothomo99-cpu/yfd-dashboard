@@ -10,6 +10,10 @@ export interface KarbonTask {
   category: string;
   dueDate: string;
   status: KarbonTaskStatus;
+  // Karbon's actual PrimaryStatus string (e.g. "Planned", "Ready To Start",
+  // "In Progress", "Waiting", "Completed") — the 3-value `status` above
+  // collapses these for KPI counts, but filtering needs the real values.
+  rawStatus: string;
   isOverdue: boolean;
 }
 
@@ -21,6 +25,7 @@ export interface KarbonWorkItem {
   clientName: string;
   type: string;
   status: KarbonWorkStatus;
+  rawStatus: string;
   dueDate: string;
   assigneeId: string;
   assigneeName: string;

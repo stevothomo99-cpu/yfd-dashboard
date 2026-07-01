@@ -5,6 +5,7 @@ import PageHeader from "@/components/dashboard/PageHeader";
 import KpiCard from "@/components/dashboard/KpiCard";
 import TaskRow from "@/components/dashboard/TaskRow";
 import StaffSlicer from "@/components/layout/StaffSlicer";
+import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
 import { staffFromAssignees } from "@/lib/utils";
 import type { KarbonTask, KarbonUser } from "@/types/karbon";
 import type { TasksSnapshot } from "./page";
@@ -26,6 +27,7 @@ export default function TasksPageClient({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>({ selected: [], mode: "exclude" });
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -45,7 +47,13 @@ export default function TasksPageClient({
   const staff = staffFromAssignees(
     karbonUsers.map((u) => ({ assigneeId: u.id, assigneeName: u.name })),
   );
-  const visible = data.tasks.filter((t) => !selectedId || t.assigneeId === selectedId);
+  const statusOptions = Array.from(
+    new Set(data.tasks.map((t) => t.rawStatus).filter(Boolean)),
+  ).sort();
+  const visible = applyStatusFilter(
+    data.tasks.filter((t) => !selectedId || t.assigneeId === selectedId),
+    statusFilter,
+  );
   const weekAgo = addDays(today, -7);
 
   const overdue = visible.filter((t) => t.isOverdue);
@@ -116,6 +124,10 @@ export default function TasksPageClient({
       ) : null}
 
       <StaffSlicer staff={staff} selectedId={selectedId} onChange={setSelectedId} />
+
+      <div style={{ marginBottom: "12px" }}>
+        <StatusFilter options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
+      </div>
 
       <div
         style={{
