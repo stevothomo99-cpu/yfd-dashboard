@@ -1,19 +1,21 @@
-const basItems = [
-  { client: "Smith & Co", status: "lodged", due: "28 Jun" },
-  { client: "Taylor Plumbing", status: "in-progress", due: "28 Jun" },
-  { client: "Nguyen Retail", status: "lodged", due: "28 Jun" },
-  { client: "Lee Constructions", status: "not-started", due: "28 Jun" },
-  { client: "Patel Medical", status: "lodged", due: "28 Jun" },
-  { client: "Harris Cafe", status: "lodged", due: "28 Jun" },
-];
+import BasStatusBadge from "@/components/dashboard/BasStatusBadge";
+import type { BasStatus } from "@/types/dashboard";
+import type { KarbonWorkItem, KarbonWorkStatus } from "@/types/karbon";
 
-const statusStyle: Record<string, { bg: string; txt: string; label: string }> = {
-  lodged: { bg: "#EAF3DE", txt: "#27500A", label: "Lodged" },
-  "in-progress": { bg: "#FAEEDA", txt: "#633806", label: "In progress" },
-  "not-started": { bg: "#FCEBEB", txt: "#501313", label: "Not started" },
+const WORK_STATUS_TO_BAS: Record<KarbonWorkStatus, BasStatus> = {
+  notStarted: "not-started",
+  inProgress: "in-progress",
+  complete: "lodged",
 };
 
-export default function BasSnapshot() {
+function formatDue(d: string): string {
+  if (!d) return "—";
+  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
+
+export default function BasSnapshot({ workItems }: { workItems: KarbonWorkItem[] }) {
+  const items = workItems.slice(0, 6);
+
   return (
     <div style={{
       background: "white",
@@ -30,20 +32,18 @@ export default function BasSnapshot() {
         <div style={{ fontSize: "13px", fontWeight: "500", color: "#111111" }}>
           🧾 BAS status
         </div>
-        <span style={{ fontSize: "11px", color: "#0C447C", cursor: "pointer" }}>
-          View all →
-        </span>
       </div>
 
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "8px",
-      }}>
-        {basItems.map((b, i) => {
-          const s = statusStyle[b.status];
-          return (
-            <div key={i} style={{
+      {items.length === 0 ? (
+        <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>No work items found.</div>
+      ) : (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "8px",
+        }}>
+          {items.map((w) => (
+            <div key={w.id} style={{
               border: "0.5px solid #e1e0d9",
               borderRadius: "10px",
               padding: "10px 12px",
@@ -57,27 +57,18 @@ export default function BasSnapshot() {
                 overflow: "hidden",
                 textOverflow: "ellipsis",
               }}>
-                {b.client}
+                {w.clientName}
               </div>
-              <div style={{
-                fontSize: "10px",
-                padding: "2px 8px",
-                borderRadius: "8px",
-                fontWeight: "500",
-                display: "inline-block",
-                background: s.bg,
-                color: s.txt,
-                marginBottom: "4px",
-              }}>
-                {s.label}
+              <div style={{ marginBottom: "4px" }}>
+                <BasStatusBadge status={WORK_STATUS_TO_BAS[w.status]} />
               </div>
               <div style={{ fontSize: "11px", color: "#888780" }}>
-                Due {b.due}
+                Due {formatDue(w.dueDate)}
               </div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
