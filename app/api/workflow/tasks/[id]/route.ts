@@ -19,6 +19,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const patch: Parameters<typeof updateTask>[1] = {};
     if (typeof body.title === "string") patch.title = body.title.trim();
+    if (typeof body.type === "string") patch.type = body.type.trim();
     if ("assigneeId" in body) patch.assigneeId = typeof body.assigneeId === "string" ? body.assigneeId : null;
     if ("dueDate" in body) patch.dueDate = typeof body.dueDate === "string" ? body.dueDate : null;
     if (typeof body.recurrence === "string") patch.recurrence = body.recurrence;

@@ -90,6 +90,7 @@ interface TaskViewRow {
   id: string;
   job_id: string;
   title: string;
+  type: string;
   assignee_id: string | null;
   due_date: string | null;
   status_id: string;
@@ -120,6 +121,7 @@ function mapTaskView(row: TaskViewRow): WorkflowTaskView {
     partnerId: row.job?.partner_id ?? null,
     managerId: row.job?.manager_id ?? null,
     title: row.title,
+    type: row.type,
     assigneeId: row.assignee_id,
     assigneeName: row.assignee?.name ?? null,
     dueDate: row.due_date,
@@ -134,7 +136,7 @@ function mapTaskView(row: TaskViewRow): WorkflowTaskView {
 }
 
 const TASK_VIEW_SELECT = `
-  id, job_id, title, assignee_id, due_date, status_id, recurrence, recurrence_parent_id,
+  id, job_id, title, type, assignee_id, due_date, status_id, recurrence, recurrence_parent_id,
   completed_at, created_at, updated_at,
   job:jobs ( id, name, customer_id, partner_id, manager_id, customer:customers ( id, name ) ),
   assignee:staff ( id, name ),
@@ -268,6 +270,7 @@ export async function createTask(input: CreateTaskInput): Promise<WorkflowTask> 
     .insert({
       job_id: input.jobId,
       title: input.title,
+      type: input.type,
       assignee_id: input.assigneeId,
       due_date: input.dueDate,
       status_id: input.statusId,
@@ -283,6 +286,7 @@ interface RawTaskRow {
   id: string;
   job_id: string;
   title: string;
+  type: string;
   assignee_id: string | null;
   due_date: string | null;
   status_id: string;
@@ -298,6 +302,7 @@ function mapTaskRow(row: RawTaskRow): WorkflowTask {
     id: row.id,
     jobId: row.job_id,
     title: row.title,
+    type: row.type,
     assigneeId: row.assignee_id,
     dueDate: row.due_date,
     statusId: row.status_id,
@@ -360,6 +365,7 @@ export async function updateTaskStatus(taskId: string, statusId: string): Promis
     .insert({
       job_id: task.jobId,
       title: task.title,
+      type: task.type,
       assignee_id: task.assigneeId,
       due_date: due,
       status_id: (openStatus as { id: string }).id,
@@ -375,6 +381,7 @@ export async function updateTaskStatus(taskId: string, statusId: string): Promis
 
 export interface UpdateTaskInput {
   title?: string;
+  type?: string;
   assigneeId?: string | null;
   dueDate?: string | null;
   recurrence?: WorkflowTask["recurrence"];
@@ -383,6 +390,7 @@ export interface UpdateTaskInput {
 export async function updateTask(taskId: string, patch: UpdateTaskInput): Promise<WorkflowTask> {
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.title !== undefined) update.title = patch.title;
+  if (patch.type !== undefined) update.type = patch.type;
   if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
   if (patch.dueDate !== undefined) update.due_date = patch.dueDate;
   if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;

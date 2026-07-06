@@ -36,6 +36,7 @@ export async function POST(request: Request) {
   const input: CreateTaskInput = {
     jobId,
     title,
+    type: typeof body.type === "string" && body.type.trim() ? body.type.trim() : "General",
     statusId,
     recurrence,
     assigneeId: typeof body.assigneeId === "string" ? body.assigneeId : null,

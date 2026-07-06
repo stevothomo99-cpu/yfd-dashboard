@@ -39,6 +39,7 @@ export interface WorkflowTask {
   id: string;
   jobId: string;
   title: string;
+  type: string;
   assigneeId: string | null;
   dueDate: string | null;
   statusId: string;
@@ -63,11 +64,24 @@ export interface WorkflowTaskView extends WorkflowTask {
 export interface CreateTaskInput {
   jobId: string;
   title: string;
+  type: string;
   assigneeId: string | null;
   dueDate: string | null;
   statusId: string;
   recurrence: TaskRecurrence;
 }
+
+// Free-text, but these are the common categories staff already use in
+// Karbon/XPM — offered as <datalist> suggestions, not an enforced enum.
+export const TASK_TYPE_SUGGESTIONS = [
+  "Bookkeeping",
+  "BAS/IAS",
+  "Payroll",
+  "Tax",
+  "Advisory",
+  "Month-end close",
+  "General",
+];
 
 export interface CreateJobInput {
   customerId: string;
