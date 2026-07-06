@@ -11,6 +11,7 @@ const navItems = [
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Timesheets", href: "/timesheets" },
   { label: "Karbon Tasks", href: "/tasks" },
+  { label: "Workflow", href: "/workflow" },
   { label: "BAS Status", href: "/bas" },
   { label: "Clients", href: "/clients" },
   { label: "Settings", href: "/settings" },

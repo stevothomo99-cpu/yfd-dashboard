@@ -1,6 +1,13 @@
 import type { StaffMember, ClientTile, BasStatus, KpiData } from "@/types/dashboard";
 import type { KarbonTask, KarbonWorkItem, KarbonUser } from "@/types/karbon";
 import type { XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
+import type {
+  WorkflowStaff,
+  WorkflowStatus,
+  WorkflowTaskView,
+  WorkflowCustomer,
+  WorkflowJob,
+} from "@/types/workflow";
 import { fyYearFor } from "./utils";
 
 export const STAFF: StaffMember[] = [
@@ -381,3 +388,117 @@ export const INVOICES: XpmInvoice[] = CLIENT_SEEDS.flatMap((c, ci) =>
     fyYear: CURRENT_FY,
   })),
 );
+
+// ─── Workflow tool (Karbon replacement) mock data ──────────────────────────
+// Same id convention as STAFF/CLIENT_SEEDS above, plus one Partner (the
+// dashboard owner) since jobs/customers carry a Partner in addition to a
+// Manager.
+export const WORKFLOW_STATUSES: WorkflowStatus[] = [
+  { id: "open", name: "Open", color: "#b4b2a9", sortOrder: 0, isComplete: false },
+  { id: "in-progress", name: "In Progress", color: "#2a78d6", sortOrder: 1, isComplete: false },
+  { id: "waiting-on-client", name: "Waiting on Client", color: "#eda100", sortOrder: 2, isComplete: false },
+  { id: "with-steve", name: "With Steve", color: "#9b59b6", sortOrder: 3, isComplete: false },
+  { id: "completed", name: "Completed", color: "#1baf7a", sortOrder: 4, isComplete: true },
+];
+
+const PARTNER_ID = "steve-thompson";
+
+export const WORKFLOW_STAFF: WorkflowStaff[] = [
+  { id: PARTNER_ID, xpmStaffId: null, name: "Steve Thompson", email: "steve@yourfinancedept.com.au", role: "Partner", included: true },
+  ...STAFF.map((s) => ({
+    id: s.id,
+    xpmStaffId: s.id,
+    name: s.name,
+    email: `${s.id}@yfd.example`,
+    role: "Manager" as const,
+    included: s.included,
+  })),
+];
+
+interface JobSeed {
+  id: string;
+  customerId: string;
+  customerName: string;
+  name: string;
+  managerId: string;
+}
+
+const JOB_SEEDS: JobSeed[] = CLIENT_SEEDS.map((c) => ({
+  id: `${c.id}-job`,
+  customerId: c.id,
+  customerName: c.name,
+  name: "Monthly Bookkeeping",
+  managerId: c.managerId,
+}));
+
+export const WORKFLOW_CUSTOMERS: WorkflowCustomer[] = CLIENT_SEEDS.map((c) => ({
+  id: c.id,
+  xpmClientId: c.id,
+  name: c.name,
+  partnerId: PARTNER_ID,
+}));
+
+export const WORKFLOW_JOBS: WorkflowJob[] = JOB_SEEDS.map((j) => ({
+  id: j.id,
+  customerId: j.customerId,
+  xpmJobId: null,
+  name: j.name,
+  partnerId: PARTNER_ID,
+  managerId: j.managerId,
+}));
+
+function statusOf(id: string): WorkflowStatus {
+  return WORKFLOW_STATUSES.find((s) => s.id === id)!;
+}
+
+function staffNameOf(id: string | null): string | null {
+  if (!id) return null;
+  return WORKFLOW_STAFF.find((s) => s.id === id)?.name ?? null;
+}
+
+let nextWorkflowTaskId = 1;
+function makeWorkflowTask(
+  jobId: string,
+  title: string,
+  assigneeId: string | null,
+  dueDate: string | null,
+  statusId: string,
+  recurrence: WorkflowTaskView["recurrence"],
+): WorkflowTaskView {
+  const job = JOB_SEEDS.find((j) => j.id === jobId)!;
+  const now = new Date().toISOString();
+  return {
+    id: "WT" + nextWorkflowTaskId++,
+    jobId,
+    jobName: job.name,
+    customerId: job.customerId,
+    customerName: job.customerName,
+    partnerId: PARTNER_ID,
+    managerId: job.managerId,
+    title,
+    assigneeId,
+    assigneeName: staffNameOf(assigneeId),
+    dueDate,
+    statusId,
+    status: statusOf(statusId),
+    recurrence,
+    recurrenceParentId: null,
+    completedAt: statusId === "completed" ? now : null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export const WORKFLOW_TASKS: WorkflowTaskView[] = [
+  makeWorkflowTask("taylor-plumbing-job", "Creditor reconciliation", "ana-cruz", "2026-06-19", "in-progress", "monthly"),
+  makeWorkflowTask("harris-cafe-job", "Fixed asset schedule", "ana-cruz", "2026-06-17", "waiting-on-client", "quarterly"),
+  makeWorkflowTask("mori-imports-job", "Monthly report draft", "ben-tan", "2026-06-16", "in-progress", "monthly"),
+  makeWorkflowTask("mori-imports-job", "Supplier queries", "ben-tan", "2026-06-15", "open", "none"),
+  makeWorkflowTask("taylor-plumbing-job", "BAS lodgement — Taylor", "jay-reyes", "2026-06-22", "with-steve", "quarterly"),
+  makeWorkflowTask("nguyen-retail-job", "Chart of accounts setup", "lia-garcia", "2026-06-17", "open", "none"),
+  makeWorkflowTask("smith-co-job", "Payroll run — Smith", "maria-santos", "2026-06-29", "open", "fortnightly"),
+  makeWorkflowTask("patel-medical-job", "BAS prep — Patel", "jay-reyes", "2026-06-30", "in-progress", "quarterly"),
+  makeWorkflowTask("smith-co-job", "Year-end review", "maria-santos", "2026-07-03", "open", "none"),
+  makeWorkflowTask("harris-cafe-job", "Receipt review — Harris", "ana-cruz", "2026-06-26", "completed", "weekly"),
+  makeWorkflowTask("patel-medical-job", "Bank rec — Patel", "jay-reyes", "2026-06-25", "completed", "monthly"),
+];
