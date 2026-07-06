@@ -7,12 +7,14 @@ import {
   WORKFLOW_JOBS,
   WORKFLOW_TASKS,
   WORKFLOW_STATUSES,
+  WORKFLOW_TASK_TYPES,
 } from "./mock";
 import type {
   WorkflowStaff,
   WorkflowCustomer,
   WorkflowJob,
   WorkflowStatus,
+  WorkflowTaskType,
   WorkflowTask,
   WorkflowTaskView,
   CreateTaskInput,
@@ -20,6 +22,15 @@ import type {
 } from "@/types/workflow";
 
 export { isSupabaseConfigured as isWorkflowConfigured, SupabaseNotConfiguredError };
+
+// FK violation (23503) means rows still reference the row being deleted —
+// surface that as a friendly message instead of a raw Postgres error.
+function friendlyDeleteError(kind: string, error: { code?: string; message: string }): Error {
+  if (error.code === "23503") {
+    return new Error(`Can't delete this ${kind} — some tasks still use it. Reassign those tasks first.`);
+  }
+  return new Error(`Failed to delete ${kind}: ${error.message}`);
+}
 
 // ─── Row → domain mapping ───────────────────────────────────────────────────
 
@@ -86,12 +97,24 @@ function mapStatus(row: StatusRow): WorkflowStatus {
   return { id: row.id, name: row.name, color: row.color, sortOrder: row.sort_order, isComplete: row.is_complete };
 }
 
+interface TaskTypeRow {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+}
+
+function mapTaskType(row: TaskTypeRow): WorkflowTaskType {
+  return { id: row.id, name: row.name, color: row.color, sortOrder: row.sort_order };
+}
+
 interface TaskViewRow {
   id: string;
   job_id: string;
   title: string;
-  type: string;
+  type_id: string;
   assignee_id: string | null;
+  start_date: string | null;
   due_date: string | null;
   status_id: string;
   recurrence: WorkflowTask["recurrence"];
@@ -109,6 +132,7 @@ interface TaskViewRow {
   } | null;
   assignee: { id: string; name: string } | null;
   status: StatusRow;
+  type: TaskTypeRow;
 }
 
 function mapTaskView(row: TaskViewRow): WorkflowTaskView {
@@ -121,9 +145,11 @@ function mapTaskView(row: TaskViewRow): WorkflowTaskView {
     partnerId: row.job?.partner_id ?? null,
     managerId: row.job?.manager_id ?? null,
     title: row.title,
-    type: row.type,
+    typeId: row.type_id,
+    type: mapTaskType(row.type),
     assigneeId: row.assignee_id,
     assigneeName: row.assignee?.name ?? null,
+    startDate: row.start_date,
     dueDate: row.due_date,
     statusId: row.status_id,
     status: mapStatus(row.status),
@@ -136,11 +162,12 @@ function mapTaskView(row: TaskViewRow): WorkflowTaskView {
 }
 
 const TASK_VIEW_SELECT = `
-  id, job_id, title, type, assignee_id, due_date, status_id, recurrence, recurrence_parent_id,
-  completed_at, created_at, updated_at,
+  id, job_id, title, type_id, assignee_id, start_date, due_date, status_id, recurrence,
+  recurrence_parent_id, completed_at, created_at, updated_at,
   job:jobs ( id, name, customer_id, partner_id, manager_id, customer:customers ( id, name ) ),
   assignee:staff ( id, name ),
-  status:statuses ( id, name, color, sort_order, is_complete )
+  status:statuses ( id, name, color, sort_order, is_complete ),
+  type:task_types ( id, name, color, sort_order )
 `;
 
 // ─── Reads ──────────────────────────────────────────────────────────────────
@@ -149,6 +176,12 @@ export async function listStatuses(): Promise<WorkflowStatus[]> {
   const { data, error } = await supabaseAdmin().from("statuses").select("*").order("sort_order");
   if (error) throw new Error(`Supabase statuses query failed: ${error.message}`);
   return (data as StatusRow[]).map(mapStatus);
+}
+
+export async function listTaskTypes(): Promise<WorkflowTaskType[]> {
+  const { data, error } = await supabaseAdmin().from("task_types").select("*").order("sort_order");
+  if (error) throw new Error(`Supabase task_types query failed: ${error.message}`);
+  return (data as TaskTypeRow[]).map(mapTaskType);
 }
 
 export async function listStaff(): Promise<WorkflowStaff[]> {
@@ -185,6 +218,7 @@ export interface WorkflowSnapshot {
   jobs: WorkflowJob[];
   tasks: WorkflowTaskView[];
   statuses: WorkflowStatus[];
+  taskTypes: WorkflowTaskType[];
   syncedAt: string;
   message?: string;
 }
@@ -198,19 +232,21 @@ export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
       jobs: WORKFLOW_JOBS,
       tasks: WORKFLOW_TASKS,
       statuses: WORKFLOW_STATUSES,
+      taskTypes: WORKFLOW_TASK_TYPES,
       syncedAt: new Date().toISOString(),
       message: "Showing mock data because SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set.",
     };
   }
   try {
-    const [staff, customers, jobs, tasks, statuses] = await Promise.all([
+    const [staff, customers, jobs, tasks, statuses, taskTypes] = await Promise.all([
       listStaff(),
       listCustomers(),
       listJobs(),
       listTaskViews(),
       listStatuses(),
+      listTaskTypes(),
     ]);
-    return { mode: "live", staff, customers, jobs, tasks, statuses, syncedAt: new Date().toISOString() };
+    return { mode: "live", staff, customers, jobs, tasks, statuses, taskTypes, syncedAt: new Date().toISOString() };
   } catch (err) {
     if (err instanceof SupabaseNotConfiguredError) {
       return {
@@ -220,6 +256,7 @@ export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
         jobs: WORKFLOW_JOBS,
         tasks: WORKFLOW_TASKS,
         statuses: WORKFLOW_STATUSES,
+        taskTypes: WORKFLOW_TASK_TYPES,
         syncedAt: new Date().toISOString(),
         message: err.message,
       };
@@ -231,13 +268,14 @@ export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
       jobs: [],
       tasks: [],
       statuses: [],
+      taskTypes: [],
       syncedAt: new Date().toISOString(),
       message: err instanceof Error ? err.message : "Unknown error",
     };
   }
 }
 
-// ─── Writes ─────────────────────────────────────────────────────────────────
+// ─── Writes: customers/jobs/tasks ───────────────────────────────────────────
 
 export async function createCustomer(name: string, partnerId: string | null): Promise<WorkflowCustomer> {
   const { data, error } = await supabaseAdmin()
@@ -270,8 +308,9 @@ export async function createTask(input: CreateTaskInput): Promise<WorkflowTask> 
     .insert({
       job_id: input.jobId,
       title: input.title,
-      type: input.type,
+      type_id: input.typeId,
       assignee_id: input.assigneeId,
+      start_date: input.startDate,
       due_date: input.dueDate,
       status_id: input.statusId,
       recurrence: input.recurrence,
@@ -286,8 +325,9 @@ interface RawTaskRow {
   id: string;
   job_id: string;
   title: string;
-  type: string;
+  type_id: string;
   assignee_id: string | null;
+  start_date: string | null;
   due_date: string | null;
   status_id: string;
   recurrence: WorkflowTask["recurrence"];
@@ -302,8 +342,9 @@ function mapTaskRow(row: RawTaskRow): WorkflowTask {
     id: row.id,
     jobId: row.job_id,
     title: row.title,
-    type: row.type,
+    typeId: row.type_id,
     assigneeId: row.assignee_id,
+    startDate: row.start_date,
     dueDate: row.due_date,
     statusId: row.status_id,
     recurrence: row.recurrence,
@@ -320,8 +361,9 @@ export interface UpdateTaskStatusResult {
 }
 
 // Sets a task's status. If the new status is the "complete" status and the
-// task recurs, immediately creates the next instance due off the current
-// task's own due date (generate-on-completion, per lib/recurrence.ts).
+// task recurs, immediately creates the next instance — due date (and start
+// date, if set) shifted by the same interval, generate-on-completion per
+// lib/recurrence.ts.
 export async function updateTaskStatus(taskId: string, statusId: string): Promise<UpdateTaskStatusResult> {
   const db = supabaseAdmin();
 
@@ -360,13 +402,15 @@ export async function updateTaskStatus(taskId: string, statusId: string): Promis
   if (openErr) throw new Error(`Failed to find an open status for the recurring task: ${openErr.message}`);
 
   const due = nextDueDate(task.dueDate, task.recurrence);
+  const start = task.startDate ? nextDueDate(task.startDate, task.recurrence) : null;
   const { data: created, error: createErr } = await db
     .from("tasks")
     .insert({
       job_id: task.jobId,
       title: task.title,
-      type: task.type,
+      type_id: task.typeId,
       assignee_id: task.assigneeId,
+      start_date: start,
       due_date: due,
       status_id: (openStatus as { id: string }).id,
       recurrence: task.recurrence,
@@ -381,8 +425,9 @@ export async function updateTaskStatus(taskId: string, statusId: string): Promis
 
 export interface UpdateTaskInput {
   title?: string;
-  type?: string;
+  typeId?: string;
   assigneeId?: string | null;
+  startDate?: string | null;
   dueDate?: string | null;
   recurrence?: WorkflowTask["recurrence"];
 }
@@ -390,8 +435,9 @@ export interface UpdateTaskInput {
 export async function updateTask(taskId: string, patch: UpdateTaskInput): Promise<WorkflowTask> {
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.title !== undefined) update.title = patch.title;
-  if (patch.type !== undefined) update.type = patch.type;
+  if (patch.typeId !== undefined) update.type_id = patch.typeId;
   if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
+  if (patch.startDate !== undefined) update.start_date = patch.startDate;
   if (patch.dueDate !== undefined) update.due_date = patch.dueDate;
   if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
 
@@ -403,6 +449,74 @@ export async function updateTask(taskId: string, patch: UpdateTaskInput): Promis
     .single();
   if (error) throw new Error(`Failed to update task: ${error.message}`);
   return mapTaskRow(data as RawTaskRow);
+}
+
+// ─── Admin: statuses & task types ───────────────────────────────────────────
+
+export interface StatusInput {
+  name: string;
+  color: string;
+  sortOrder: number;
+  isComplete: boolean;
+}
+
+export async function createStatus(input: StatusInput): Promise<WorkflowStatus> {
+  const { data, error } = await supabaseAdmin()
+    .from("statuses")
+    .insert({ name: input.name, color: input.color, sort_order: input.sortOrder, is_complete: input.isComplete })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create status: ${error.message}`);
+  return mapStatus(data as StatusRow);
+}
+
+export async function updateStatus(id: string, patch: Partial<StatusInput>): Promise<WorkflowStatus> {
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) update.name = patch.name;
+  if (patch.color !== undefined) update.color = patch.color;
+  if (patch.sortOrder !== undefined) update.sort_order = patch.sortOrder;
+  if (patch.isComplete !== undefined) update.is_complete = patch.isComplete;
+
+  const { data, error } = await supabaseAdmin().from("statuses").update(update).eq("id", id).select().single();
+  if (error) throw new Error(`Failed to update status: ${error.message}`);
+  return mapStatus(data as StatusRow);
+}
+
+export async function deleteStatus(id: string): Promise<void> {
+  const { error } = await supabaseAdmin().from("statuses").delete().eq("id", id);
+  if (error) throw friendlyDeleteError("status", error);
+}
+
+export interface TaskTypeInput {
+  name: string;
+  color: string;
+  sortOrder: number;
+}
+
+export async function createTaskType(input: TaskTypeInput): Promise<WorkflowTaskType> {
+  const { data, error } = await supabaseAdmin()
+    .from("task_types")
+    .insert({ name: input.name, color: input.color, sort_order: input.sortOrder })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create task type: ${error.message}`);
+  return mapTaskType(data as TaskTypeRow);
+}
+
+export async function updateTaskType(id: string, patch: Partial<TaskTypeInput>): Promise<WorkflowTaskType> {
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) update.name = patch.name;
+  if (patch.color !== undefined) update.color = patch.color;
+  if (patch.sortOrder !== undefined) update.sort_order = patch.sortOrder;
+
+  const { data, error } = await supabaseAdmin().from("task_types").update(update).eq("id", id).select().single();
+  if (error) throw new Error(`Failed to update task type: ${error.message}`);
+  return mapTaskType(data as TaskTypeRow);
+}
+
+export async function deleteTaskType(id: string): Promise<void> {
+  const { error } = await supabaseAdmin().from("task_types").delete().eq("id", id);
+  if (error) throw friendlyDeleteError("task type", error);
 }
 
 // ─── XPM sync ───────────────────────────────────────────────────────────────

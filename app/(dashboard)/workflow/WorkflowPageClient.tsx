@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StaffSlicer from "@/components/layout/StaffSlicer";
 import StatusFilter, { type StatusFilterValue } from "@/components/layout/StatusFilter";
@@ -9,8 +10,13 @@ import { initialsOf } from "@/lib/utils";
 import { RECURRENCE_LABELS } from "@/lib/recurrence";
 import type { WorkflowSnapshot } from "@/lib/workflow";
 import type { StaffMember } from "@/types/dashboard";
-import type { TaskRecurrence, WorkflowTaskView, WorkflowCustomer, WorkflowJob } from "@/types/workflow";
-import { TASK_TYPE_SUGGESTIONS } from "@/types/workflow";
+import type {
+  TaskRecurrence,
+  WorkflowTaskView,
+  WorkflowCustomer,
+  WorkflowJob,
+  WorkflowTaskType,
+} from "@/types/workflow";
 
 interface WorkflowPageClientProps {
   initial: WorkflowSnapshot;
@@ -155,7 +161,14 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
 
   async function handleTaskEdit(
     taskId: string,
-    patch: { title: string; type: string; assigneeId: string | null; dueDate: string | null; recurrence: TaskRecurrence },
+    patch: {
+      title: string;
+      typeId: string;
+      assigneeId: string | null;
+      startDate: string | null;
+      dueDate: string | null;
+      recurrence: TaskRecurrence;
+    },
   ) {
     const res = await fetch(`/api/workflow/tasks/${taskId}`, {
       method: "PATCH",
@@ -178,8 +191,9 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
     newJobName: string;
     newJobManagerId: string;
     title: string;
-    type: string;
+    typeId: string;
     assigneeId: string | null;
+    startDate: string | null;
     dueDate: string | null;
     recurrence: TaskRecurrence;
     statusId: string;
@@ -219,8 +233,9 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
         body: JSON.stringify({
           jobId,
           title: input.title,
-          type: input.type,
+          typeId: input.typeId,
           assigneeId: input.assigneeId,
+          startDate: input.startDate,
           dueDate: input.dueDate,
           recurrence: input.recurrence,
           statusId: input.statusId,
@@ -258,10 +273,6 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
     [data.staff],
   );
 
-  const distinctTypes = useMemo(
-    () => Array.from(new Set(data.tasks.map((t) => t.type).filter(Boolean))).sort(),
-    [data.tasks],
-  );
   const statusOptions = useMemo(() => data.statuses.map((s) => s.name), [data.statuses]);
 
   function matchesDuePreset(task: WorkflowTaskView): boolean {
@@ -283,7 +294,7 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
       const inSet = statusFilter.selected.includes(t.status.name);
       return statusFilter.mode === "include" ? inSet : !inSet;
     })
-    .filter((t) => typeFilter === "all" || t.type === typeFilter)
+    .filter((t) => typeFilter === "all" || t.typeId === typeFilter)
     .filter(matchesDuePreset)
     .sort((a, b) => {
       if (!a.dueDate) return 1;
@@ -304,6 +315,9 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
         subtitle="All tasks · in-house replacement for Karbon"
         action={
           <div style={{ display: "flex", gap: "8px" }}>
+            <Link href="/workflow/admin" style={{ textDecoration: "none" }}>
+              <span style={ghostButtonStyle}>Manage statuses & types</span>
+            </Link>
             <button type="button" onClick={handleSync} disabled={syncing} style={ghostButtonStyle}>
               {syncing ? "Syncing…" : "Sync from XPM"}
             </button>
@@ -325,6 +339,7 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
           jobs={data.jobs}
           staff={data.staff.filter((s) => s.role !== "Partner")}
           statuses={data.statuses}
+          taskTypes={data.taskTypes}
           onAdd={handleAddWork}
           onCancel={() => setShowAddWork(false)}
         />
@@ -349,9 +364,9 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
         </select>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={pillSelectStyle}>
           <option value="all">All work types</option>
-          {distinctTypes.map((type) => (
-            <option key={type} value={type}>
-              {type}
+          {data.taskTypes.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
             </option>
           ))}
         </select>
@@ -391,7 +406,7 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "2.2fr 1.4fr 1fr 1.3fr 1fr 1fr 1.2fr",
+            gridTemplateColumns: "2fr 1.2fr 1.1fr 1.3fr 0.9fr 0.9fr 0.9fr 1.1fr",
             gap: "8px",
             padding: "10px 16px",
             borderBottom: "0.5px solid #e1e0d9",
@@ -406,6 +421,7 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
           <div>Client</div>
           <div>Type</div>
           <div>Status</div>
+          <div>Start</div>
           <div>Due</div>
           <div>Repeat</div>
           <div>Assignee</div>
@@ -420,6 +436,7 @@ export default function WorkflowPageClient({ initial }: WorkflowPageClientProps)
               task={task}
               today={today}
               statuses={data.statuses}
+              taskTypes={data.taskTypes}
               staff={data.staff.filter((s) => s.role !== "Partner")}
               expanded={expandedTaskId === task.id}
               onToggleExpand={() => setExpandedTaskId((id) => (id === task.id ? null : task.id))}
@@ -479,10 +496,29 @@ function dueMeta(task: WorkflowTaskView, today: string): { label: string; color:
   return { label: formatShort(task.dueDate), color: "#444441" };
 }
 
+function TypeTag({ type }: { type: WorkflowTaskType }) {
+  return (
+    <span
+      style={{
+        fontSize: "11px",
+        fontWeight: 500,
+        padding: "2px 8px",
+        borderRadius: "999px",
+        background: `${type.color}1a`,
+        color: type.color,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {type.name}
+    </span>
+  );
+}
+
 function TaskRow({
   task,
   today,
   statuses,
+  taskTypes,
   staff,
   expanded,
   onToggleExpand,
@@ -492,11 +528,19 @@ function TaskRow({
   task: WorkflowTaskView;
   today: string;
   statuses: WorkflowSnapshot["statuses"];
+  taskTypes: WorkflowTaskType[];
   staff: WorkflowSnapshot["staff"];
   expanded: boolean;
   onToggleExpand: () => void;
   onStatusChange: (statusId: string) => void;
-  onSaveEdit: (patch: { title: string; type: string; assigneeId: string | null; dueDate: string | null; recurrence: TaskRecurrence }) => void;
+  onSaveEdit: (patch: {
+    title: string;
+    typeId: string;
+    assigneeId: string | null;
+    startDate: string | null;
+    dueDate: string | null;
+    recurrence: TaskRecurrence;
+  }) => void;
 }) {
   const due = dueMeta(task, today);
   return (
@@ -505,7 +549,7 @@ function TaskRow({
         onClick={onToggleExpand}
         style={{
           display: "grid",
-          gridTemplateColumns: "2.2fr 1.4fr 1fr 1.3fr 1fr 1fr 1.2fr",
+          gridTemplateColumns: "2fr 1.2fr 1.1fr 1.3fr 0.9fr 0.9fr 0.9fr 1.1fr",
           gap: "8px",
           alignItems: "center",
           padding: "12px 16px",
@@ -514,17 +558,20 @@ function TaskRow({
       >
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{task.title}</div>
         <div style={{ fontSize: "13px", color: "#444441" }}>{task.customerName}</div>
-        <div style={{ fontSize: "12px", color: "#888780" }}>{task.type}</div>
+        <div>
+          <TypeTag type={task.type} />
+        </div>
         <div onClick={(e) => e.stopPropagation()}>
           <StatusPill status={task.status} statuses={statuses} onChange={onStatusChange} />
         </div>
+        <div style={{ fontSize: "12px", color: "#888780" }}>{task.startDate ? formatShort(task.startDate) : "—"}</div>
         <div style={{ fontSize: "12px", fontWeight: 500, color: due.color }}>{due.label}</div>
         <div style={{ fontSize: "12px", color: "#888780" }}>{RECURRENCE_LABELS[task.recurrence]}</div>
         <div style={{ fontSize: "12px", color: "#444441" }}>{task.assigneeName ?? "Unassigned"}</div>
       </div>
       {expanded ? (
         <div onClick={(e) => e.stopPropagation()} style={{ padding: "0 16px 16px" }}>
-          <TaskDetail task={task} staff={staff} onSave={onSaveEdit} />
+          <TaskDetail task={task} staff={staff} taskTypes={taskTypes} onSave={onSaveEdit} />
         </div>
       ) : null}
     </div>
@@ -534,15 +581,25 @@ function TaskRow({
 function TaskDetail({
   task,
   staff,
+  taskTypes,
   onSave,
 }: {
   task: WorkflowTaskView;
   staff: WorkflowSnapshot["staff"];
-  onSave: (patch: { title: string; type: string; assigneeId: string | null; dueDate: string | null; recurrence: TaskRecurrence }) => void;
+  taskTypes: WorkflowTaskType[];
+  onSave: (patch: {
+    title: string;
+    typeId: string;
+    assigneeId: string | null;
+    startDate: string | null;
+    dueDate: string | null;
+    recurrence: TaskRecurrence;
+  }) => void;
 }) {
   const [title, setTitle] = useState(task.title);
-  const [type, setType] = useState(task.type);
+  const [typeId, setTypeId] = useState(task.typeId);
   const [assigneeId, setAssigneeId] = useState(task.assigneeId ?? "");
+  const [startDate, setStartDate] = useState(task.startDate ?? "");
   const [dueDate, setDueDate] = useState(task.dueDate ?? "");
   const [recurrence, setRecurrence] = useState<TaskRecurrence>(task.recurrence);
 
@@ -564,13 +621,13 @@ function TaskDetail({
       </div>
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" style={{ ...inputStyle, flex: 2 }} />
-        <input
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          placeholder="Type"
-          list="task-type-suggestions"
-          style={{ ...inputStyle, flex: 1 }}
-        />
+        <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={inputStyle}>
+          {taskTypes.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={inputStyle}>
           <option value="">Unassigned</option>
           {staff.map((s) => (
@@ -579,7 +636,14 @@ function TaskDetail({
             </option>
           ))}
         </select>
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#888780" }}>
+          Start
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#888780" }}>
+          Due
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+        </label>
         <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as TaskRecurrence)} style={inputStyle}>
           {Object.entries(RECURRENCE_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
@@ -595,8 +659,9 @@ function TaskDetail({
           onClick={() =>
             onSave({
               title: title.trim(),
-              type: type.trim() || "General",
+              typeId,
               assigneeId: assigneeId || null,
+              startDate: startDate || null,
               dueDate: dueDate || null,
               recurrence,
             })
@@ -614,6 +679,7 @@ function AddWorkForm({
   jobs,
   staff,
   statuses,
+  taskTypes,
   onAdd,
   onCancel,
 }: {
@@ -621,6 +687,7 @@ function AddWorkForm({
   jobs: WorkflowJob[];
   staff: WorkflowSnapshot["staff"];
   statuses: WorkflowSnapshot["statuses"];
+  taskTypes: WorkflowTaskType[];
   onAdd: (input: {
     customerId: string;
     newCustomerName: string;
@@ -628,8 +695,9 @@ function AddWorkForm({
     newJobName: string;
     newJobManagerId: string;
     title: string;
-    type: string;
+    typeId: string;
     assigneeId: string | null;
+    startDate: string | null;
     dueDate: string | null;
     recurrence: TaskRecurrence;
     statusId: string;
@@ -642,8 +710,9 @@ function AddWorkForm({
   const [newJobName, setNewJobName] = useState("");
   const [newJobManagerId, setNewJobManagerId] = useState("");
   const [title, setTitle] = useState("");
-  const [type, setType] = useState("");
+  const [typeId, setTypeId] = useState(taskTypes[0]?.id ?? "");
   const [assigneeId, setAssigneeId] = useState("");
+  const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [recurrence, setRecurrence] = useState<TaskRecurrence>("none");
   const [statusId, setStatusId] = useState(statuses.find((s) => !s.isComplete)?.id ?? statuses[0]?.id ?? "");
@@ -656,7 +725,8 @@ function AddWorkForm({
     (isNewCustomer ? newCustomerName.trim().length > 0 : customerId.length > 0) &&
     (isNewJob ? newJobName.trim().length > 0 : jobId.length > 0) &&
     title.trim().length > 0 &&
-    statusId.length > 0;
+    statusId.length > 0 &&
+    typeId.length > 0;
 
   return (
     <div
@@ -730,13 +800,13 @@ function AddWorkForm({
 
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" style={{ ...inputStyle, flex: 2 }} />
-        <input
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          placeholder="Type (e.g. BAS/IAS)"
-          list="task-type-suggestions"
-          style={inputStyle}
-        />
+        <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={inputStyle}>
+          {taskTypes.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={inputStyle}>
           <option value="">Assignee…</option>
           {staff.map((s) => (
@@ -745,7 +815,14 @@ function AddWorkForm({
             </option>
           ))}
         </select>
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#888780" }}>
+          Start
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#888780" }}>
+          Due
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+        </label>
         <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as TaskRecurrence)} style={inputStyle}>
           {Object.entries(RECURRENCE_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
@@ -762,12 +839,6 @@ function AddWorkForm({
         </select>
       </div>
 
-      <datalist id="task-type-suggestions">
-        {TASK_TYPE_SUGGESTIONS.map((s) => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
-
       <div style={{ display: "flex", gap: "8px" }}>
         <button
           type="button"
@@ -781,8 +852,9 @@ function AddWorkForm({
               newJobName: newJobName.trim(),
               newJobManagerId,
               title: title.trim(),
-              type: type.trim() || "General",
+              typeId,
               assigneeId: assigneeId || null,
+              startDate: startDate || null,
               dueDate: dueDate || null,
               recurrence,
               statusId,

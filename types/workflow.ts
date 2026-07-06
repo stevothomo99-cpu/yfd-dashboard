@@ -35,12 +35,22 @@ export interface WorkflowStatus {
   isComplete: boolean;
 }
 
+// Managed list (Admin page), e.g. Bookkeeping / BAS-IAS / Payroll / Tax —
+// replaces the earlier free-text task "type" field.
+export interface WorkflowTaskType {
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+}
+
 export interface WorkflowTask {
   id: string;
   jobId: string;
   title: string;
-  type: string;
+  typeId: string;
   assigneeId: string | null;
+  startDate: string | null;
   dueDate: string | null;
   statusId: string;
   recurrence: TaskRecurrence;
@@ -50,7 +60,7 @@ export interface WorkflowTask {
   updatedAt: string;
 }
 
-// Denormalized view joining job/customer/staff/status — what the UI renders.
+// Denormalized view joining job/customer/staff/status/type — what the UI renders.
 export interface WorkflowTaskView extends WorkflowTask {
   jobName: string;
   customerId: string;
@@ -59,29 +69,19 @@ export interface WorkflowTaskView extends WorkflowTask {
   managerId: string | null;
   assigneeName: string | null;
   status: WorkflowStatus;
+  type: WorkflowTaskType;
 }
 
 export interface CreateTaskInput {
   jobId: string;
   title: string;
-  type: string;
+  typeId: string;
   assigneeId: string | null;
+  startDate: string | null;
   dueDate: string | null;
   statusId: string;
   recurrence: TaskRecurrence;
 }
-
-// Free-text, but these are the common categories staff already use in
-// Karbon/XPM — offered as <datalist> suggestions, not an enforced enum.
-export const TASK_TYPE_SUGGESTIONS = [
-  "Bookkeeping",
-  "BAS/IAS",
-  "Payroll",
-  "Tax",
-  "Advisory",
-  "Month-end close",
-  "General",
-];
 
 export interface CreateJobInput {
   customerId: string;

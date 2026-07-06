@@ -29,17 +29,19 @@ export async function POST(request: Request) {
   const jobId = typeof body.jobId === "string" ? body.jobId : "";
   const title = typeof body.title === "string" ? body.title.trim() : "";
   const statusId = typeof body.statusId === "string" ? body.statusId : "";
-  if (!jobId || !title || !statusId) {
-    return NextResponse.json({ message: "jobId, title and statusId are required." }, { status: 400 });
+  const typeId = typeof body.typeId === "string" ? body.typeId : "";
+  if (!jobId || !title || !statusId || !typeId) {
+    return NextResponse.json({ message: "jobId, title, typeId and statusId are required." }, { status: 400 });
   }
   const recurrence: TaskRecurrence = RECURRENCES.includes(body.recurrence) ? body.recurrence : "none";
   const input: CreateTaskInput = {
     jobId,
     title,
-    type: typeof body.type === "string" && body.type.trim() ? body.type.trim() : "General",
+    typeId,
     statusId,
     recurrence,
     assigneeId: typeof body.assigneeId === "string" ? body.assigneeId : null,
+    startDate: typeof body.startDate === "string" ? body.startDate : null,
     dueDate: typeof body.dueDate === "string" ? body.dueDate : null,
   };
   try {

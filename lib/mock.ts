@@ -4,6 +4,7 @@ import type { XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
 import type {
   WorkflowStaff,
   WorkflowStatus,
+  WorkflowTaskType,
   WorkflowTaskView,
   WorkflowCustomer,
   WorkflowJob,
@@ -401,6 +402,16 @@ export const WORKFLOW_STATUSES: WorkflowStatus[] = [
   { id: "completed", name: "Completed", color: "#1baf7a", sortOrder: 4, isComplete: true },
 ];
 
+export const WORKFLOW_TASK_TYPES: WorkflowTaskType[] = [
+  { id: "bookkeeping", name: "Bookkeeping", color: "#2a78d6", sortOrder: 0 },
+  { id: "bas-ias", name: "BAS/IAS", color: "#9b59b6", sortOrder: 1 },
+  { id: "payroll", name: "Payroll", color: "#eda100", sortOrder: 2 },
+  { id: "tax", name: "Tax", color: "#1baf7a", sortOrder: 3 },
+  { id: "advisory", name: "Advisory", color: "#e24b4a", sortOrder: 4 },
+  { id: "month-end-close", name: "Month-end close", color: "#4ECDC4", sortOrder: 5 },
+  { id: "general", name: "General", color: "#888780", sortOrder: 6 },
+];
+
 const PARTNER_ID = "steve-thompson";
 
 export const WORKFLOW_STAFF: WorkflowStaff[] = [
@@ -456,17 +467,29 @@ function staffNameOf(id: string | null): string | null {
   return WORKFLOW_STAFF.find((s) => s.id === id)?.name ?? null;
 }
 
+function typeIdOf(name: string): string {
+  return WORKFLOW_TASK_TYPES.find((t) => t.name === name)!.id;
+}
+
+function daysBefore(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 let nextWorkflowTaskId = 1;
 function makeWorkflowTask(
   jobId: string,
   title: string,
-  type: string,
+  typeName: string,
   assigneeId: string | null,
   dueDate: string | null,
   statusId: string,
   recurrence: WorkflowTaskView["recurrence"],
+  startDate: string | null = dueDate ? daysBefore(dueDate, 5) : null,
 ): WorkflowTaskView {
   const job = JOB_SEEDS.find((j) => j.id === jobId)!;
+  const typeId = typeIdOf(typeName);
   const now = new Date().toISOString();
   return {
     id: "WT" + nextWorkflowTaskId++,
@@ -477,9 +500,11 @@ function makeWorkflowTask(
     partnerId: PARTNER_ID,
     managerId: job.managerId,
     title,
-    type,
+    typeId,
+    type: WORKFLOW_TASK_TYPES.find((t) => t.id === typeId)!,
     assigneeId,
     assigneeName: staffNameOf(assigneeId),
+    startDate,
     dueDate,
     statusId,
     status: statusOf(statusId),
@@ -495,12 +520,12 @@ export const WORKFLOW_TASKS: WorkflowTaskView[] = [
   makeWorkflowTask("taylor-plumbing-job", "Creditor reconciliation", "Bookkeeping", "ana-cruz", "2026-06-19", "in-progress", "monthly"),
   makeWorkflowTask("harris-cafe-job", "Fixed asset schedule", "Tax", "ana-cruz", "2026-06-17", "waiting-on-client", "quarterly"),
   makeWorkflowTask("mori-imports-job", "Monthly report draft", "Bookkeeping", "ben-tan", "2026-06-16", "in-progress", "monthly"),
-  makeWorkflowTask("mori-imports-job", "Supplier queries", "Bookkeeping", "ben-tan", "2026-06-15", "open", "none"),
+  makeWorkflowTask("mori-imports-job", "Supplier queries", "Bookkeeping", "ben-tan", "2026-06-15", "open", "none", null),
   makeWorkflowTask("taylor-plumbing-job", "BAS lodgement — Taylor", "BAS/IAS", "jay-reyes", "2026-06-22", "with-steve", "quarterly"),
-  makeWorkflowTask("nguyen-retail-job", "Chart of accounts setup", "Bookkeeping", "lia-garcia", "2026-06-17", "open", "none"),
-  makeWorkflowTask("smith-co-job", "Payroll run — Smith", "Payroll", "maria-santos", "2026-06-29", "open", "fortnightly"),
+  makeWorkflowTask("nguyen-retail-job", "Chart of accounts setup", "Bookkeeping", "lia-garcia", "2026-06-17", "open", "none", null),
+  makeWorkflowTask("smith-co-job", "Payroll run — Smith", "Payroll", "maria-santos", "2026-06-29", "open", "fortnightly", null),
   makeWorkflowTask("patel-medical-job", "BAS prep — Patel", "BAS/IAS", "jay-reyes", "2026-06-30", "in-progress", "quarterly"),
-  makeWorkflowTask("smith-co-job", "Year-end review", "Advisory", "maria-santos", "2026-07-03", "open", "none"),
+  makeWorkflowTask("smith-co-job", "Year-end review", "Advisory", "maria-santos", "2026-07-03", "open", "none", null),
   makeWorkflowTask("harris-cafe-job", "Receipt review — Harris", "Bookkeeping", "ana-cruz", "2026-06-26", "completed", "weekly"),
   makeWorkflowTask("patel-medical-job", "Bank rec — Patel", "Bookkeeping", "jay-reyes", "2026-06-25", "completed", "monthly"),
 ];

@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { listStatuses, createStatus, isWorkflowConfigured } from "@/lib/workflow";
-import { WORKFLOW_STATUSES } from "@/lib/mock";
+import { listTaskTypes, createTaskType, isWorkflowConfigured } from "@/lib/workflow";
+import { WORKFLOW_TASK_TYPES } from "@/lib/mock";
 
 export async function GET() {
   if (!isWorkflowConfigured()) {
-    return NextResponse.json({ statuses: WORKFLOW_STATUSES });
+    return NextResponse.json({ taskTypes: WORKFLOW_TASK_TYPES });
   }
   try {
-    const statuses = await listStatuses();
-    return NextResponse.json({ statuses });
+    const taskTypes = await listTaskTypes();
+    return NextResponse.json({ taskTypes });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ statuses: [], message }, { status: 502 });
+    return NextResponse.json({ taskTypes: [], message }, { status: 502 });
   }
 }
 
@@ -24,15 +24,14 @@ export async function POST(request: Request) {
   }
   const body = await request.json();
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!name) return NextResponse.json({ message: "Status name is required." }, { status: 400 });
+  if (!name) return NextResponse.json({ message: "Type name is required." }, { status: 400 });
   try {
-    const status = await createStatus({
+    const taskType = await createTaskType({
       name,
       color: typeof body.color === "string" ? body.color : "#888780",
       sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : 0,
-      isComplete: Boolean(body.isComplete),
     });
-    return NextResponse.json({ status }, { status: 201 });
+    return NextResponse.json({ taskType }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ message }, { status: 502 });
