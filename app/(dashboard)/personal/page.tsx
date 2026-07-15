@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { BusinessKpiTile } from "@/components/dashboard/BusinessKpiTile";
 import { SubscriptionMetricsTile } from "@/components/dashboard/SubscriptionMetricsTile";
 import { SiteMarginMetricsTile } from "@/components/dashboard/SiteMarginMetricsTile";
+import { SearchConsoleMetricsTile } from "@/components/dashboard/SearchConsoleMetricsTile";
+import { AnalyticsMetricsTile } from "@/components/dashboard/AnalyticsMetricsTile";
 import PageHeader from "@/components/dashboard/PageHeader";
 
 interface DealKPIs {
@@ -57,28 +59,72 @@ interface SiteMarginMetrics {
   error?: string;
 }
 
+interface SearchConsoleMetrics {
+  siteMargin: {
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    avgPosition: number;
+    topQueries: Array<{ query: string; clicks: number; impressions: number }>;
+  } | null;
+  focablyED: {
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    avgPosition: number;
+    topQueries: Array<{ query: string; clicks: number; impressions: number }>;
+  } | null;
+  error?: string;
+  lastUpdated: string;
+}
+
+interface AnalyticsMetrics {
+  siteMargin: {
+    sessions: number;
+    users: number;
+    pageviews: number;
+    bounceRate: number;
+  } | null;
+  focablyED: {
+    sessions: number;
+    users: number;
+    pageviews: number;
+    bounceRate: number;
+  } | null;
+  error?: string;
+  lastUpdated: string;
+}
+
 export default function PersonalDashboard() {
   const [kpis, setKpis] = useState<DealKPIs | null>(null);
   const [focablyMetrics, setFocablyMetrics] = useState<FocablyMetrics | null>(null);
   const [siteMarginMetrics, setSiteMarginMetrics] = useState<SiteMarginMetrics | null>(null);
+  const [searchConsoleMetrics, setSearchConsoleMetrics] = useState<SearchConsoleMetrics | null>(null);
+  const [analyticsMetrics, setAnalyticsMetrics] = useState<AnalyticsMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [kpisRes, focablyRes, siteMarginRes] = await Promise.all([
+        const [kpisRes, focablyRes, siteMarginRes, searchConsoleRes, analyticsRes] = await Promise.all([
           fetch("/api/hubspot/deals"),
           fetch("/api/focably/metrics"),
           fetch("/api/sitemargin/metrics"),
+          fetch("/api/google/search-console"),
+          fetch("/api/google/analytics"),
         ]);
 
         const kpisData: DealKPIs = await kpisRes.json();
         const focablyData: FocablyMetrics = await focablyRes.json();
         const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
+        const searchConsoleData: SearchConsoleMetrics = await searchConsoleRes.json();
+        const analyticsData: AnalyticsMetrics = await analyticsRes.json();
 
         setKpis(kpisData);
         setFocablyMetrics(focablyData);
         setSiteMarginMetrics(siteMarginData);
+        setSearchConsoleMetrics(searchConsoleData);
+        setAnalyticsMetrics(analyticsData);
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
         setKpis({
@@ -127,19 +173,25 @@ export default function PersonalDashboard() {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const [kpisRes, focablyRes, siteMarginRes] = await Promise.all([
+      const [kpisRes, focablyRes, siteMarginRes, searchConsoleRes, analyticsRes] = await Promise.all([
         fetch("/api/hubspot/deals", { method: "POST" }),
         fetch("/api/focably/metrics"),
         fetch("/api/sitemargin/metrics"),
+        fetch("/api/google/search-console"),
+        fetch("/api/google/analytics"),
       ]);
 
       const kpisData: DealKPIs = await kpisRes.json();
       const focablyData: FocablyMetrics = await focablyRes.json();
       const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
+      const searchConsoleData: SearchConsoleMetrics = await searchConsoleRes.json();
+      const analyticsData: AnalyticsMetrics = await analyticsRes.json();
 
       setKpis(kpisData);
       setFocablyMetrics(focablyData);
       setSiteMarginMetrics(siteMarginData);
+      setSearchConsoleMetrics(searchConsoleData);
+      setAnalyticsMetrics(analyticsData);
     } catch (err) {
       console.error("Failed to refresh data:", err);
     } finally {
@@ -154,7 +206,7 @@ export default function PersonalDashboard() {
         subtitle="HubSpot pipeline metrics across all products"
       />
 
-      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error) && (
+      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error || searchConsoleMetrics?.error || analyticsMetrics?.error) && (
         <div
           style={{
             fontSize: "12px",
@@ -166,7 +218,7 @@ export default function PersonalDashboard() {
             marginBottom: "14px",
           }}
         >
-          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error}
+          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error || searchConsoleMetrics?.error || analyticsMetrics?.error}
         </div>
       )}
 
@@ -216,6 +268,55 @@ export default function PersonalDashboard() {
               activeDealValue={0}
               wonDealsThisMonth={0}
               avgDaysToClose={0}
+              isLoading={true}
+            />
+          )}
+        </div>
+      </div>
+
+      <div>
+        {/* Web Metrics */}
+        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* SiteMargin Search Console */}
+          {searchConsoleMetrics?.siteMargin ? (
+            <SearchConsoleMetricsTile
+              businessName="SiteMargin"
+              clicks={searchConsoleMetrics.siteMargin.clicks}
+              impressions={searchConsoleMetrics.siteMargin.impressions}
+              ctr={searchConsoleMetrics.siteMargin.ctr}
+              avgPosition={searchConsoleMetrics.siteMargin.avgPosition}
+              topQueries={searchConsoleMetrics.siteMargin.topQueries}
+              isLoading={loading}
+            />
+          ) : (
+            <SearchConsoleMetricsTile
+              businessName="SiteMargin"
+              clicks={0}
+              impressions={0}
+              ctr={0}
+              avgPosition={0}
+              isLoading={true}
+            />
+          )}
+
+          {/* SiteMargin Analytics */}
+          {analyticsMetrics?.siteMargin ? (
+            <AnalyticsMetricsTile
+              businessName="SiteMargin"
+              sessions={analyticsMetrics.siteMargin.sessions}
+              users={analyticsMetrics.siteMargin.users}
+              pageviews={analyticsMetrics.siteMargin.pageviews}
+              bounceRate={analyticsMetrics.siteMargin.bounceRate}
+              isLoading={loading}
+            />
+          ) : (
+            <AnalyticsMetricsTile
+              businessName="SiteMargin"
+              sessions={0}
+              users={0}
+              pageviews={0}
+              bounceRate={0}
               isLoading={true}
             />
           )}
