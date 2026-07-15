@@ -61,27 +61,54 @@ export async function getHubSpotPipelines(): Promise<
 }
 
 export async function getHubSpotDealsByPipeline(
-  pipelineId: string,
-  limit = 100
+  pipelineId: string
 ): Promise<HubSpotDeal[]> {
-  const res = await hubspotFetch<HubSpotDealsResponse>(
-    `/crm/v3/objects/deals?properties=dealname,dealstage,amount,closedate,hs_lastmodifieddate&limit=${limit}&associations=pipelines`,
-    {
-      method: "GET",
-    }
-  );
+  const deals: HubSpotDeal[] = [];
+  let after: string | undefined;
 
-  // Filter by pipeline
-  // Note: may need adjustment based on actual API response structure
-  return res.results;
+  while (true) {
+    const params = new URLSearchParams({
+      properties: "dealname,dealstage,amount,closedate,hs_lastmodifieddate",
+      limit: "100",
+      associations: "pipelines",
+    });
+    if (after) params.append("after", after);
+
+    const res = await hubspotFetch<HubSpotDealsResponse>(
+      `/crm/v3/objects/deals?${params.toString()}`,
+      { method: "GET" }
+    );
+
+    deals.push(...res.results);
+
+    if (!res.paging?.next?.after) break;
+    after = res.paging.next.after;
+  }
+
+  return deals;
 }
 
-export async function getHubSpotDeals(limit = 100): Promise<HubSpotDeal[]> {
-  const res = await hubspotFetch<HubSpotDealsResponse>(
-    `/crm/v3/objects/deals?properties=dealname,dealstage,amount,closedate,hs_lastmodifieddate&limit=${limit}`,
-    {
-      method: "GET",
-    }
-  );
-  return res.results;
+export async function getHubSpotDeals(): Promise<HubSpotDeal[]> {
+  const deals: HubSpotDeal[] = [];
+  let after: string | undefined;
+
+  while (true) {
+    const params = new URLSearchParams({
+      properties: "dealname,dealstage,amount,closedate,hs_lastmodifieddate",
+      limit: "100",
+    });
+    if (after) params.append("after", after);
+
+    const res = await hubspotFetch<HubSpotDealsResponse>(
+      `/crm/v3/objects/deals?${params.toString()}`,
+      { method: "GET" }
+    );
+
+    deals.push(...res.results);
+
+    if (!res.paging?.next?.after) break;
+    after = res.paging.next.after;
+  }
+
+  return deals;
 }

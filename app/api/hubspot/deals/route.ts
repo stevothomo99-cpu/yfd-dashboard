@@ -108,7 +108,7 @@ function calculateMetrics(deals: any[]): PipelineMetrics {
 
 export async function GET(): Promise<NextResponse<ResponseBody>> {
   try {
-    const deals = await getHubSpotDeals(500);
+    const deals = await getHubSpotDeals();
 
     // For now, split deals by some heuristic or custom property
     // TODO: Update once you clarify pipeline IDs
