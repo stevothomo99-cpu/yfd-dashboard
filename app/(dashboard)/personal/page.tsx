@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { BusinessKpiTile } from "@/components/dashboard/BusinessKpiTile";
 import { SubscriptionMetricsTile } from "@/components/dashboard/SubscriptionMetricsTile";
+import { SiteMarginMetricsTile } from "@/components/dashboard/SiteMarginMetricsTile";
 import PageHeader from "@/components/dashboard/PageHeader";
 
 interface DealKPIs {
@@ -38,24 +39,42 @@ interface FocablyMetrics {
   error?: string;
 }
 
+interface SiteMarginMetrics {
+  totalOrganizations: number;
+  activeTrials: number;
+  activeSubscriptions: number;
+  trialConversionRate: number;
+  canceledOrganizations: number;
+  pastDueOrganizations: number;
+  paidChurnThisMonth: number;
+  untrialChurnThisMonth: number;
+  lastUpdated: string;
+  note?: string;
+  error?: string;
+}
+
 export default function PersonalDashboard() {
   const [kpis, setKpis] = useState<DealKPIs | null>(null);
   const [focablyMetrics, setFocablyMetrics] = useState<FocablyMetrics | null>(null);
+  const [siteMarginMetrics, setSiteMarginMetrics] = useState<SiteMarginMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [kpisRes, focablyRes] = await Promise.all([
+        const [kpisRes, focablyRes, siteMarginRes] = await Promise.all([
           fetch("/api/hubspot/deals"),
           fetch("/api/focably/metrics"),
+          fetch("/api/sitemargin/metrics"),
         ]);
 
         const kpisData: DealKPIs = await kpisRes.json();
         const focablyData: FocablyMetrics = await focablyRes.json();
+        const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
 
         setKpis(kpisData);
         setFocablyMetrics(focablyData);
+        setSiteMarginMetrics(siteMarginData);
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
         setKpis({
@@ -77,6 +96,18 @@ export default function PersonalDashboard() {
           lastUpdated: new Date().toISOString(),
           error: "Failed to load Focably metrics",
         });
+        setSiteMarginMetrics({
+          totalOrganizations: 0,
+          activeTrials: 0,
+          activeSubscriptions: 0,
+          trialConversionRate: 0,
+          canceledOrganizations: 0,
+          pastDueOrganizations: 0,
+          paidChurnThisMonth: 0,
+          untrialChurnThisMonth: 0,
+          lastUpdated: new Date().toISOString(),
+          error: "Failed to load SiteMargin metrics",
+        });
       } finally {
         setLoading(false);
       }
@@ -88,16 +119,19 @@ export default function PersonalDashboard() {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const [kpisRes, focablyRes] = await Promise.all([
+      const [kpisRes, focablyRes, siteMarginRes] = await Promise.all([
         fetch("/api/hubspot/deals", { method: "POST" }),
         fetch("/api/focably/metrics"),
+        fetch("/api/sitemargin/metrics"),
       ]);
 
       const kpisData: DealKPIs = await kpisRes.json();
       const focablyData: FocablyMetrics = await focablyRes.json();
+      const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
 
       setKpis(kpisData);
       setFocablyMetrics(focablyData);
+      setSiteMarginMetrics(siteMarginData);
     } catch (err) {
       console.error("Failed to refresh data:", err);
     } finally {
@@ -112,7 +146,7 @@ export default function PersonalDashboard() {
         subtitle="HubSpot pipeline metrics across all products"
       />
 
-      {(kpis?.error || focablyMetrics?.error) && (
+      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error) && (
         <div
           style={{
             fontSize: "12px",
@@ -124,7 +158,7 @@ export default function PersonalDashboard() {
             marginBottom: "14px",
           }}
         >
-          ⚠️ {kpis?.error || focablyMetrics?.error}
+          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error}
         </div>
       )}
 
@@ -210,6 +244,32 @@ export default function PersonalDashboard() {
               isLoading={true}
             />
           )}
+
+          {/* SiteMargin Trial & Subscription Metrics */}
+          {siteMarginMetrics ? (
+            <SiteMarginMetricsTile
+              businessName="SiteMargin"
+              totalOrganizations={siteMarginMetrics.totalOrganizations}
+              activeTrials={siteMarginMetrics.activeTrials}
+              activeSubscriptions={siteMarginMetrics.activeSubscriptions}
+              trialConversionRate={siteMarginMetrics.trialConversionRate}
+              canceledOrganizations={siteMarginMetrics.canceledOrganizations}
+              pastDueOrganizations={siteMarginMetrics.pastDueOrganizations}
+              isLoading={loading}
+              note={siteMarginMetrics.note}
+            />
+          ) : (
+            <SiteMarginMetricsTile
+              businessName="SiteMargin"
+              totalOrganizations={0}
+              activeTrials={0}
+              activeSubscriptions={0}
+              trialConversionRate={0}
+              canceledOrganizations={0}
+              pastDueOrganizations={0}
+              isLoading={true}
+            />
+          )}
         </div>
       </div>
 
@@ -223,9 +283,9 @@ export default function PersonalDashboard() {
         </button>
       </div>
 
-      {(kpis?.lastUpdated || focablyMetrics?.lastUpdated) && (
+      {(kpis?.lastUpdated || focablyMetrics?.lastUpdated || siteMarginMetrics?.lastUpdated) && (
         <p className="text-xs text-gray-500 mt-4">
-          Last updated: {new Date(kpis?.lastUpdated || focablyMetrics?.lastUpdated || "").toLocaleString()}
+          Last updated: {new Date(kpis?.lastUpdated || focablyMetrics?.lastUpdated || siteMarginMetrics?.lastUpdated || "").toLocaleString()}
         </p>
       )}
     </div>
