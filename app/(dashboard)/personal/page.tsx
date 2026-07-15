@@ -4,7 +4,38 @@ import { useEffect, useState } from "react";
 import { BusinessKpiTile } from "@/components/dashboard/BusinessKpiTile";
 import { SubscriptionMetricsTile } from "@/components/dashboard/SubscriptionMetricsTile";
 import { SiteMarginMetricsTile } from "@/components/dashboard/SiteMarginMetricsTile";
+import { SearchConsoleMetricsTile } from "@/components/dashboard/SearchConsoleMetricsTile";
+import { AnalyticsMetricsTile } from "@/components/dashboard/AnalyticsMetricsTile";
 import PageHeader from "@/components/dashboard/PageHeader";
+
+interface SearchConsoleMetrics {
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  avgPosition: number;
+  topQueries: Array<{ query: string; clicks: number; impressions: number }>;
+}
+
+interface SearchConsoleData {
+  siteMargin: SearchConsoleMetrics | null;
+  focablyED: SearchConsoleMetrics | null;
+  error?: string;
+  lastUpdated: string;
+}
+
+interface AnalyticsMetrics {
+  sessions: number;
+  users: number;
+  pageviews: number;
+  bounceRate: number;
+}
+
+interface AnalyticsData {
+  siteMargin: AnalyticsMetrics | null;
+  focablyED: AnalyticsMetrics | null;
+  error?: string;
+  lastUpdated: string;
+}
 
 interface DealKPIs {
   focablyED: {
@@ -57,24 +88,32 @@ export default function PersonalDashboard() {
   const [kpis, setKpis] = useState<DealKPIs | null>(null);
   const [focablyMetrics, setFocablyMetrics] = useState<FocablyMetrics | null>(null);
   const [siteMarginMetrics, setSiteMarginMetrics] = useState<SiteMarginMetrics | null>(null);
+  const [searchConsoleData, setSearchConsoleData] = useState<SearchConsoleData | null>(null);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [kpisRes, focablyRes, siteMarginRes] = await Promise.all([
+        const [kpisRes, focablyRes, siteMarginRes, searchConsoleRes, analyticsRes] = await Promise.all([
           fetch("/api/hubspot/deals"),
           fetch("/api/focably/metrics"),
           fetch("/api/sitemargin/metrics"),
+          fetch("/api/google/search-console"),
+          fetch("/api/google/analytics"),
         ]);
 
         const kpisData: DealKPIs = await kpisRes.json();
         const focablyData: FocablyMetrics = await focablyRes.json();
         const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
+        const searchConsoleResult: SearchConsoleData = await searchConsoleRes.json();
+        const analyticsResult: AnalyticsData = await analyticsRes.json();
 
         setKpis(kpisData);
         setFocablyMetrics(focablyData);
         setSiteMarginMetrics(siteMarginData);
+        setSearchConsoleData(searchConsoleResult);
+        setAnalyticsData(analyticsResult);
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
         setKpis({
@@ -119,19 +158,25 @@ export default function PersonalDashboard() {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const [kpisRes, focablyRes, siteMarginRes] = await Promise.all([
+      const [kpisRes, focablyRes, siteMarginRes, searchConsoleRes, analyticsRes] = await Promise.all([
         fetch("/api/hubspot/deals", { method: "POST" }),
         fetch("/api/focably/metrics"),
         fetch("/api/sitemargin/metrics"),
+        fetch("/api/google/search-console"),
+        fetch("/api/google/analytics"),
       ]);
 
       const kpisData: DealKPIs = await kpisRes.json();
       const focablyData: FocablyMetrics = await focablyRes.json();
       const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
+      const searchConsoleResult: SearchConsoleData = await searchConsoleRes.json();
+      const analyticsResult: AnalyticsData = await analyticsRes.json();
 
       setKpis(kpisData);
       setFocablyMetrics(focablyData);
       setSiteMarginMetrics(siteMarginData);
+      setSearchConsoleData(searchConsoleResult);
+      setAnalyticsData(analyticsResult);
     } catch (err) {
       console.error("Failed to refresh data:", err);
     } finally {
@@ -146,7 +191,7 @@ export default function PersonalDashboard() {
         subtitle="HubSpot pipeline metrics across all products"
       />
 
-      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error) && (
+      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error || searchConsoleData?.error || analyticsData?.error) && (
         <div
           style={{
             fontSize: "12px",
@@ -158,7 +203,7 @@ export default function PersonalDashboard() {
             marginBottom: "14px",
           }}
         >
-          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error}
+          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error || searchConsoleData?.error || analyticsData?.error}
         </div>
       )}
 
@@ -211,6 +256,23 @@ export default function PersonalDashboard() {
               isLoading={true}
             />
           )}
+        </div>
+      </div>
+
+      {/* Web Metrics */}
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics (30d)</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <SearchConsoleMetricsTile
+            data={searchConsoleData?.siteMargin || null}
+            loading={loading}
+            error={searchConsoleData?.error}
+          />
+          <AnalyticsMetricsTile
+            data={analyticsData?.siteMargin || null}
+            loading={loading}
+            error={analyticsData?.error}
+          />
         </div>
       </div>
 
