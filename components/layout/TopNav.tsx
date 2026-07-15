@@ -7,7 +7,8 @@ import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import { initialsOf } from "@/lib/utils";
 
 const navItems = [
-  { label: "Overview", href: "/" },
+  { label: "Business KPIs", href: "/personal" },
+  { label: "Team", href: "/team" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Timesheets", href: "/timesheets" },
   { label: "Karbon Tasks", href: "/tasks" },
