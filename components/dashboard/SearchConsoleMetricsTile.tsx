@@ -1,89 +1,97 @@
 "use client";
 
-interface SearchConsoleMetricsTileProps {
-  businessName: string;
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface SearchConsoleMetricsData {
   clicks: number;
   impressions: number;
   ctr: number;
   avgPosition: number;
-  topQueries?: Array<{ query: string; clicks: number; impressions: number }>;
-  isLoading?: boolean;
+  topQueries: Array<{ query: string; clicks: number; impressions: number }>;
+}
+
+interface SearchConsoleMetricsTileProps {
+  data: SearchConsoleMetricsData | null;
+  loading: boolean;
+  error?: string;
 }
 
 export function SearchConsoleMetricsTile({
-  businessName,
-  clicks,
-  impressions,
-  ctr,
-  avgPosition,
-  topQueries = [],
-  isLoading = false,
+  data,
+  loading,
+  error,
 }: SearchConsoleMetricsTileProps) {
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6 animate-pulse">
-        <div className="h-6 bg-gray-200 rounded w-24 mb-4" />
+      <div className="rounded-lg border bg-card p-6">
+        <h3 className="mb-4 text-lg font-semibold">Search Console</h3>
         <div className="space-y-3">
-          <div className="h-4 bg-gray-200 rounded" />
-          <div className="h-4 bg-gray-200 rounded" />
-          <div className="h-4 bg-gray-200 rounded" />
+          <Skeleton className="h-6 w-24" />
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-6 w-28" />
         </div>
       </div>
     );
   }
 
-  const ctrPercent = (ctr * 100).toFixed(2);
+  if (error || !data) {
+    return (
+      <div className="rounded-lg border bg-card p-6">
+        <h3 className="mb-4 text-lg font-semibold">Search Console</h3>
+        <p className="text-sm text-muted-foreground">
+          {error || "No data available"}
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-6">
-        {businessName} — Search Console
-      </h3>
+    <div className="rounded-lg border bg-card p-6">
+      <h3 className="mb-4 text-lg font-semibold">Search Console</h3>
 
-      <div className="grid grid-cols-2 gap-6 mb-6">
-        {/* Clicks */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Clicks (30d)</p>
-          <p className="text-3xl font-bold text-blue-600">{clicks}</p>
-        </div>
-
-        {/* Impressions */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Impressions (30d)</p>
-          <p className="text-3xl font-bold text-purple-600">{impressions}</p>
-        </div>
-
-        {/* CTR */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Click-Through Rate</p>
-          <p className="text-3xl font-bold text-green-600">{ctrPercent}%</p>
-        </div>
-
-        {/* Avg Position */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Avg Position</p>
-          <p className="text-3xl font-bold text-amber-600">{avgPosition}</p>
-        </div>
-      </div>
-
-      {topQueries.length > 0 && (
-        <div>
-          <p className="text-sm font-semibold text-gray-900 mb-3">
-            Top Search Queries
-          </p>
-          <div className="space-y-2">
-            {topQueries.slice(0, 5).map((q, idx) => (
-              <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-                <p className="text-sm text-gray-700 truncate flex-1 pr-4">{q.query}</p>
-                <div className="flex gap-4 text-right">
-                  <p className="text-sm text-gray-600">{q.clicks} clicks</p>
-                  <p className="text-sm text-gray-500">{q.impressions} impr</p>
-                </div>
-              </div>
-            ))}
+      <div className="space-y-4">
+        {/* Key Metrics */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Clicks</p>
+            <p className="text-2xl font-bold">{data.clicks.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Impressions</p>
+            <p className="text-2xl font-bold">
+              {data.impressions.toLocaleString()}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">CTR</p>
+            <p className="text-2xl font-bold">{(data.ctr * 100).toFixed(2)}%</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Avg Position</p>
+            <p className="text-2xl font-bold">{data.avgPosition.toFixed(1)}</p>
           </div>
         </div>
-      )}
+
+        {/* Top Queries */}
+        {data.topQueries.length > 0 && (
+          <div className="pt-4">
+            <p className="mb-3 text-sm font-semibold">Top Queries</p>
+            <div className="space-y-2">
+              {data.topQueries.slice(0, 5).map((query, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span className="truncate text-muted-foreground">
+                    {query.query}
+                  </span>
+                  <span className="ml-2 font-medium">{query.clicks}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -7,7 +7,6 @@ function getPrivateKey(): string {
     throw new Error("GOOGLE_PRIVATE_KEY_BASE64 environment variable is not set");
   }
 
-  // Decode from base64 (available in Node.js runtime)
   if (typeof Buffer === "undefined") {
     throw new Error("Buffer is not available in this context");
   }
@@ -15,14 +14,18 @@ function getPrivateKey(): string {
   try {
     return Buffer.from(keyBase64, "base64").toString("utf-8");
   } catch (err) {
-    throw new Error(`Failed to decode GOOGLE_PRIVATE_KEY_BASE64: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Failed to decode GOOGLE_PRIVATE_KEY_BASE64: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 
 const GOOGLE_CREDS = {
   project_id: process.env.GOOGLE_PROJECT_ID || "yfd-dashbaord",
   private_key: getPrivateKey(),
-  client_email: process.env.GOOGLE_CLIENT_EMAIL || "yfd-dashboard@yfd-dashbaord.iam.gserviceaccount.com",
+  client_email:
+    process.env.GOOGLE_CLIENT_EMAIL ||
+    "yfd-dashboard@yfd-dashbaord.iam.gserviceaccount.com",
 };
 
 const SCOPES = [
@@ -36,17 +39,25 @@ async function getAccessToken(): Promise<string> {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const token = jwt.sign(
-    {
-      iss: GOOGLE_CREDS.client_email,
-      scope: SCOPES.join(" "),
-      aud: "https://oauth2.googleapis.com/token",
-      exp: now + 3600,
-      iat: now,
-    },
-    GOOGLE_CREDS.private_key,
-    { algorithm: "RS256" }
-  );
+  let token: string;
+  try {
+    token = jwt.sign(
+      {
+        iss: GOOGLE_CREDS.client_email,
+        scope: SCOPES.join(" "),
+        aud: "https://oauth2.googleapis.com/token",
+        exp: now + 3600,
+        iat: now,
+      },
+      GOOGLE_CREDS.private_key,
+      { algorithm: "RS256" }
+    );
+  } catch (err) {
+    const keyPreview = GOOGLE_CREDS.private_key.substring(0, 100);
+    throw new Error(
+      `Failed to sign JWT: ${err instanceof Error ? err.message : String(err)}. Key preview: ${keyPreview}...`
+    );
+  }
 
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -58,7 +69,16 @@ async function getAccessToken(): Promise<string> {
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to get access token: ${res.status}`);
+    let errorDetails = "";
+    try {
+      const errorData = await res.json();
+      errorDetails = JSON.stringify(errorData);
+    } catch {
+      errorDetails = await res.text();
+    }
+    throw new Error(
+      `Failed to get access token: ${res.status}. Response: ${errorDetails}`
+    );
   }
 
   const data = (await res.json()) as { access_token: string };

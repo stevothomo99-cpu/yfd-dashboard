@@ -27,7 +27,7 @@ export async function GET(): Promise<NextResponse<ResponseBody>> {
     );
 
     // TODO: Add FocablyED Search Console metrics once domain is verified
-    // const focablyMetrics = await getSearchConsoleMetrics("https://www.focablyED.com/");
+    // const focablyMetrics = await getSearchConsoleMetrics("sc-domain:focablyed.com");
 
     return NextResponse.json({
       siteMargin: siteMarginMetrics,

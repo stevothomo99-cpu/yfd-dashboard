@@ -1,70 +1,97 @@
 "use client";
 
-interface AnalyticsMetricsTileProps {
-  businessName: string;
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface AnalyticsMetricsData {
   sessions: number;
   users: number;
   pageviews: number;
   bounceRate: number;
-  isLoading?: boolean;
+}
+
+interface AnalyticsMetricsTileProps {
+  data: AnalyticsMetricsData | null;
+  loading: boolean;
+  error?: string;
 }
 
 export function AnalyticsMetricsTile({
-  businessName,
-  sessions,
-  users,
-  pageviews,
-  bounceRate,
-  isLoading = false,
+  data,
+  loading,
+  error,
 }: AnalyticsMetricsTileProps) {
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6 animate-pulse">
-        <div className="h-6 bg-gray-200 rounded w-24 mb-4" />
+      <div className="rounded-lg border bg-card p-6">
+        <h3 className="mb-4 text-lg font-semibold">Analytics (30d)</h3>
         <div className="space-y-3">
-          <div className="h-4 bg-gray-200 rounded" />
-          <div className="h-4 bg-gray-200 rounded" />
-          <div className="h-4 bg-gray-200 rounded" />
+          <Skeleton className="h-6 w-24" />
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-6 w-28" />
         </div>
       </div>
     );
   }
 
-  const sessionPerUser = users > 0 ? (sessions / users).toFixed(2) : "0";
-  const pageviewsPerSession = sessions > 0 ? (pageviews / sessions).toFixed(2) : "0";
-  const bounceRatePercent = (bounceRate || 0).toFixed(1);
+  if (error || !data) {
+    return (
+      <div className="rounded-lg border bg-card p-6">
+        <h3 className="mb-4 text-lg font-semibold">Analytics (30d)</h3>
+        <p className="text-sm text-muted-foreground">
+          {error || "No data available"}
+        </p>
+      </div>
+    );
+  }
+
+  const sessionsPerUser =
+    data.users > 0 ? (data.sessions / data.users).toFixed(2) : "0";
+  const pageviewsPerSession =
+    data.sessions > 0 ? (data.pageviews / data.sessions).toFixed(2) : "0";
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-6">
-        {businessName} — Google Analytics
-      </h3>
+    <div className="rounded-lg border bg-card p-6">
+      <h3 className="mb-4 text-lg font-semibold">Analytics (30d)</h3>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* Sessions */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Sessions (30d)</p>
-          <p className="text-3xl font-bold text-blue-600">{sessions}</p>
+      <div className="space-y-4">
+        {/* Key Metrics */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Sessions</p>
+            <p className="text-2xl font-bold">
+              {data.sessions.toLocaleString()}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Users</p>
+            <p className="text-2xl font-bold">{data.users.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Pageviews</p>
+            <p className="text-2xl font-bold">
+              {data.pageviews.toLocaleString()}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Bounce Rate</p>
+            <p className="text-2xl font-bold">
+              {(data.bounceRate * 100).toFixed(1)}%
+            </p>
+          </div>
         </div>
 
-        {/* Users */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Users (30d)</p>
-          <p className="text-3xl font-bold text-green-600">{users}</p>
-          <p className="text-xs text-gray-500 mt-1">{sessionPerUser} sessions/user</p>
-        </div>
-
-        {/* Pageviews */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Pageviews (30d)</p>
-          <p className="text-3xl font-bold text-purple-600">{pageviews}</p>
-          <p className="text-xs text-gray-500 mt-1">{pageviewsPerSession} per session</p>
-        </div>
-
-        {/* Bounce Rate */}
-        <div>
-          <p className="text-sm text-gray-600 mb-1">Bounce Rate</p>
-          <p className="text-3xl font-bold text-amber-600">{bounceRatePercent}%</p>
+        {/* Derived Metrics */}
+        <div className="border-t pt-4">
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground">Sessions/User</p>
+              <p className="font-semibold">{sessionsPerUser}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Pageviews/Session</p>
+              <p className="font-semibold">{pageviewsPerSession}</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
