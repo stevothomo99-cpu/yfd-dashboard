@@ -32,11 +32,15 @@ export async function GET(): Promise<NextResponse<ResponseBody>> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[Analytics API Error]", message);
+    if (err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
     return NextResponse.json(
       {
         siteMargin: null,
         focablyED: null,
-        error: message,
+        error: `Analytics API error: ${message}`,
         lastUpdated: new Date().toISOString(),
       },
       { status: 502 }
