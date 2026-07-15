@@ -1,16 +1,22 @@
 import jwt from "jsonwebtoken";
 
 function getPrivateKey(): string {
-  const keyBase64 = process.env.GOOGLE_PRIVATE_KEY_BASE64 || "";
+  const keyBase64 = process.env.GOOGLE_PRIVATE_KEY_BASE64;
+
   if (!keyBase64) {
-    const keyPem = process.env.GOOGLE_PRIVATE_KEY || "";
-    if (keyPem) {
-      return keyPem.replace(/\\n/g, "\n");
-    }
-    return "";
+    throw new Error("GOOGLE_PRIVATE_KEY_BASE64 environment variable is not set");
   }
-  // Decode from base64
-  return Buffer.from(keyBase64, "base64").toString("utf-8");
+
+  // Decode from base64 (available in Node.js runtime)
+  if (typeof Buffer === "undefined") {
+    throw new Error("Buffer is not available in this context");
+  }
+
+  try {
+    return Buffer.from(keyBase64, "base64").toString("utf-8");
+  } catch (err) {
+    throw new Error(`Failed to decode GOOGLE_PRIVATE_KEY_BASE64: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 const GOOGLE_CREDS = {
