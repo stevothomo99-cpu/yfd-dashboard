@@ -39,17 +39,25 @@ async function getAccessToken(): Promise<string> {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const token = jwt.sign(
-    {
-      iss: GOOGLE_CREDS.client_email,
-      scope: SCOPES.join(" "),
-      aud: "https://oauth2.googleapis.com/token",
-      exp: now + 3600,
-      iat: now,
-    },
-    GOOGLE_CREDS.private_key,
-    { algorithm: "RS256" }
-  );
+  let token: string;
+  try {
+    token = jwt.sign(
+      {
+        iss: GOOGLE_CREDS.client_email,
+        scope: SCOPES.join(" "),
+        aud: "https://oauth2.googleapis.com/token",
+        exp: now + 3600,
+        iat: now,
+      },
+      GOOGLE_CREDS.private_key,
+      { algorithm: "RS256" }
+    );
+  } catch (err) {
+    const keyPreview = GOOGLE_CREDS.private_key.substring(0, 100);
+    throw new Error(
+      `Failed to sign JWT: ${err instanceof Error ? err.message : String(err)}. Key preview: ${keyPreview}...`
+    );
+  }
 
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
