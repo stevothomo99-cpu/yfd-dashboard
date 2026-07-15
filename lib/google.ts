@@ -1,8 +1,21 @@
 import jwt from "jsonwebtoken";
 
+function getPrivateKey(): string {
+  const keyBase64 = process.env.GOOGLE_PRIVATE_KEY_BASE64 || "";
+  if (!keyBase64) {
+    const keyPem = process.env.GOOGLE_PRIVATE_KEY || "";
+    if (keyPem) {
+      return keyPem.replace(/\\n/g, "\n");
+    }
+    return "";
+  }
+  // Decode from base64
+  return Buffer.from(keyBase64, "base64").toString("utf-8");
+}
+
 const GOOGLE_CREDS = {
   project_id: process.env.GOOGLE_PROJECT_ID || "yfd-dashbaord",
-  private_key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+  private_key: getPrivateKey(),
   client_email: process.env.GOOGLE_CLIENT_EMAIL || "yfd-dashboard@yfd-dashbaord.iam.gserviceaccount.com",
 };
 
