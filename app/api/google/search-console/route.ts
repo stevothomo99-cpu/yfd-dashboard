@@ -23,7 +23,7 @@ interface ResponseBody {
 export async function GET(): Promise<NextResponse<ResponseBody>> {
   try {
     const siteMarginMetrics = await getSearchConsoleMetrics(
-      "https://www.sitemargin.com.au/"
+      "sc-domain:sitemargin.com.au"
     );
 
     // TODO: Add FocablyED Search Console metrics once domain is verified
