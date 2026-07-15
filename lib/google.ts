@@ -69,7 +69,16 @@ async function getAccessToken(): Promise<string> {
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to get access token: ${res.status}`);
+    let errorDetails = "";
+    try {
+      const errorData = await res.json();
+      errorDetails = JSON.stringify(errorData);
+    } catch {
+      errorDetails = await res.text();
+    }
+    throw new Error(
+      `Failed to get access token: ${res.status}. Response: ${errorDetails}`
+    );
   }
 
   const data = (await res.json()) as { access_token: string };
