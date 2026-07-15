@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { BusinessKpiTile } from "@/components/dashboard/BusinessKpiTile";
 import { SubscriptionMetricsTile } from "@/components/dashboard/SubscriptionMetricsTile";
 import { SiteMarginMetricsTile } from "@/components/dashboard/SiteMarginMetricsTile";
-import { SearchConsoleMetricsTile } from "@/components/dashboard/SearchConsoleMetricsTile";
-import { AnalyticsMetricsTile } from "@/components/dashboard/AnalyticsMetricsTile";
+import { WebMetricsTile } from "@/components/dashboard/WebMetricsTile";
 import PageHeader from "@/components/dashboard/PageHeader";
 
 interface SearchConsoleMetrics {
@@ -16,13 +15,6 @@ interface SearchConsoleMetrics {
   topQueries: Array<{ query: string; clicks: number; impressions: number }>;
 }
 
-interface SearchConsoleData {
-  siteMargin: SearchConsoleMetrics | null;
-  focablyED: SearchConsoleMetrics | null;
-  error?: string;
-  lastUpdated: string;
-}
-
 interface AnalyticsMetrics {
   sessions: number;
   users: number;
@@ -30,11 +22,9 @@ interface AnalyticsMetrics {
   bounceRate: number;
 }
 
-interface AnalyticsData {
-  siteMargin: AnalyticsMetrics | null;
-  focablyED: AnalyticsMetrics | null;
-  error?: string;
-  lastUpdated: string;
+interface WebMetricsData {
+  searchConsole: SearchConsoleMetrics | null;
+  analytics: AnalyticsMetrics | null;
 }
 
 interface DealKPIs {
@@ -88,8 +78,8 @@ export default function PersonalDashboard() {
   const [kpis, setKpis] = useState<DealKPIs | null>(null);
   const [focablyMetrics, setFocablyMetrics] = useState<FocablyMetrics | null>(null);
   const [siteMarginMetrics, setSiteMarginMetrics] = useState<SiteMarginMetrics | null>(null);
-  const [searchConsoleData, setSearchConsoleData] = useState<SearchConsoleData | null>(null);
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [siteMarginWeb, setSiteMarginWeb] = useState<WebMetricsData | null>(null);
+  const [focablyWeb, setFocablyWeb] = useState<WebMetricsData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -106,14 +96,20 @@ export default function PersonalDashboard() {
         const kpisData: DealKPIs = await kpisRes.json();
         const focablyData: FocablyMetrics = await focablyRes.json();
         const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
-        const searchConsoleResult: SearchConsoleData = await searchConsoleRes.json();
-        const analyticsResult: AnalyticsData = await analyticsRes.json();
+        const searchConsoleData = await searchConsoleRes.json();
+        const analyticsData = await analyticsRes.json();
 
         setKpis(kpisData);
         setFocablyMetrics(focablyData);
         setSiteMarginMetrics(siteMarginData);
-        setSearchConsoleData(searchConsoleResult);
-        setAnalyticsData(analyticsResult);
+        setSiteMarginWeb({
+          searchConsole: searchConsoleData.siteMargin,
+          analytics: analyticsData.siteMargin,
+        });
+        setFocablyWeb({
+          searchConsole: searchConsoleData.focablyED,
+          analytics: analyticsData.focablyED,
+        });
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
         setKpis({
@@ -169,14 +165,20 @@ export default function PersonalDashboard() {
       const kpisData: DealKPIs = await kpisRes.json();
       const focablyData: FocablyMetrics = await focablyRes.json();
       const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
-      const searchConsoleResult: SearchConsoleData = await searchConsoleRes.json();
-      const analyticsResult: AnalyticsData = await analyticsRes.json();
+      const searchConsoleData = await searchConsoleRes.json();
+      const analyticsData = await analyticsRes.json();
 
       setKpis(kpisData);
       setFocablyMetrics(focablyData);
       setSiteMarginMetrics(siteMarginData);
-      setSearchConsoleData(searchConsoleResult);
-      setAnalyticsData(analyticsResult);
+      setSiteMarginWeb({
+        searchConsole: searchConsoleData.siteMargin,
+        analytics: analyticsData.siteMargin,
+      });
+      setFocablyWeb({
+        searchConsole: searchConsoleData.focablyED,
+        analytics: analyticsData.focablyED,
+      });
     } catch (err) {
       console.error("Failed to refresh data:", err);
     } finally {
@@ -191,7 +193,7 @@ export default function PersonalDashboard() {
         subtitle="HubSpot pipeline metrics across all products"
       />
 
-      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error || searchConsoleData?.error || analyticsData?.error) && (
+      {(kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error) && (
         <div
           style={{
             fontSize: "12px",
@@ -203,7 +205,7 @@ export default function PersonalDashboard() {
             marginBottom: "14px",
           }}
         >
-          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error || searchConsoleData?.error || analyticsData?.error}
+          ⚠️ {kpis?.error || focablyMetrics?.error || siteMarginMetrics?.error}
         </div>
       )}
 
@@ -263,15 +265,17 @@ export default function PersonalDashboard() {
       <div>
         <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics (30d)</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <SearchConsoleMetricsTile
-            data={searchConsoleData?.siteMargin || null}
+          <WebMetricsTile
+            productName="SiteMargin"
+            data={siteMarginWeb}
             loading={loading}
-            error={searchConsoleData?.error}
+            error={siteMarginWeb?.searchConsole === null ? "Search Console not connected" : undefined}
           />
-          <AnalyticsMetricsTile
-            data={analyticsData?.siteMargin || null}
+          <WebMetricsTile
+            productName="FocablyED"
+            data={focablyWeb}
             loading={loading}
-            error={analyticsData?.error}
+            error={focablyWeb?.searchConsole === null ? "Not yet configured" : undefined}
           />
         </div>
       </div>
