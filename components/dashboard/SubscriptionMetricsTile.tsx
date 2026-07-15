@@ -9,6 +9,8 @@ interface SubscriptionMetricsTileProps {
   totalChurnThisMonth: number;
   churnRate: number;
   winBackCandidates: number;
+  currentMonthMRR?: number;
+  currentMonthARR?: number;
   isLoading?: boolean;
 }
 
@@ -21,6 +23,8 @@ export function SubscriptionMetricsTile({
   totalChurnThisMonth,
   churnRate,
   winBackCandidates,
+  currentMonthMRR = 0,
+  currentMonthARR = 0,
   isLoading = false,
 }: SubscriptionMetricsTileProps) {
   if (isLoading) {
@@ -39,6 +43,14 @@ export function SubscriptionMetricsTile({
   const conversionRate =
     totalUsers > 0 ? ((paidUsers / totalUsers) * 100).toFixed(1) : "0";
   const retentionRate = totalUsers > 0 ? (((totalUsers - nonActiveUsers) / totalUsers) * 100).toFixed(1) : "0";
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat("en-AU", {
+      style: "currency",
+      currency: "AUD",
+      minimumFractionDigits: 0,
+    }).format(val);
+  };
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
@@ -83,6 +95,18 @@ export function SubscriptionMetricsTile({
         <div>
           <p className="text-sm text-gray-600 mb-1">Monthly Churn Rate</p>
           <p className="text-3xl font-bold text-red-700">{churnRate}%</p>
+        </div>
+
+        {/* Current Month MRR */}
+        <div>
+          <p className="text-sm text-gray-600 mb-1">Current Month MRR</p>
+          <p className="text-3xl font-bold text-teal-600">{formatCurrency(currentMonthMRR)}</p>
+        </div>
+
+        {/* Current Month ARR */}
+        <div>
+          <p className="text-sm text-gray-600 mb-1">Current Month ARR</p>
+          <p className="text-3xl font-bold text-cyan-600">{formatCurrency(currentMonthARR)}</p>
         </div>
 
         {/* Win-Back Candidates */}

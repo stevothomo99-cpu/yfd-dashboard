@@ -35,6 +35,8 @@ interface FocablyMetrics {
   totalChurnThisMonth: number;
   churnRate: number;
   winBackCandidates: number;
+  currentMonthMRR: number;
+  currentMonthARR: number;
   lastUpdated: string;
   error?: string;
 }
@@ -48,6 +50,8 @@ interface SiteMarginMetrics {
   pastDueOrganizations: number;
   paidChurnThisMonth: number;
   untrialChurnThisMonth: number;
+  currentMonthMRR: number;
+  currentMonthARR: number;
   lastUpdated: string;
   note?: string;
   error?: string;
@@ -93,6 +97,8 @@ export default function PersonalDashboard() {
           totalChurnThisMonth: 0,
           churnRate: 0,
           winBackCandidates: 0,
+          currentMonthMRR: 0,
+          currentMonthARR: 0,
           lastUpdated: new Date().toISOString(),
           error: "Failed to load Focably metrics",
         });
@@ -105,6 +111,8 @@ export default function PersonalDashboard() {
           pastDueOrganizations: 0,
           paidChurnThisMonth: 0,
           untrialChurnThisMonth: 0,
+          currentMonthMRR: 0,
+          currentMonthARR: 0,
           lastUpdated: new Date().toISOString(),
           error: "Failed to load SiteMargin metrics",
         });
@@ -217,7 +225,7 @@ export default function PersonalDashboard() {
       <div>
         {/* Subscription Metrics */}
         <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">User & Churn Metrics</h2>
-        <div className="grid grid-cols-1 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* FocablyED Subscription Metrics */}
           {focablyMetrics ? (
             <SubscriptionMetricsTile
@@ -229,6 +237,8 @@ export default function PersonalDashboard() {
               totalChurnThisMonth={focablyMetrics.totalChurnThisMonth}
               churnRate={focablyMetrics.churnRate}
               winBackCandidates={focablyMetrics.winBackCandidates}
+              currentMonthMRR={focablyMetrics.currentMonthMRR}
+              currentMonthARR={focablyMetrics.currentMonthARR}
               isLoading={loading}
             />
           ) : (
@@ -241,6 +251,8 @@ export default function PersonalDashboard() {
               totalChurnThisMonth={0}
               churnRate={0}
               winBackCandidates={0}
+              currentMonthMRR={0}
+              currentMonthARR={0}
               isLoading={true}
             />
           )}
@@ -255,6 +267,8 @@ export default function PersonalDashboard() {
               trialConversionRate={siteMarginMetrics.trialConversionRate}
               canceledOrganizations={siteMarginMetrics.canceledOrganizations}
               pastDueOrganizations={siteMarginMetrics.pastDueOrganizations}
+              currentMonthMRR={siteMarginMetrics.currentMonthMRR}
+              currentMonthARR={siteMarginMetrics.currentMonthARR}
               isLoading={loading}
               note={siteMarginMetrics.note}
             />
@@ -267,6 +281,8 @@ export default function PersonalDashboard() {
               trialConversionRate={0}
               canceledOrganizations={0}
               pastDueOrganizations={0}
+              currentMonthMRR={0}
+              currentMonthARR={0}
               isLoading={true}
             />
           )}

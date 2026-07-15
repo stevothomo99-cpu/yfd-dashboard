@@ -31,6 +31,8 @@ export interface FocablyMetrics {
   totalChurnThisMonth: number;
   churnRate: number;
   winBackCandidates: number;
+  currentMonthMRR: number;
+  currentMonthARR: number;
 }
 
 export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
@@ -94,6 +96,11 @@ export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
     // For accuracy, you'd need to calculate: churners ÷ families_paying_at_month_start
     const churnRate = (paidUsers || 0) > 0 ? (paidChurnThisMonth / (paidUsers || 1)) * 100 : 0;
 
+    // TODO: Calculate MRR and ARR from subscription pricing data
+    // Need to query: families with subscription_status='pro' and their subscription amounts
+    const currentMonthMRR = 0;
+    const currentMonthARR = currentMonthMRR * 12;
+
     return {
       totalUsers: totalUsers || 0,
       paidUsers: paidUsers || 0,
@@ -104,6 +111,8 @@ export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
       totalChurnThisMonth,
       churnRate: Math.round(churnRate * 100) / 100,
       winBackCandidates: winBackCandidates || 0,
+      currentMonthMRR,
+      currentMonthARR,
     };
   } catch (error) {
     console.error("Error fetching Focably metrics:", error);

@@ -30,6 +30,8 @@ export interface SiteMarginMetrics {
   pastDueOrganizations: number;
   paidChurnThisMonth: number;
   untrialChurnThisMonth: number;
+  currentMonthMRR: number;
+  currentMonthARR: number;
 }
 
 export async function getSiteMarginSubscriptionMetrics(): Promise<SiteMarginMetrics> {
@@ -105,6 +107,11 @@ export async function getSiteMarginSubscriptionMetrics(): Promise<SiteMarginMetr
       .eq("event_type", "trial_expired")
       .gte("occurred_at", monthAgo.toISOString());
 
+    // TODO: Calculate MRR and ARR from subscription pricing data
+    // Need to query: organisations with subscription_status='active' and their subscription amounts
+    const currentMonthMRR = 0;
+    const currentMonthARR = currentMonthMRR * 12;
+
     return {
       totalOrganizations: totalOrganizations || 0,
       activeTrials: activeTrials || 0,
@@ -114,6 +121,8 @@ export async function getSiteMarginSubscriptionMetrics(): Promise<SiteMarginMetr
       pastDueOrganizations: pastDueOrganizations || 0,
       paidChurnThisMonth: paidChurnData?.length || 0,
       untrialChurnThisMonth: untrialChurnData?.length || 0,
+      currentMonthMRR,
+      currentMonthARR,
     };
   } catch (error) {
     console.error("Error fetching SiteMargin metrics:", error);

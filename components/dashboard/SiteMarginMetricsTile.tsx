@@ -8,6 +8,8 @@ interface SiteMarginMetricsTileProps {
   trialConversionRate: number;
   canceledOrganizations: number;
   pastDueOrganizations: number;
+  currentMonthMRR?: number;
+  currentMonthARR?: number;
   isLoading?: boolean;
   note?: string;
 }
@@ -20,6 +22,8 @@ export function SiteMarginMetricsTile({
   trialConversionRate,
   canceledOrganizations,
   pastDueOrganizations,
+  currentMonthMRR = 0,
+  currentMonthARR = 0,
   isLoading = false,
   note,
 }: SiteMarginMetricsTileProps) {
@@ -35,6 +39,14 @@ export function SiteMarginMetricsTile({
       </div>
     );
   }
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat("en-AU", {
+      style: "currency",
+      currency: "AUD",
+      minimumFractionDigits: 0,
+    }).format(val);
+  };
 
   const activeRate =
     totalOrganizations > 0
@@ -89,6 +101,18 @@ export function SiteMarginMetricsTile({
         <div>
           <p className="text-sm text-gray-600 mb-1">Past Due</p>
           <p className="text-3xl font-bold text-orange-600">{pastDueOrganizations}</p>
+        </div>
+
+        {/* Current Month MRR */}
+        <div>
+          <p className="text-sm text-gray-600 mb-1">Current Month MRR</p>
+          <p className="text-3xl font-bold text-teal-600">{formatCurrency(currentMonthMRR)}</p>
+        </div>
+
+        {/* Current Month ARR */}
+        <div>
+          <p className="text-sm text-gray-600 mb-1">Current Month ARR</p>
+          <p className="text-3xl font-bold text-cyan-600">{formatCurrency(currentMonthARR)}</p>
         </div>
 
         {/* Active Rate */}
