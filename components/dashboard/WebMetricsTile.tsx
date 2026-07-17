@@ -100,17 +100,17 @@ export function WebMetricsTile({
     <div className="rounded-lg border bg-card p-6">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold">{productName}</h3>
-        <div className="flex gap-1">
+        <div className="flex gap-2">
           {(["24h", "week", "month"] as const).map((p) => (
             <button
               key={p}
               onClick={() => handlePeriodChange(p)}
               disabled={changingPeriod || loading}
-              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
                 period === p
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              } disabled:opacity-50`}
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                  : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
+              } disabled:opacity-50 cursor-pointer`}
             >
               {p}
             </button>
