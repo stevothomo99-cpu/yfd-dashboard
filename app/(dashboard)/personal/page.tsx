@@ -95,6 +95,7 @@ export default function PersonalDashboard() {
   const [siteMarginWeb, setSiteMarginWeb] = useState<WebMetricsData | null>(null);
   const [focablyWeb, setFocablyWeb] = useState<WebMetricsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [webMetricsPeriod, setWebMetricsPeriod] = useState<"24h" | "7d" | "30d">("30d");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -183,6 +184,8 @@ export default function PersonalDashboard() {
   };
 
   const handleWebMetricsPeriodChange = async (days: number) => {
+    const periodLabel = days === 1 ? "24h" : days === 7 ? "7d" : "30d";
+    setWebMetricsPeriod(periodLabel as "24h" | "7d" | "30d");
     try {
       const [searchConsoleRes, analyticsRes] = await Promise.all([
         fetch(`/api/google/search-console?days=${days}`),
@@ -304,7 +307,7 @@ export default function PersonalDashboard() {
 
       {/* Web Metrics */}
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics (30d)</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics ({webMetricsPeriod})</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <WebMetricsTile
             productName="SiteMargin"
