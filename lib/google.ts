@@ -94,11 +94,13 @@ export interface SearchConsoleMetrics {
 }
 
 export async function getSearchConsoleMetrics(
-  siteUrl: string
+  siteUrl: string,
+  options?: { days?: number }
 ): Promise<SearchConsoleMetrics> {
   const accessToken = await getAccessToken();
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const days = options?.days ?? 30;
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
 
   const res = await fetch(
     "https://www.googleapis.com/webmasters/v3/sites/" +
@@ -111,7 +113,7 @@ export async function getSearchConsoleMetrics(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        startDate: thirtyDaysAgo.toISOString().split("T")[0],
+        startDate: startDate.toISOString().split("T")[0],
         endDate: new Date().toISOString().split("T")[0],
         dimensions: ["query"],
         rowLimit: 10,
@@ -176,11 +178,13 @@ export interface AnalyticsMetrics {
 }
 
 export async function getAnalyticsMetrics(
-  propertyId: string
+  propertyId: string,
+  options?: { days?: number }
 ): Promise<AnalyticsMetrics> {
   const accessToken = await getAccessToken();
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const days = options?.days ?? 30;
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
 
   const res = await fetch(
     "https://analyticsdata.googleapis.com/v1beta/properties/" +
@@ -195,7 +199,7 @@ export async function getAnalyticsMetrics(
       body: JSON.stringify({
         dateRanges: [
           {
-            startDate: thirtyDaysAgo.toISOString().split("T")[0],
+            startDate: startDate.toISOString().split("T")[0],
             endDate: new Date().toISOString().split("T")[0],
           },
         ],

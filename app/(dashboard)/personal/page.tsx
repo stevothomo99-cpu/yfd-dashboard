@@ -182,6 +182,29 @@ export default function PersonalDashboard() {
     }
   };
 
+  const handleWebMetricsPeriodChange = async (days: number) => {
+    try {
+      const [searchConsoleRes, analyticsRes] = await Promise.all([
+        fetch(`/api/google/search-console?days=${days}`),
+        fetch(`/api/google/analytics?days=${days}`),
+      ]);
+
+      const searchConsoleData = await searchConsoleRes.json();
+      const analyticsData = await analyticsRes.json();
+
+      setSiteMarginWeb({
+        searchConsole: searchConsoleData.siteMargin,
+        analytics: analyticsData.siteMargin,
+      });
+      setFocablyWeb({
+        searchConsole: searchConsoleData.focablyED,
+        analytics: analyticsData.focablyED,
+      });
+    } catch (err) {
+      console.error("Failed to fetch web metrics for period:", err);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -288,12 +311,14 @@ export default function PersonalDashboard() {
             data={siteMarginWeb}
             loading={loading}
             error={siteMarginWeb?.searchConsole === null ? "Search Console not connected" : undefined}
+            onPeriodChange={handleWebMetricsPeriodChange}
           />
           <WebMetricsTile
             productName="FocablyED"
             data={focablyWeb}
             loading={loading}
             error={focablyWeb?.searchConsole === null ? "Not yet configured" : undefined}
+            onPeriodChange={handleWebMetricsPeriodChange}
           />
         </div>
       </div>

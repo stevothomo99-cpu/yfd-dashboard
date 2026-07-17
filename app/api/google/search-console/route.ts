@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { getSearchConsoleMetrics } from "@/lib/google";
 
 interface ResponseBody {
@@ -20,10 +20,15 @@ interface ResponseBody {
   lastUpdated: string;
 }
 
-export async function GET(): Promise<NextResponse<ResponseBody>> {
+export async function GET(request: NextRequest): Promise<NextResponse<ResponseBody>> {
   try {
+    const days = request.nextUrl.searchParams.get("days")
+      ? parseInt(request.nextUrl.searchParams.get("days")!)
+      : 30;
+
     const siteMarginMetrics = await getSearchConsoleMetrics(
-      "sc-domain:sitemargin.com.au"
+      "sc-domain:sitemargin.com.au",
+      { days }
     );
 
     // TODO: Add FocablyED Search Console metrics once domain is verified

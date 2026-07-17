@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface SearchConsoleMetrics {
@@ -27,14 +28,44 @@ interface WebMetricsTileProps {
   data: WebMetricsData | null;
   loading: boolean;
   error?: string;
+  onPeriodChange?: (days: number) => Promise<void>;
 }
+
+type TimePeriod = "24h" | "week" | "month";
 
 export function WebMetricsTile({
   productName,
   data,
   loading,
   error,
+  onPeriodChange,
 }: WebMetricsTileProps) {
+  const [period, setPeriod] = useState<TimePeriod>("month");
+  const [changingPeriod, setChangingPeriod] = useState(false);
+
+  const periodDays = {
+    "24h": 1,
+    "week": 7,
+    "month": 30,
+  };
+
+  const handlePeriodChange = async (newPeriod: TimePeriod) => {
+    setPeriod(newPeriod);
+    if (onPeriodChange) {
+      setChangingPeriod(true);
+      try {
+        await onPeriodChange(periodDays[newPeriod]);
+      } finally {
+        setChangingPeriod(false);
+      }
+    }
+  };
+
+  const periodLabels = {
+    "24h": "24h",
+    "week": "7d",
+    "month": "30d",
+  };
   if (loading) {
     return (
       <div className="rounded-lg border bg-card p-6">
@@ -67,13 +98,31 @@ export function WebMetricsTile({
 
   return (
     <div className="rounded-lg border bg-card p-6">
-      <h3 className="mb-6 text-lg font-semibold">{productName}</h3>
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-lg font-semibold">{productName}</h3>
+        <div className="flex gap-1">
+          {(["24h", "week", "month"] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => handlePeriodChange(p)}
+              disabled={changingPeriod || loading}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                period === p
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              } disabled:opacity-50`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-8">
         {/* Search Console */}
         <div>
           <h4 className="mb-4 text-sm font-semibold text-muted-foreground">
-            Search Console (30d)
+            Search Console ({periodLabels[period]})
           </h4>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -122,7 +171,7 @@ export function WebMetricsTile({
         {/* Analytics */}
         <div>
           <h4 className="mb-4 text-sm font-semibold text-muted-foreground">
-            Analytics (30d)
+            Analytics ({periodLabels[period]})
           </h4>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
