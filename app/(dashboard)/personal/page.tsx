@@ -6,36 +6,6 @@ import { SubscriptionMetricsTile } from "@/components/dashboard/SubscriptionMetr
 import { SiteMarginMetricsTile } from "@/components/dashboard/SiteMarginMetricsTile";
 import { WebMetricsTile } from "@/components/dashboard/WebMetricsTile";
 import PageHeader from "@/components/dashboard/PageHeader";
-import type { ChurnRange } from "@/lib/utils";
-
-const CHURN_RANGE_LABELS: Record<ChurnRange, string> = {
-  all: "All Time",
-  "12m": "Last 12 Months",
-  fy: "Financial Year",
-  month: "This Month",
-  week: "This Week",
-  "24h": "Last 24 Hours",
-};
-
-interface SearchConsoleMetrics {
-  clicks: number;
-  impressions: number;
-  ctr: number;
-  avgPosition: number;
-  topQueries: Array<{ query: string; clicks: number; impressions: number }>;
-}
-
-interface AnalyticsMetrics {
-  sessions: number;
-  users: number;
-  pageviews: number;
-  bounceRate: number;
-}
-
-interface WebMetricsData {
-  searchConsole: SearchConsoleMetrics | null;
-  analytics: AnalyticsMetrics | null;
-}
 
 interface XeroSalesMetrics {
   monthTotal: number;
@@ -69,81 +39,24 @@ interface DealKPIs {
   lastUpdated: string;
 }
 
-interface FocablyMetrics {
-  totalUsers: number;
-  paidUsers: number;
-  freemiumUsers: number;
-  nonActiveUsers: number;
-  paidChurnInPeriod: number;
-  unpaidChurnInPeriod: number;
-  totalChurnInPeriod: number;
-  churnRate: number;
-  winBackCandidates: number;
-  lastUpdated: string;
-  error?: string;
-}
-
-interface SiteMarginMetrics {
-  totalOrganizations: number;
-  activeTrials: number;
-  activeSubscriptions: number;
-  trialConversionRate: number;
-  canceledOrganizations: number;
-  pastDueOrganizations: number;
-  paidChurnInPeriod: number;
-  untrialChurnInPeriod: number;
-  lastUpdated: string;
-  note?: string;
-  error?: string;
-}
-
 export default function PersonalDashboard() {
   const [kpis, setKpis] = useState<DealKPIs | null>(null);
-  const [focablyMetrics, setFocablyMetrics] = useState<FocablyMetrics | null>(null);
-  const [siteMarginMetrics, setSiteMarginMetrics] = useState<SiteMarginMetrics | null>(null);
   const [xeroSales, setXeroSales] = useState<XeroSalesMetrics | null>(null);
-  const [siteMarginWeb, setSiteMarginWeb] = useState<WebMetricsData | null>(null);
-  const [focablyWeb, setFocablyWeb] = useState<WebMetricsData | null>(null);
-  const [yfdWeb, setYfdWeb] = useState<WebMetricsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [webMetricsPeriod, setWebMetricsPeriod] = useState<"24h" | "7d" | "30d">("30d");
-  const [churnRange, setChurnRange] = useState<ChurnRange>("month");
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [kpisRes, focablyRes, siteMarginRes, xeroRes, searchConsoleRes, analyticsRes] = await Promise.all([
+        const [kpisRes, xeroRes] = await Promise.all([
           fetch("/api/hubspot/deals"),
-          fetch(`/api/focably/metrics?range=${churnRange}`),
-          fetch(`/api/sitemargin/metrics?range=${churnRange}`),
           fetch("/api/xpm/sales"),
-          fetch("/api/google/search-console"),
-          fetch("/api/google/analytics"),
         ]);
 
         const kpisData: DealKPIs = await kpisRes.json();
-        const focablyData: FocablyMetrics = await focablyRes.json();
-        const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
         const xeroData: XeroSalesMetrics = await xeroRes.json();
-        const searchConsoleData = await searchConsoleRes.json();
-        const analyticsData = await analyticsRes.json();
 
         setKpis(kpisData);
-        setFocablyMetrics(focablyData);
-        setSiteMarginMetrics(siteMarginData);
         setXeroSales(xeroData);
-        setSiteMarginWeb({
-          searchConsole: searchConsoleData.siteMargin,
-          analytics: analyticsData.siteMargin,
-        });
-        setFocablyWeb({
-          searchConsole: searchConsoleData.focablyED,
-          analytics: analyticsData.focablyED,
-        });
-        setYfdWeb({
-          searchConsole: searchConsoleData.yfd,
-          analytics: analyticsData.yfd,
-        });
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
         setKpis({
@@ -164,89 +77,20 @@ export default function PersonalDashboard() {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      const [kpisRes, focablyRes, siteMarginRes, xeroRes, searchConsoleRes, analyticsRes] = await Promise.all([
+      const [kpisRes, xeroRes] = await Promise.all([
         fetch("/api/hubspot/deals", { method: "POST" }),
-        fetch(`/api/focably/metrics?range=${churnRange}`),
-        fetch(`/api/sitemargin/metrics?range=${churnRange}`),
         fetch("/api/xpm/sales", { method: "POST" }),
-        fetch("/api/google/search-console"),
-        fetch("/api/google/analytics"),
       ]);
 
       const kpisData: DealKPIs = await kpisRes.json();
-      const focablyData: FocablyMetrics = await focablyRes.json();
-      const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
       const xeroData: XeroSalesMetrics = await xeroRes.json();
-      const searchConsoleData = await searchConsoleRes.json();
-      const analyticsData = await analyticsRes.json();
 
       setKpis(kpisData);
-      setFocablyMetrics(focablyData);
-      setSiteMarginMetrics(siteMarginData);
       setXeroSales(xeroData);
-      setSiteMarginWeb({
-        searchConsole: searchConsoleData.siteMargin,
-        analytics: analyticsData.siteMargin,
-      });
-      setFocablyWeb({
-        searchConsole: searchConsoleData.focablyED,
-        analytics: analyticsData.focablyED,
-      });
-      setYfdWeb({
-        searchConsole: searchConsoleData.yfd,
-        analytics: analyticsData.yfd,
-      });
     } catch (err) {
       console.error("Failed to refresh data:", err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleWebMetricsPeriodChange = async (days: number) => {
-    const periodLabel = days === 1 ? "24h" : days === 7 ? "7d" : "30d";
-    setWebMetricsPeriod(periodLabel as "24h" | "7d" | "30d");
-    try {
-      const [searchConsoleRes, analyticsRes] = await Promise.all([
-        fetch(`/api/google/search-console?days=${days}`),
-        fetch(`/api/google/analytics?days=${days}`),
-      ]);
-
-      const searchConsoleData = await searchConsoleRes.json();
-      const analyticsData = await analyticsRes.json();
-
-      setSiteMarginWeb({
-        searchConsole: searchConsoleData.siteMargin,
-        analytics: analyticsData.siteMargin,
-      });
-      setFocablyWeb({
-        searchConsole: searchConsoleData.focablyED,
-        analytics: analyticsData.focablyED,
-      });
-      setYfdWeb({
-        searchConsole: searchConsoleData.yfd,
-        analytics: analyticsData.yfd,
-      });
-    } catch (err) {
-      console.error("Failed to fetch web metrics for period:", err);
-    }
-  };
-
-  const handleChurnRangeChange = async (range: ChurnRange) => {
-    setChurnRange(range);
-    try {
-      const [focablyRes, siteMarginRes] = await Promise.all([
-        fetch(`/api/focably/metrics?range=${range}`),
-        fetch(`/api/sitemargin/metrics?range=${range}`),
-      ]);
-
-      const focablyData: FocablyMetrics = await focablyRes.json();
-      const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
-
-      setFocablyMetrics(focablyData);
-      setSiteMarginMetrics(siteMarginData);
-    } catch (err) {
-      console.error("Failed to fetch churn metrics for range:", err);
     }
   };
 
@@ -349,109 +193,22 @@ export default function PersonalDashboard() {
 
       {/* Web Metrics */}
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics ({webMetricsPeriod})</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <WebMetricsTile
-            productName="SiteMargin"
-            data={siteMarginWeb}
-            loading={loading}
-            error={siteMarginWeb?.searchConsole === null ? "Search Console not connected" : undefined}
-            onPeriodChange={handleWebMetricsPeriodChange}
-          />
-          <WebMetricsTile
-            productName="FocablyED"
-            data={focablyWeb}
-            loading={loading}
-            error={focablyWeb?.searchConsole === null ? "Not yet configured" : undefined}
-            onPeriodChange={handleWebMetricsPeriodChange}
-          />
-          <WebMetricsTile
-            productName="YFD"
-            data={yfdWeb}
-            loading={loading}
-            error={yfdWeb?.searchConsole === null ? "Not yet configured" : undefined}
-            onPeriodChange={handleWebMetricsPeriodChange}
-          />
+          <WebMetricsTile productKey="siteMargin" productName="SiteMargin" />
+          <WebMetricsTile productKey="focablyED" productName="FocablyED" />
+          <WebMetricsTile productKey="yfd" productName="YFD" />
         </div>
       </div>
 
       <div>
         {/* Subscription Metrics */}
-        <div className="flex items-center justify-between mb-4 mt-8">
-          <h2 className="text-xl font-semibold text-gray-900">
-            User & Churn Metrics ({CHURN_RANGE_LABELS[churnRange]})
-          </h2>
-          <div className="flex gap-2">
-            {(["all", "12m", "fy", "month", "week", "24h"] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => handleChurnRangeChange(r)}
-                disabled={loading}
-                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
-                  churnRange === r
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                    : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
-                } disabled:opacity-50 cursor-pointer`}
-              >
-                {CHURN_RANGE_LABELS[r]}
-              </button>
-            ))}
-          </div>
-        </div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">
+          User & Churn Metrics
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {/* FocablyED Subscription Metrics */}
-          {focablyMetrics ? (
-            <SubscriptionMetricsTile
-              businessName="FocablyED"
-              totalUsers={focablyMetrics.totalUsers}
-              paidUsers={focablyMetrics.paidUsers}
-              freemiumUsers={focablyMetrics.freemiumUsers}
-              nonActiveUsers={focablyMetrics.nonActiveUsers}
-              totalChurnInPeriod={focablyMetrics.totalChurnInPeriod}
-              churnRate={focablyMetrics.churnRate}
-              winBackCandidates={focablyMetrics.winBackCandidates}
-              isLoading={loading}
-              periodLabel={CHURN_RANGE_LABELS[churnRange]}
-            />
-          ) : (
-            <SubscriptionMetricsTile
-              businessName="FocablyED"
-              totalUsers={0}
-              paidUsers={0}
-              freemiumUsers={0}
-              nonActiveUsers={0}
-              totalChurnInPeriod={0}
-              churnRate={0}
-              winBackCandidates={0}
-              isLoading={true}
-            />
-          )}
-
-          {/* SiteMargin Trial & Subscription Metrics */}
-          {siteMarginMetrics ? (
-            <SiteMarginMetricsTile
-              businessName="SiteMargin"
-              totalOrganizations={siteMarginMetrics.totalOrganizations}
-              activeTrials={siteMarginMetrics.activeTrials}
-              activeSubscriptions={siteMarginMetrics.activeSubscriptions}
-              trialConversionRate={siteMarginMetrics.trialConversionRate}
-              canceledOrganizations={siteMarginMetrics.canceledOrganizations}
-              pastDueOrganizations={siteMarginMetrics.pastDueOrganizations}
-              isLoading={loading}
-              note={siteMarginMetrics.note}
-            />
-          ) : (
-            <SiteMarginMetricsTile
-              businessName="SiteMargin"
-              totalOrganizations={0}
-              activeTrials={0}
-              activeSubscriptions={0}
-              trialConversionRate={0}
-              canceledOrganizations={0}
-              pastDueOrganizations={0}
-              isLoading={true}
-            />
-          )}
+          <SubscriptionMetricsTile businessName="FocablyED" />
+          <SiteMarginMetricsTile businessName="SiteMargin" />
         </div>
       </div>
 
@@ -465,9 +222,9 @@ export default function PersonalDashboard() {
         </button>
       </div>
 
-      {(kpis?.lastUpdated || focablyMetrics?.lastUpdated || siteMarginMetrics?.lastUpdated) && (
+      {kpis?.lastUpdated && (
         <p className="text-xs text-gray-500 mt-4">
-          Last updated: {new Date(kpis?.lastUpdated || focablyMetrics?.lastUpdated || siteMarginMetrics?.lastUpdated || "").toLocaleString()}
+          Last updated: {new Date(kpis.lastUpdated).toLocaleString()}
         </p>
       )}
     </div>

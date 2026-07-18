@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface SearchConsoleMetrics {
@@ -18,58 +18,103 @@ interface AnalyticsMetrics {
   bounceRate: number;
 }
 
-interface WebMetricsData {
-  searchConsole: SearchConsoleMetrics | null;
-  analytics: AnalyticsMetrics | null;
-}
+type ProductKey = "siteMargin" | "focablyED" | "yfd";
 
 interface WebMetricsTileProps {
+  productKey: ProductKey;
   productName: string;
-  data: WebMetricsData | null;
-  loading: boolean;
-  error?: string;
-  onPeriodChange?: (days: number) => Promise<void>;
 }
 
 type TimePeriod = "24h" | "week" | "month";
 
-export function WebMetricsTile({
-  productName,
-  data,
-  loading,
-  error,
-  onPeriodChange,
-}: WebMetricsTileProps) {
+const periodDays: Record<TimePeriod, number> = {
+  "24h": 1,
+  week: 7,
+  month: 30,
+};
+
+const periodLabels: Record<TimePeriod, string> = {
+  "24h": "24h",
+  week: "7d",
+  month: "30d",
+};
+
+export function WebMetricsTile({ productKey, productName }: WebMetricsTileProps) {
   const [period, setPeriod] = useState<TimePeriod>("month");
-  const [changingPeriod, setChangingPeriod] = useState(false);
+  const [searchConsole, setSearchConsole] = useState<SearchConsoleMetrics | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | undefined>(undefined);
 
-  const periodDays = {
-    "24h": 1,
-    "week": 7,
-    "month": 30,
-  };
+  useEffect(() => {
+    let cancelled = false;
 
-  const handlePeriodChange = async (newPeriod: TimePeriod) => {
-    setPeriod(newPeriod);
-    if (onPeriodChange) {
-      setChangingPeriod(true);
+    const fetchData = async () => {
+      setLoading(true);
       try {
-        await onPeriodChange(periodDays[newPeriod]);
+        const days = periodDays[period];
+        const [searchConsoleRes, analyticsRes] = await Promise.all([
+          fetch(`/api/google/search-console?days=${days}`),
+          fetch(`/api/google/analytics?days=${days}`),
+        ]);
+
+        const searchConsoleJson = await searchConsoleRes.json();
+        const analyticsJson = await analyticsRes.json();
+
+        if (cancelled) return;
+
+        const sc = searchConsoleJson[productKey] ?? null;
+        const an = analyticsJson[productKey] ?? null;
+
+        setSearchConsole(sc);
+        setAnalytics(an);
+        setErrorMsg(sc === null || an === null ? "Not yet configured" : undefined);
+      } catch (err) {
+        if (cancelled) return;
+        console.error(`Failed to fetch web metrics for ${productKey}:`, err);
+        setErrorMsg("Not yet configured");
       } finally {
-        setChangingPeriod(false);
+        if (!cancelled) setLoading(false);
       }
-    }
+    };
+
+    fetchData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [productKey, period]);
+
+  const handlePeriodChange = (newPeriod: TimePeriod) => {
+    setPeriod(newPeriod);
   };
 
-  const periodLabels = {
-    "24h": "24h",
-    "week": "7d",
-    "month": "30d",
-  };
+  const header = (
+    <div className="flex items-center justify-between mb-6">
+      <h3 className="text-lg font-semibold">{productName}</h3>
+      <div className="flex gap-2">
+        {(["24h", "week", "month"] as const).map((p) => (
+          <button
+            key={p}
+            onClick={() => handlePeriodChange(p)}
+            disabled={loading}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+              period === p
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
+            } disabled:opacity-50 cursor-pointer`}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="rounded-lg border bg-card p-6">
-        <h3 className="mb-4 text-lg font-semibold">{productName}</h3>
+        {header}
         <div className="space-y-3">
           <Skeleton className="h-6 w-24" />
           <Skeleton className="h-6 w-32" />
@@ -79,44 +124,26 @@ export function WebMetricsTile({
     );
   }
 
-  if (error || !data?.searchConsole || !data?.analytics) {
+  if (errorMsg || !searchConsole || !analytics) {
     return (
       <div className="rounded-lg border bg-card p-6">
-        <h3 className="mb-4 text-lg font-semibold">{productName}</h3>
+        {header}
         <p className="text-sm text-muted-foreground">
-          {error || "No data available"}
+          {errorMsg || "No data available"}
         </p>
       </div>
     );
   }
 
-  const sc = data.searchConsole;
-  const an = data.analytics;
+  const sc = searchConsole;
+  const an = analytics;
   const sessionsPerUser = an.users > 0 ? (an.sessions / an.users).toFixed(2) : "0";
   const pageviewsPerSession =
     an.sessions > 0 ? (an.pageviews / an.sessions).toFixed(2) : "0";
 
   return (
     <div className="rounded-lg border bg-card p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold">{productName}</h3>
-        <div className="flex gap-2">
-          {(["24h", "week", "month"] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => handlePeriodChange(p)}
-              disabled={changingPeriod || loading}
-              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
-                period === p
-                  ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                  : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
-              } disabled:opacity-50 cursor-pointer`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
+      {header}
 
       <div className="grid grid-cols-2 gap-8">
         {/* Search Console */}

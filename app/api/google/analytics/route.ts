@@ -30,11 +30,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
       ? parseInt(request.nextUrl.searchParams.get("days")!)
       : 30;
 
-    const siteMarginMetrics = await getAnalyticsMetrics("544627080", { days });
+    const siteMarginMetrics = await getAnalyticsMetrics(
+      process.env.SITEMARGIN_GA4_PROPERTY_ID || "544627080",
+      { days }
+    );
 
     let focablyMetrics = null;
     try {
-      focablyMetrics = await getAnalyticsMetrics("546068683", { days });
+      focablyMetrics = await getAnalyticsMetrics(
+        process.env.FOCABLYED_GA4_PROPERTY_ID || "546068683",
+        { days }
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error("[Analytics API Error] FocablyED", message);
@@ -42,9 +48,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
 
     let yfdMetrics = null;
     if (process.env.YFD_GA4_PROPERTY_ID) {
-      yfdMetrics = await getAnalyticsMetrics(process.env.YFD_GA4_PROPERTY_ID, {
-        days,
-      });
+      try {
+        yfdMetrics = await getAnalyticsMetrics(process.env.YFD_GA4_PROPERTY_ID, {
+          days,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        console.error("[Analytics API Error] YFD", message);
+      }
     }
 
     return NextResponse.json({

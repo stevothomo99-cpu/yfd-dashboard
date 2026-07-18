@@ -1,35 +1,94 @@
 "use client";
 
-interface SubscriptionMetricsTileProps {
-  businessName: string;
+import { useEffect, useState } from "react";
+import type { ChurnRange } from "@/lib/utils";
+
+const CHURN_RANGE_LABELS: Record<ChurnRange, string> = {
+  all: "All Time",
+  "12m": "Last 12 Months",
+  fy: "Financial Year",
+  month: "This Month",
+  week: "This Week",
+  "24h": "Last 24 Hours",
+};
+
+interface FocablyMetrics {
   totalUsers: number;
   paidUsers: number;
   freemiumUsers: number;
   nonActiveUsers: number;
+  paidChurnInPeriod: number;
+  unpaidChurnInPeriod: number;
   totalChurnInPeriod: number;
   churnRate: number;
   winBackCandidates: number;
   currentMonthMRR?: number;
   currentMonthARR?: number;
-  isLoading?: boolean;
-  periodLabel?: string;
+  lastUpdated: string;
+  error?: string;
 }
 
-export function SubscriptionMetricsTile({
-  businessName,
-  totalUsers,
-  paidUsers,
-  freemiumUsers,
-  nonActiveUsers,
-  totalChurnInPeriod,
-  churnRate,
-  winBackCandidates,
-  currentMonthMRR = 0,
-  currentMonthARR = 0,
-  isLoading = false,
-  periodLabel = "This Month",
-}: SubscriptionMetricsTileProps) {
-  if (isLoading) {
+interface SubscriptionMetricsTileProps {
+  businessName: string;
+}
+
+export function SubscriptionMetricsTile({ businessName }: SubscriptionMetricsTileProps) {
+  const [range, setRange] = useState<ChurnRange>("month");
+  const [metrics, setMetrics] = useState<FocablyMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/focably/metrics?range=${range}`);
+        const data: FocablyMetrics = await res.json();
+        if (!cancelled) setMetrics(data);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to fetch FocablyED subscription metrics:", err);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  const periodLabel = CHURN_RANGE_LABELS[range];
+
+  const header = (
+    <div className="flex items-center justify-between mb-6">
+      <h3 className="text-lg font-semibold text-gray-900">
+        {businessName} — Users & Churn
+      </h3>
+      <div className="flex gap-2">
+        {(["all", "12m", "fy", "month", "week", "24h"] as const).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRange(r)}
+            disabled={loading}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+              range === r
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
+            } disabled:opacity-50 cursor-pointer`}
+          >
+            {CHURN_RANGE_LABELS[r]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (loading) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6 animate-pulse">
         <div className="h-6 bg-gray-200 rounded w-24 mb-4" />
@@ -41,6 +100,28 @@ export function SubscriptionMetricsTile({
       </div>
     );
   }
+
+  if (!metrics) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        {header}
+        <p className="text-sm text-gray-600">No data available</p>
+      </div>
+    );
+  }
+
+  const {
+    totalUsers,
+    paidUsers,
+    freemiumUsers,
+    nonActiveUsers,
+    totalChurnInPeriod,
+    churnRate,
+    winBackCandidates,
+    currentMonthMRR = 0,
+    currentMonthARR = 0,
+    error,
+  } = metrics;
 
   const conversionRate =
     totalUsers > 0 ? ((paidUsers / totalUsers) * 100).toFixed(1) : "0";
@@ -56,9 +137,13 @@ export function SubscriptionMetricsTile({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-6">
-        {businessName} — Users & Churn
-      </h3>
+      {header}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded px-3 py-2 mb-4 text-xs text-red-700">
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-6">
         {/* Total Users */}

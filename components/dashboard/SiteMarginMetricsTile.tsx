@@ -1,33 +1,92 @@
 "use client";
 
-interface SiteMarginMetricsTileProps {
-  businessName: string;
+import { useEffect, useState } from "react";
+import type { ChurnRange } from "@/lib/utils";
+
+const CHURN_RANGE_LABELS: Record<ChurnRange, string> = {
+  all: "All Time",
+  "12m": "Last 12 Months",
+  fy: "Financial Year",
+  month: "This Month",
+  week: "This Week",
+  "24h": "Last 24 Hours",
+};
+
+interface SiteMarginMetrics {
   totalOrganizations: number;
   activeTrials: number;
   activeSubscriptions: number;
   trialConversionRate: number;
   canceledOrganizations: number;
   pastDueOrganizations: number;
+  paidChurnInPeriod: number;
+  untrialChurnInPeriod: number;
   currentMonthMRR?: number;
   currentMonthARR?: number;
-  isLoading?: boolean;
+  lastUpdated: string;
   note?: string;
+  error?: string;
 }
 
-export function SiteMarginMetricsTile({
-  businessName,
-  totalOrganizations,
-  activeTrials,
-  activeSubscriptions,
-  trialConversionRate,
-  canceledOrganizations,
-  pastDueOrganizations,
-  currentMonthMRR = 0,
-  currentMonthARR = 0,
-  isLoading = false,
-  note,
-}: SiteMarginMetricsTileProps) {
-  if (isLoading) {
+interface SiteMarginMetricsTileProps {
+  businessName: string;
+}
+
+export function SiteMarginMetricsTile({ businessName }: SiteMarginMetricsTileProps) {
+  const [range, setRange] = useState<ChurnRange>("month");
+  const [metrics, setMetrics] = useState<SiteMarginMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/sitemargin/metrics?range=${range}`);
+        const data: SiteMarginMetrics = await res.json();
+        if (!cancelled) setMetrics(data);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to fetch SiteMargin subscription metrics:", err);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  const header = (
+    <div className="flex items-center justify-between mb-6">
+      <h3 className="text-lg font-semibold text-gray-900">
+        {businessName} — Trial & Subscription
+      </h3>
+      <div className="flex gap-2">
+        {(["all", "12m", "fy", "month", "week", "24h"] as const).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRange(r)}
+            disabled={loading}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+              range === r
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
+            } disabled:opacity-50 cursor-pointer`}
+          >
+            {CHURN_RANGE_LABELS[r]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (loading) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6 animate-pulse">
         <div className="h-6 bg-gray-200 rounded w-24 mb-4" />
@@ -39,6 +98,27 @@ export function SiteMarginMetricsTile({
       </div>
     );
   }
+
+  if (!metrics) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        {header}
+        <p className="text-sm text-gray-600">No data available</p>
+      </div>
+    );
+  }
+
+  const {
+    totalOrganizations,
+    activeTrials,
+    activeSubscriptions,
+    trialConversionRate,
+    canceledOrganizations,
+    pastDueOrganizations,
+    currentMonthMRR = 0,
+    currentMonthARR = 0,
+    note,
+  } = metrics;
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("en-AU", {
@@ -55,9 +135,7 @@ export function SiteMarginMetricsTile({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-6">
-        {businessName} — Trial & Subscription
-      </h3>
+      {header}
 
       {note && (
         <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 mb-4 text-xs text-blue-700">
