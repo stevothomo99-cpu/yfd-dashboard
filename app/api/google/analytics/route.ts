@@ -14,6 +14,12 @@ interface ResponseBody {
     pageviews: number;
     bounceRate: number;
   } | null;
+  yfd: {
+    sessions: number;
+    users: number;
+    pageviews: number;
+    bounceRate: number;
+  } | null;
   error?: string;
   lastUpdated: string;
 }
@@ -29,9 +35,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
     // TODO: Add FocablyED analytics once GA4 property ID is confirmed
     // const focablyMetrics = await getAnalyticsMetrics("FOCABLY_GA4_PROPERTY_ID");
 
+    let yfdMetrics = null;
+    if (process.env.YFD_GA4_PROPERTY_ID) {
+      yfdMetrics = await getAnalyticsMetrics(process.env.YFD_GA4_PROPERTY_ID, {
+        days,
+      });
+    }
+
     return NextResponse.json({
       siteMargin: siteMarginMetrics,
       focablyED: null,
+      yfd: yfdMetrics,
       lastUpdated: new Date().toISOString(),
     });
   } catch (err) {
@@ -44,6 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
       {
         siteMargin: null,
         focablyED: null,
+        yfd: null,
         error: `Analytics API error: ${message}`,
         lastUpdated: new Date().toISOString(),
       },

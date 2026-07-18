@@ -94,6 +94,7 @@ export default function PersonalDashboard() {
   const [xeroSales, setXeroSales] = useState<XeroSalesMetrics | null>(null);
   const [siteMarginWeb, setSiteMarginWeb] = useState<WebMetricsData | null>(null);
   const [focablyWeb, setFocablyWeb] = useState<WebMetricsData | null>(null);
+  const [yfdWeb, setYfdWeb] = useState<WebMetricsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [webMetricsPeriod, setWebMetricsPeriod] = useState<"24h" | "7d" | "30d">("30d");
 
@@ -127,6 +128,10 @@ export default function PersonalDashboard() {
         setFocablyWeb({
           searchConsole: searchConsoleData.focablyED,
           analytics: analyticsData.focablyED,
+        });
+        setYfdWeb({
+          searchConsole: searchConsoleData.yfd,
+          analytics: analyticsData.yfd,
         });
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
@@ -176,6 +181,10 @@ export default function PersonalDashboard() {
         searchConsole: searchConsoleData.focablyED,
         analytics: analyticsData.focablyED,
       });
+      setYfdWeb({
+        searchConsole: searchConsoleData.yfd,
+        analytics: analyticsData.yfd,
+      });
     } catch (err) {
       console.error("Failed to refresh data:", err);
     } finally {
@@ -202,6 +211,10 @@ export default function PersonalDashboard() {
       setFocablyWeb({
         searchConsole: searchConsoleData.focablyED,
         analytics: analyticsData.focablyED,
+      });
+      setYfdWeb({
+        searchConsole: searchConsoleData.yfd,
+        analytics: analyticsData.yfd,
       });
     } catch (err) {
       console.error("Failed to fetch web metrics for period:", err);
@@ -308,7 +321,7 @@ export default function PersonalDashboard() {
       {/* Web Metrics */}
       <div>
         <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">Web Metrics ({webMetricsPeriod})</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <WebMetricsTile
             productName="SiteMargin"
             data={siteMarginWeb}
@@ -321,6 +334,13 @@ export default function PersonalDashboard() {
             data={focablyWeb}
             loading={loading}
             error={focablyWeb?.searchConsole === null ? "Not yet configured" : undefined}
+            onPeriodChange={handleWebMetricsPeriodChange}
+          />
+          <WebMetricsTile
+            productName="YFD"
+            data={yfdWeb}
+            loading={loading}
+            error={yfdWeb?.searchConsole === null ? "Not yet configured" : undefined}
             onPeriodChange={handleWebMetricsPeriodChange}
           />
         </div>
