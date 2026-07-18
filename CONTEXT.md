@@ -114,26 +114,24 @@ Key components: `components/dashboard/WebMetricsTile.tsx` (unified Search Consol
 
 ---
 
-## 7. Known Gap — Multi-user auth is NOT fully wired yet
+## 7. Multi-user auth — now wired end to end
 
-**This is the most important thing for the next session to know.**
+The dashboard supports two authentication paths through a single NextAuth `Credentials` provider (`auth.ts`), both landing on the same session shape:
 
-The real dashboard login (`/login` → NextAuth `Credentials` provider in `auth.ts`) still only checks a **single** hardcoded pair: `process.env.AUTH_USERNAME` / `AUTH_PASSWORD`, compared with a constant-time hash check. It does not query Supabase at all.
+1. **CEO env-based login** (original setup) — `process.env.AUTH_USERNAME` / `AUTH_PASSWORD`, constant-time compared. Returns `{ id: "ceo", name, role: "admin" }`.
+2. **Supabase-backed users** — any row in the `dashboard_users` table (in the **`yfd-workflow`** Supabase project, id `xbjxrvqydcbwldnrexqu` — reused deliberately to avoid paying for a second project). `authorize()` looks the submitted value up by `username` then by `email` (via `getSupabaseAdmin()`, which uses the service role key and bypasses RLS for this internal lookup), then verifies the password with `supabaseClient.auth.signInWithPassword`. Returns `{ id, name: username, email, role }` from the `dashboard_users` row.
 
-Separately, we built a **parallel, not-yet-connected** system:
-- `lib/supabase.ts` — client using `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (pointed at the existing **`yfd-workflow`** Supabase project, id `xbjxrvqydcbwldnrexqu` — chosen specifically to avoid paying for a second Supabase project)
-- `dashboard_users` table (migration in `migrations/001_create_dashboard_users.sql`) — `id`, `email`, `username`, `role` (`admin`|`user`), RLS enabled, already created in that project
-- `POST/GET /api/admin/users` — creates a Supabase Auth user + a `dashboard_users` row
-- `POST /api/auth/login` — a **separate, unused** login endpoint that calls `supabaseClient.auth.signInWithPassword` and sets its own `auth-token` cookie
-- `/settings/users` UI page — lets the CEO add users with a role, backed by the above
+Both paths flow through the same `jwt`/`session` callbacks in `auth.config.ts`, which carry `role` (`"admin" | "user"`) onto the session (see `types/next-auth.d.ts` for the module augmentation — note the `JWT` interface has to be augmented against `@auth/core/jwt`, not `next-auth/jwt`, since that's where next-auth's re-export actually originates; augmenting the wrong module silently no-ops and `token.role` falls back to `unknown` via the `Record<string, unknown>` base the real interface extends).
 
-**The disconnect:** creating a user via `/settings/users` puts them in Supabase and the `dashboard_users` table, but the actual `/login` page has no idea Supabase exists — it will still reject anyone who isn't `AUTH_USERNAME`/`AUTH_PASSWORD`. So adding Kim (kim@focablyed.com) via the settings UI does **not** currently let her sign into the dashboard.
+`app/(dashboard)/page.tsx`'s root redirect now checks `session.user.role === "admin"` (not an exact username match), so **any** admin `dashboard_users` row lands on `/personal` exactly like the CEO account does.
 
-**What's needed to finish this** (pick up here next):
-1. Either (a) add a second `Credentials` provider entry / rewrite `auth.ts`'s `authorize()` to check `dashboard_users` + Supabase Auth instead of/in addition to the env-var pair, or (b) replace NextAuth entirely with Supabase Auth session handling.
-2. Decide what should happen to the existing `AUTH_USERNAME`/`AUTH_PASSWORD` CEO login — keep as a fallback, or migrate the CEO into `dashboard_users` too so there's one source of truth.
-3. The root `/` redirect logic (`app/(dashboard)/page.tsx`) currently does `session.user.name === process.env.AUTH_USERNAME` to decide CEO vs team landing page — this will need to check `role === 'admin'` from `dashboard_users` instead once unified.
-4. Once wired, actually create Kim's user (email `kim@focablyed.com`, role `admin`) and confirm she can log in end to end.
+Key implementation detail: `lib/supabase.ts` lazily constructs its Supabase clients (`getSupabaseClient()`, `getSupabaseAdmin()`) instead of throwing at module import time. `auth.ts` imports this module on every request via the Credentials provider, so if it threw eagerly on a missing env var, it would take down the *entire* login flow — including the CEO's env-var path — not just the Supabase path. `isSupabaseConfigured()` + try/catch in `verifyDashboardUserPassword` mean a misconfigured/absent Supabase env simply makes path 2 a no-op; path 1 (CEO) is unaffected.
+
+The old `POST /api/auth/login` endpoint (a separate, disconnected Supabase-only login that nothing in the UI called) has been deleted — it predated this fix and would have been confusing to leave alongside the real flow.
+
+**To add a new admin user (e.g. Kim):** go to `/settings` → **Dashboard Users** tab (or `/settings/users` directly) → **Add New User** → email `kim@focablyed.com`, username `kim`, set a password, role **Admin**. She can then sign in at `/login` with that username (or her email) and password, and will land on `/personal` with full access, same as the CEO.
+
+**Not yet done:** no UI for deleting/editing existing `dashboard_users` rows or resetting a forgotten password — only create + list exist today (`app/api/admin/users/route.ts`).
 
 ---
 
@@ -147,7 +145,7 @@ AUTH_SECRET=
 AUTH_USERNAME=
 AUTH_PASSWORD=
 
-# Supabase (dashboard user management — see §7, not yet wired to real login)
+# Supabase (dashboard user management — see §7, wired into the real login)
 NEXT_PUBLIC_SUPABASE_URL=          # yfd-workflow project: https://xbjxrvqydcbwldnrexqu.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -196,17 +194,19 @@ All of these live in Vercel → Project Settings → Environment Variables. Rede
 - **Turbopack build errors** surface immediately on `next build` for any missing local import (e.g. missing `components/ui/skeleton.tsx`) — check `components/ui/` has every primitive a component imports before assuming an env/config issue.
 - **XPM API version**: must be v3.1 for JSON responses.
 - Two *separate* Supabase concerns exist in this codebase — don't conflate them: (1) product data stores for FocablyED/SiteMargin metrics (`lib/focably.ts`, `lib/sitemargin.ts`), and (2) the `yfd-workflow` project used for dashboard user management (`lib/supabase.ts`). They use different env var names and different projects.
+- **NextAuth `JWT` module augmentation** must target `@auth/core/jwt`, not `next-auth/jwt` — the latter is just a re-export (`export * from "@auth/core/jwt"`), and TypeScript module augmentation doesn't follow re-exports. Augmenting the wrong specifier compiles with no error but silently does nothing; the symptom is a custom token field typing as `unknown` (falling back to the `Record<string, unknown>` index signature the real `JWT` interface extends) instead of your declared type.
+- `lib/supabase.ts` must never throw at import time — it's imported by `auth.ts`, which runs on every request. A module-level `if (!url) throw` here would take down the CEO's env-var login path too, not just the Supabase path. Always lazy-init (function-based getters) for anything imported by the auth module.
 
 ---
 
 ## 10. Future / Not Yet Built
 
-- Finish wiring multi-user auth into the real login flow (§7 — top priority).
 - FocablyED Search Console + GA4 (needs domain verification + GA4 property ID).
-- Role-based read-only access (currently "full access" is the only tier discussed).
+- Role-based read-only access (currently "full access" is the only tier discussed; `dashboard_users.role` already supports a `"user"` value but nothing in the app treats it differently from `"admin"` yet).
+- UI for deleting/editing `dashboard_users` rows or resetting a password (only create + list exist).
 - Mobile responsive layout — not yet tested/optimized.
 - Email/Slack daily digest.
 
 ---
 
-*Keep this file at repo root as `CONTEXT.md`, update it whenever a new chat picks up meaningful work — especially closing out §7 once multi-user login actually works end to end.*
+*Keep this file at repo root as `CONTEXT.md`, update it whenever a new chat picks up meaningful work.*
