@@ -44,6 +44,17 @@ the XPM/Xero Practice Manager integration) but the findings apply broadly.
 
 ## Known, accepted gaps (yfd-dashboard)
 
+- **Log retention falls short of one year.** Vercel's own runtime log
+  retention caps out at hours-to-days depending on plan tier (even the
+  paid Observability Plus add-on only reaches 30 days). Logs are tamper-
+  protected (platform-managed, immutable), but reaching a full year of
+  retention would require a Log Drain to external long-term storage
+  (e.g. a SIEM or object storage) — not currently set up. Fix if this
+  becomes a hard requirement, not urgent otherwise.
+- **No automated vulnerability scanning tool has been run** (Snyk, Burp,
+  Nessus, etc.) — what's been done so far is a manual code-level security
+  review, not a scanner/pentest. Dependabot covers dependency CVEs going
+  forward, but that's narrower than a full app scan.
 - **MFA/SSO not implemented.** Login is username/password only. Flagged as
   a real gap on the Xero questionnaire; not yet built (bigger piece of
   work — TOTP or an SSO provider).
