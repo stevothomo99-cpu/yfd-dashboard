@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import { initialsOf } from "@/lib/utils";
@@ -100,6 +101,17 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         title="Settings"
         subtitle="Configure the XPM Partner filter and which staff appear across the dashboard"
       />
+
+      <div className="mb-6 flex gap-4">
+        <button className="px-4 py-2 bg-gray-100 text-gray-900 rounded-lg font-medium">
+          Staff & Sync
+        </button>
+        <Link href="/settings/users">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Dashboard Users
+          </button>
+        </Link>
+      </div>
 
       {snapshot.karbonMode === "mock" ? (
         <Banner tone="warn">Karbon roster: showing mock data — {snapshot.karbonMessage ?? "Karbon is not configured."}</Banner>

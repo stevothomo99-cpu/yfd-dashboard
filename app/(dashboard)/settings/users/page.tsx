@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import PageHeader from "@/components/dashboard/PageHeader";
 
 interface User {
@@ -79,6 +80,17 @@ export default function UsersPage() {
         title="User Management"
         subtitle="Manage dashboard users and permissions"
       />
+
+      <div className="mb-6 flex gap-4">
+        <Link href="/settings">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Staff & Sync
+          </button>
+        </Link>
+        <button className="px-4 py-2 bg-gray-100 text-gray-900 rounded-lg font-medium">
+          Dashboard Users
+        </button>
+      </div>
 
       {message && (
         <div
