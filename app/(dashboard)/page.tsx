@@ -4,12 +4,12 @@ import { auth } from "@/auth";
 export default async function DashboardHomepage() {
   const session = await auth();
 
-  // Check if user is the CEO (CEO username is in AUTH_USERNAME)
-  const ceoUsername = process.env.AUTH_USERNAME;
-  const isCeo = session?.user?.name === ceoUsername;
+  // Admins (the CEO's env-based account, or any Supabase dashboard_users
+  // row with role "admin") land on the full Business KPIs view; everyone
+  // else gets the team-facing dashboard.
+  const isAdmin = session?.user?.role === "admin";
 
-  // Redirect to personal dashboard if CEO, team dashboard otherwise
-  if (isCeo) {
+  if (isAdmin) {
     redirect("/personal");
   } else {
     redirect("/team");
