@@ -1,14 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import crypto from "node:crypto";
 import { authConfig } from "./auth.config";
 import { verifyDashboardUserPassword } from "./lib/supabase";
-
-function constantTimeEqual(a: string, b: string): boolean {
-  const ha = crypto.createHash("sha256").update(a).digest();
-  const hb = crypto.createHash("sha256").update(b).digest();
-  return crypto.timingSafeEqual(ha, hb);
-}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -25,20 +18,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!submittedUser || !submittedPass) return null;
 
-        // Path 1: single hardcoded CEO account via env vars (original setup).
-        const expectedUser = process.env.AUTH_USERNAME;
-        const expectedPass = process.env.AUTH_PASSWORD;
-        if (
-          expectedUser &&
-          expectedPass &&
-          constantTimeEqual(submittedUser, expectedUser) &&
-          constantTimeEqual(submittedPass, expectedPass)
-        ) {
-          return { id: "ceo", name: expectedUser, role: "admin" };
-        }
-
-        // Path 2: any user provisioned via /settings/users, backed by
-        // Supabase Auth + the dashboard_users table.
+        // Any user provisioned via /settings/users, backed by Supabase Auth
+        // + the dashboard_users table.
         const dashboardUser = await verifyDashboardUserPassword(submittedUser, submittedPass);
         if (dashboardUser) {
           return {
