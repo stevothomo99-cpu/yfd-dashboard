@@ -25,36 +25,113 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
 
+  const [step, setStep] = useState<"credentials" | "mfa">("credentials");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-
+  async function finishSignIn(extra?: { totpCode: string }) {
     const result = await signIn("credentials", {
       username,
       password,
+      ...(extra ?? {}),
       redirect: false,
     });
 
-    setBusy(false);
-
     if (!result || result.error) {
-      setError("Username or password is incorrect.");
-      return;
+      return false;
     }
 
     router.push(callbackUrl);
     router.refresh();
+    return true;
+  }
+
+  async function onCredentialsSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/auth/mfa-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const body: { valid: boolean; mfaRequired?: boolean } = await res.json();
+
+      if (!body.valid) {
+        setError("Username or password is incorrect.");
+        return;
+      }
+
+      if (body.mfaRequired) {
+        setStep("mfa");
+        return;
+      }
+
+      const ok = await finishSignIn();
+      if (!ok) setError("Username or password is incorrect.");
+    } catch {
+      setError("Username or password is incorrect.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMfaSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+
+    try {
+      const ok = await finishSignIn({ totpCode });
+      if (!ok) setError("Invalid code.");
+    } catch {
+      setError("Invalid code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (step === "mfa") {
+    return (
+      <Shell>
+        <form onSubmit={onMfaSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div style={{ fontSize: "12px", color: "#888780", marginBottom: "-4px" }}>
+            Enter the 6-digit code from your authenticator app.
+          </div>
+          <Field
+            label="Authentication code"
+            type="text"
+            value={totpCode}
+            onChange={setTotpCode}
+            autoComplete="one-time-code"
+            autoFocus
+          />
+
+          {error ? <ErrorBanner>{error}</ErrorBanner> : null}
+
+          <button
+            type="submit"
+            disabled={busy || !totpCode}
+            style={buttonStyle(busy || !totpCode)}
+          >
+            {busy ? "Verifying…" : "Verify"}
+          </button>
+        </form>
+      </Shell>
+    );
   }
 
   return (
     <Shell>
-      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      <form
+        onSubmit={onCredentialsSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+      >
         <Field
           label="Username"
           type="text"
@@ -71,40 +148,48 @@ function LoginForm() {
           autoComplete="current-password"
         />
 
-        {error ? (
-          <div
-            style={{
-              fontSize: "12px",
-              color: "#A32D2D",
-              background: "#FCEBEB",
-              border: "0.5px solid #f5d6d6",
-              padding: "8px 10px",
-              borderRadius: "8px",
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
+        {error ? <ErrorBanner>{error}</ErrorBanner> : null}
 
         <button
           type="submit"
           disabled={busy || !username || !password}
-          style={{
-            marginTop: "4px",
-            fontSize: "13px",
-            fontWeight: 500,
-            padding: "11px 22px",
-            borderRadius: "8px",
-            background: busy || !username || !password ? "#b4b2a9" : "#2a78d6",
-            color: "white",
-            border: "none",
-            cursor: busy || !username || !password ? "not-allowed" : "pointer",
-          }}
+          style={buttonStyle(busy || !username || !password)}
         >
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
     </Shell>
+  );
+}
+
+function buttonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    marginTop: "4px",
+    fontSize: "13px",
+    fontWeight: 500,
+    padding: "11px 22px",
+    borderRadius: "8px",
+    background: disabled ? "#b4b2a9" : "#2a78d6",
+    color: "white",
+    border: "none",
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
+}
+
+function ErrorBanner({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: "12px",
+        color: "#A32D2D",
+        background: "#FCEBEB",
+        border: "0.5px solid #f5d6d6",
+        padding: "8px 10px",
+        borderRadius: "8px",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 

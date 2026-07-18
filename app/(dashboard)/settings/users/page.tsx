@@ -90,6 +90,11 @@ export default function UsersPage() {
         <button className="px-4 py-2 bg-gray-100 text-gray-900 rounded-lg font-medium">
           Dashboard Users
         </button>
+        <Link href="/settings/security">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            My Security
+          </button>
+        </Link>
       </div>
 
       {message && (

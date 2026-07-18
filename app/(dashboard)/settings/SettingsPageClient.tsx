@@ -111,6 +111,11 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
             Dashboard Users
           </button>
         </Link>
+        <Link href="/settings/security">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            My Security
+          </button>
+        </Link>
       </div>
 
       {snapshot.karbonMode === "mock" ? (
