@@ -1,5 +1,6 @@
 import { cacheGet, cacheSet } from "./cache";
 import { fyYearFor } from "./utils";
+import { encryptSecret, decryptSecret } from "./crypto";
 import type { XpmStaff, XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
 
 const TOKEN_KEY = "xpm:access-token";
@@ -41,9 +42,25 @@ export function isXpmConfigured(): boolean {
   );
 }
 
+// Tokens are encrypted at rest (AES-256-GCM) before being written to the
+// cache. A decrypt failure (e.g. XPM_TOKEN_ENCRYPTION_KEY was rotated, or a
+// stale plaintext value from before encryption was added) is treated as a
+// cache miss rather than a crash.
+function tryDecrypt(value: string): string | null {
+  try {
+    return decryptSecret(value);
+  } catch (err) {
+    console.error("[xpm] Failed to decrypt cached token, treating as cache miss:", err);
+    return null;
+  }
+}
+
 async function currentRefreshToken(): Promise<string> {
   const stored = await cacheGet<string>(REFRESH_KEY);
-  if (stored) return stored;
+  if (stored) {
+    const decrypted = tryDecrypt(stored);
+    if (decrypted) return decrypted;
+  }
 
   // Xero rotates the refresh token on every successful exchange. If KV ever
   // held a rotated token and is now empty, the env-var token has been
@@ -94,16 +111,19 @@ async function refreshAccessToken(): Promise<string> {
 
   const data = (await res.json()) as XeroTokenResponse;
 
-  await cacheSet(REFRESH_KEY, data.refresh_token);
+  await cacheSet(REFRESH_KEY, encryptSecret(data.refresh_token));
   await cacheSet(REFRESHED_AT_KEY, new Date().toISOString());
   const accessTtl = Math.max(data.expires_in - 5 * 60, 60);
-  await cacheSet(TOKEN_KEY, data.access_token, accessTtl);
+  await cacheSet(TOKEN_KEY, encryptSecret(data.access_token), accessTtl);
   return data.access_token;
 }
 
 async function getAccessToken(): Promise<string> {
   const hit = await cacheGet<string>(TOKEN_KEY);
-  if (hit) return hit;
+  if (hit) {
+    const decrypted = tryDecrypt(hit);
+    if (decrypted) return decrypted;
+  }
   return refreshAccessToken();
 }
 
