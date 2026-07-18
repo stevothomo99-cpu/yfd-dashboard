@@ -38,8 +38,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
       { days }
     );
 
-    // TODO: Add FocablyED Search Console metrics once domain is verified
-    // const focablyMetrics = await getSearchConsoleMetrics("sc-domain:focablyed.com");
+    let focablyMetrics = null;
+    try {
+      focablyMetrics = await getSearchConsoleMetrics(
+        "https://focablyed.com/",
+        { days }
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error("[SearchConsole API Error] FocablyED", message);
+    }
 
     let yfdMetrics = null;
     try {
@@ -54,7 +62,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
 
     return NextResponse.json({
       siteMargin: siteMarginMetrics,
-      focablyED: null,
+      focablyED: focablyMetrics,
       yfd: yfdMetrics,
       lastUpdated: new Date().toISOString(),
     });

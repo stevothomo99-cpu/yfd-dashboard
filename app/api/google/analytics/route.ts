@@ -32,8 +32,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
 
     const siteMarginMetrics = await getAnalyticsMetrics("544627080", { days });
 
-    // TODO: Add FocablyED analytics once GA4 property ID is confirmed
-    // const focablyMetrics = await getAnalyticsMetrics("FOCABLY_GA4_PROPERTY_ID");
+    let focablyMetrics = null;
+    try {
+      focablyMetrics = await getAnalyticsMetrics("546068683", { days });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error("[Analytics API Error] FocablyED", message);
+    }
 
     let yfdMetrics = null;
     if (process.env.YFD_GA4_PROPERTY_ID) {
@@ -44,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
 
     return NextResponse.json({
       siteMargin: siteMarginMetrics,
-      focablyED: null,
+      focablyED: focablyMetrics,
       yfd: yfdMetrics,
       lastUpdated: new Date().toISOString(),
     });
