@@ -6,12 +6,13 @@ interface SubscriptionMetricsTileProps {
   paidUsers: number;
   freemiumUsers: number;
   nonActiveUsers: number;
-  totalChurnThisMonth: number;
+  totalChurnInPeriod: number;
   churnRate: number;
   winBackCandidates: number;
   currentMonthMRR?: number;
   currentMonthARR?: number;
   isLoading?: boolean;
+  periodLabel?: string;
 }
 
 export function SubscriptionMetricsTile({
@@ -20,12 +21,13 @@ export function SubscriptionMetricsTile({
   paidUsers,
   freemiumUsers,
   nonActiveUsers,
-  totalChurnThisMonth,
+  totalChurnInPeriod,
   churnRate,
   winBackCandidates,
   currentMonthMRR = 0,
   currentMonthARR = 0,
   isLoading = false,
+  periodLabel = "This Month",
 }: SubscriptionMetricsTileProps) {
   if (isLoading) {
     return (
@@ -85,15 +87,15 @@ export function SubscriptionMetricsTile({
           <p className="text-xs text-gray-500 mt-1">{retentionRate}% active</p>
         </div>
 
-        {/* Churn This Month */}
+        {/* Churn in period */}
         <div>
-          <p className="text-sm text-gray-600 mb-1">Churn This Month</p>
-          <p className="text-3xl font-bold text-red-600">{totalChurnThisMonth}</p>
+          <p className="text-sm text-gray-600 mb-1">Churn ({periodLabel})</p>
+          <p className="text-3xl font-bold text-red-600">{totalChurnInPeriod}</p>
         </div>
 
         {/* Churn Rate */}
         <div>
-          <p className="text-sm text-gray-600 mb-1">Monthly Churn Rate</p>
+          <p className="text-sm text-gray-600 mb-1">Churn Rate ({periodLabel})</p>
           <p className="text-3xl font-bold text-red-700">{churnRate}%</p>
         </div>
 

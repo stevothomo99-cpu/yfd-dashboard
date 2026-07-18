@@ -49,6 +49,33 @@ export function fyRange(fyYear: number): { start: Date; end: Date } {
   };
 }
 
+export type ChurnRange = "all" | "12m" | "fy" | "month" | "week" | "24h";
+
+export function getRangeStart(range: ChurnRange, now: Date): Date | null {
+  switch (range) {
+    case "all":
+      return null;
+    case "12m": {
+      const d = new Date(now);
+      d.setMonth(d.getMonth() - 12);
+      return d;
+    }
+    case "fy":
+      return fyRange(fyYearFor(now)).start;
+    case "month":
+      return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    case "week": {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const day = d.getDay(); // 0 = Sunday, 1 = Monday, ...
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      d.setDate(d.getDate() - diffToMonday);
+      return d;
+    }
+    case "24h":
+      return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  }
+}
+
 // Builds a minimal display-only StaffMember list from anything carrying an
 // assigneeId/assigneeName — used to drive StaffSlicer on pages backed by
 // live Karbon data, where full XPM-derived staff stats aren't available.

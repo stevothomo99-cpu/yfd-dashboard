@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getRangeStart, type ChurnRange } from "@/lib/utils";
 
 let supabase: ReturnType<typeof createClient> | null = null;
 
@@ -26,18 +27,20 @@ export interface FocablyMetrics {
   paidUsers: number;
   freemiumUsers: number;
   nonActiveUsers: number;
-  paidChurnThisMonth: number;
-  unpaidChurnThisMonth: number;
-  totalChurnThisMonth: number;
+  paidChurnInPeriod: number;
+  unpaidChurnInPeriod: number;
+  totalChurnInPeriod: number;
   churnRate: number;
   winBackCandidates: number;
   currentMonthMRR: number;
   currentMonthARR: number;
 }
 
-export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
+export async function getFocablySubscriptionMetrics(
+  range: ChurnRange = "month"
+): Promise<FocablyMetrics> {
   const now = new Date();
-  const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+  const rangeStart = getRangeStart(range, now);
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const sb = getSupabaseClient();
@@ -66,20 +69,26 @@ export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
       .select("*", { count: "exact", head: true })
       .lt("last_active_at", thirtyDaysAgo.toISOString());
 
-    // Paid churn this month
-    const { data: paidChurnData } = await sb
+    // Paid churn in period
+    let paidChurnQuery = sb
       .from("churn_events")
       .select("*", { count: "exact" })
-      .eq("was_ever_paid", true)
-      .gte("created_at", monthAgo.toISOString());
+      .eq("was_ever_paid", true);
+    if (rangeStart) {
+      paidChurnQuery = paidChurnQuery.gte("created_at", rangeStart.toISOString());
+    }
+    const { data: paidChurnData } = await paidChurnQuery;
 
-    // Unpaid churn this month (excluding teachers)
-    const { data: unpaidChurnData } = await sb
+    // Unpaid churn in period (excluding teachers)
+    let unpaidChurnQuery = sb
       .from("churn_events")
       .select("*", { count: "exact" })
       .eq("was_ever_paid", false)
-      .neq("role", "teacher")
-      .gte("created_at", monthAgo.toISOString());
+      .neq("role", "teacher");
+    if (rangeStart) {
+      unpaidChurnQuery = unpaidChurnQuery.gte("created_at", rangeStart.toISOString());
+    }
+    const { data: unpaidChurnData } = await unpaidChurnQuery;
 
     // Win-back candidates (churned but still on free tier)
     const { count: winBackCandidates } = await sb
@@ -88,13 +97,13 @@ export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
       .eq("subscription_status", "free")
       .not("first_paid_at", "is", null);
 
-    const paidChurnThisMonth = paidChurnData?.length || 0;
-    const unpaidChurnThisMonth = unpaidChurnData?.length || 0;
-    const totalChurnThisMonth = paidChurnThisMonth + unpaidChurnThisMonth;
+    const paidChurnInPeriod = paidChurnData?.length || 0;
+    const unpaidChurnInPeriod = unpaidChurnData?.length || 0;
+    const totalChurnInPeriod = paidChurnInPeriod + unpaidChurnInPeriod;
 
     // Calculate churn rate (paid churn only, simplified)
     // For accuracy, you'd need to calculate: churners ÷ families_paying_at_month_start
-    const churnRate = (paidUsers || 0) > 0 ? (paidChurnThisMonth / (paidUsers || 1)) * 100 : 0;
+    const churnRate = (paidUsers || 0) > 0 ? (paidChurnInPeriod / (paidUsers || 1)) * 100 : 0;
 
     // TODO: Calculate MRR and ARR from subscription pricing data
     // Need to query: families with subscription_status='pro' and their subscription amounts
@@ -106,9 +115,9 @@ export async function getFocablySubscriptionMetrics(): Promise<FocablyMetrics> {
       paidUsers: paidUsers || 0,
       freemiumUsers: freemiumUsers || 0,
       nonActiveUsers: nonActiveUsers || 0,
-      paidChurnThisMonth,
-      unpaidChurnThisMonth,
-      totalChurnThisMonth,
+      paidChurnInPeriod,
+      unpaidChurnInPeriod,
+      totalChurnInPeriod,
       churnRate: Math.round(churnRate * 100) / 100,
       winBackCandidates: winBackCandidates || 0,
       currentMonthMRR,

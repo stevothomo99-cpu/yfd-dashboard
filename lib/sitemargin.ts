@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getRangeStart, type ChurnRange } from "@/lib/utils";
 
 let supabase: ReturnType<typeof createClient> | null = null;
 
@@ -28,13 +29,15 @@ export interface SiteMarginMetrics {
   trialConversionRate: number;
   canceledOrganizations: number;
   pastDueOrganizations: number;
-  paidChurnThisMonth: number;
-  untrialChurnThisMonth: number;
+  paidChurnInPeriod: number;
+  untrialChurnInPeriod: number;
   currentMonthMRR: number;
   currentMonthARR: number;
 }
 
-export async function getSiteMarginSubscriptionMetrics(): Promise<SiteMarginMetrics> {
+export async function getSiteMarginSubscriptionMetrics(
+  range: ChurnRange = "month"
+): Promise<SiteMarginMetrics> {
   const sb = getSupabaseClient();
 
   try {
@@ -88,24 +91,26 @@ export async function getSiteMarginSubscriptionMetrics(): Promise<SiteMarginMetr
 
     // Paid churn (subscription_canceled events)
     const now = new Date();
-    const monthAgo = new Date(
-      now.getFullYear(),
-      now.getMonth() - 1,
-      now.getDate()
-    );
+    const rangeStart = getRangeStart(range, now);
 
-    const { data: paidChurnData } = await sb
+    let paidChurnQuery = sb
       .from("subscription_events")
       .select("*", { count: "exact" })
-      .eq("event_type", "subscription_canceled")
-      .gte("occurred_at", monthAgo.toISOString());
+      .eq("event_type", "subscription_canceled");
+    if (rangeStart) {
+      paidChurnQuery = paidChurnQuery.gte("occurred_at", rangeStart.toISOString());
+    }
+    const { data: paidChurnData } = await paidChurnQuery;
 
     // Unpaid/trial churn (trial_expired events)
-    const { data: untrialChurnData } = await sb
+    let untrialChurnQuery = sb
       .from("subscription_events")
       .select("*", { count: "exact" })
-      .eq("event_type", "trial_expired")
-      .gte("occurred_at", monthAgo.toISOString());
+      .eq("event_type", "trial_expired");
+    if (rangeStart) {
+      untrialChurnQuery = untrialChurnQuery.gte("occurred_at", rangeStart.toISOString());
+    }
+    const { data: untrialChurnData } = await untrialChurnQuery;
 
     // TODO: Calculate MRR and ARR from subscription pricing data
     // Need to query: organisations with subscription_status='active' and their subscription amounts
@@ -119,8 +124,8 @@ export async function getSiteMarginSubscriptionMetrics(): Promise<SiteMarginMetr
       trialConversionRate,
       canceledOrganizations: canceledOrganizations || 0,
       pastDueOrganizations: pastDueOrganizations || 0,
-      paidChurnThisMonth: paidChurnData?.length || 0,
-      untrialChurnThisMonth: untrialChurnData?.length || 0,
+      paidChurnInPeriod: paidChurnData?.length || 0,
+      untrialChurnInPeriod: untrialChurnData?.length || 0,
       currentMonthMRR,
       currentMonthARR,
     };

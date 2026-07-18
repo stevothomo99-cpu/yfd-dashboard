@@ -6,6 +6,16 @@ import { SubscriptionMetricsTile } from "@/components/dashboard/SubscriptionMetr
 import { SiteMarginMetricsTile } from "@/components/dashboard/SiteMarginMetricsTile";
 import { WebMetricsTile } from "@/components/dashboard/WebMetricsTile";
 import PageHeader from "@/components/dashboard/PageHeader";
+import type { ChurnRange } from "@/lib/utils";
+
+const CHURN_RANGE_LABELS: Record<ChurnRange, string> = {
+  all: "All Time",
+  "12m": "Last 12 Months",
+  fy: "Financial Year",
+  month: "This Month",
+  week: "This Week",
+  "24h": "Last 24 Hours",
+};
 
 interface SearchConsoleMetrics {
   clicks: number;
@@ -64,9 +74,9 @@ interface FocablyMetrics {
   paidUsers: number;
   freemiumUsers: number;
   nonActiveUsers: number;
-  paidChurnThisMonth: number;
-  unpaidChurnThisMonth: number;
-  totalChurnThisMonth: number;
+  paidChurnInPeriod: number;
+  unpaidChurnInPeriod: number;
+  totalChurnInPeriod: number;
   churnRate: number;
   winBackCandidates: number;
   lastUpdated: string;
@@ -80,8 +90,8 @@ interface SiteMarginMetrics {
   trialConversionRate: number;
   canceledOrganizations: number;
   pastDueOrganizations: number;
-  paidChurnThisMonth: number;
-  untrialChurnThisMonth: number;
+  paidChurnInPeriod: number;
+  untrialChurnInPeriod: number;
   lastUpdated: string;
   note?: string;
   error?: string;
@@ -97,14 +107,15 @@ export default function PersonalDashboard() {
   const [yfdWeb, setYfdWeb] = useState<WebMetricsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [webMetricsPeriod, setWebMetricsPeriod] = useState<"24h" | "7d" | "30d">("30d");
+  const [churnRange, setChurnRange] = useState<ChurnRange>("month");
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [kpisRes, focablyRes, siteMarginRes, xeroRes, searchConsoleRes, analyticsRes] = await Promise.all([
           fetch("/api/hubspot/deals"),
-          fetch("/api/focably/metrics"),
-          fetch("/api/sitemargin/metrics"),
+          fetch(`/api/focably/metrics?range=${churnRange}`),
+          fetch(`/api/sitemargin/metrics?range=${churnRange}`),
           fetch("/api/xpm/sales"),
           fetch("/api/google/search-console"),
           fetch("/api/google/analytics"),
@@ -155,8 +166,8 @@ export default function PersonalDashboard() {
     try {
       const [kpisRes, focablyRes, siteMarginRes, xeroRes, searchConsoleRes, analyticsRes] = await Promise.all([
         fetch("/api/hubspot/deals", { method: "POST" }),
-        fetch("/api/focably/metrics"),
-        fetch("/api/sitemargin/metrics"),
+        fetch(`/api/focably/metrics?range=${churnRange}`),
+        fetch(`/api/sitemargin/metrics?range=${churnRange}`),
         fetch("/api/xpm/sales", { method: "POST" }),
         fetch("/api/google/search-console"),
         fetch("/api/google/analytics"),
@@ -218,6 +229,24 @@ export default function PersonalDashboard() {
       });
     } catch (err) {
       console.error("Failed to fetch web metrics for period:", err);
+    }
+  };
+
+  const handleChurnRangeChange = async (range: ChurnRange) => {
+    setChurnRange(range);
+    try {
+      const [focablyRes, siteMarginRes] = await Promise.all([
+        fetch(`/api/focably/metrics?range=${range}`),
+        fetch(`/api/sitemargin/metrics?range=${range}`),
+      ]);
+
+      const focablyData: FocablyMetrics = await focablyRes.json();
+      const siteMarginData: SiteMarginMetrics = await siteMarginRes.json();
+
+      setFocablyMetrics(focablyData);
+      setSiteMarginMetrics(siteMarginData);
+    } catch (err) {
+      console.error("Failed to fetch churn metrics for range:", err);
     }
   };
 
@@ -348,8 +377,28 @@ export default function PersonalDashboard() {
 
       <div>
         {/* Subscription Metrics */}
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 mt-8">User & Churn Metrics</h2>
-        <div className="grid grid-cols-1 gap-6 mb-8">
+        <div className="flex items-center justify-between mb-4 mt-8">
+          <h2 className="text-xl font-semibold text-gray-900">
+            User & Churn Metrics ({CHURN_RANGE_LABELS[churnRange]})
+          </h2>
+          <div className="flex gap-2">
+            {(["all", "12m", "fy", "month", "week", "24h"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => handleChurnRangeChange(r)}
+                disabled={loading}
+                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+                  churnRange === r
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                    : "bg-white text-gray-700 border border-gray-200 shadow-md hover:shadow-lg hover:bg-gray-50"
+                } disabled:opacity-50 cursor-pointer`}
+              >
+                {CHURN_RANGE_LABELS[r]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* FocablyED Subscription Metrics */}
           {focablyMetrics ? (
             <SubscriptionMetricsTile
@@ -358,10 +407,11 @@ export default function PersonalDashboard() {
               paidUsers={focablyMetrics.paidUsers}
               freemiumUsers={focablyMetrics.freemiumUsers}
               nonActiveUsers={focablyMetrics.nonActiveUsers}
-              totalChurnThisMonth={focablyMetrics.totalChurnThisMonth}
+              totalChurnInPeriod={focablyMetrics.totalChurnInPeriod}
               churnRate={focablyMetrics.churnRate}
               winBackCandidates={focablyMetrics.winBackCandidates}
               isLoading={loading}
+              periodLabel={CHURN_RANGE_LABELS[churnRange]}
             />
           ) : (
             <SubscriptionMetricsTile
@@ -370,7 +420,7 @@ export default function PersonalDashboard() {
               paidUsers={0}
               freemiumUsers={0}
               nonActiveUsers={0}
-              totalChurnThisMonth={0}
+              totalChurnInPeriod={0}
               churnRate={0}
               winBackCandidates={0}
               isLoading={true}

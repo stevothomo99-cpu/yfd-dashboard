@@ -1,5 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSiteMarginSubscriptionMetrics } from "@/lib/sitemargin";
+import type { ChurnRange } from "@/lib/utils";
+
+const VALID_RANGES: ChurnRange[] = ["all", "12m", "fy", "month", "week", "24h"];
 
 interface ResponseBody {
   totalOrganizations: number;
@@ -8,16 +11,21 @@ interface ResponseBody {
   trialConversionRate: number;
   canceledOrganizations: number;
   pastDueOrganizations: number;
-  paidChurnThisMonth: number;
-  untrialChurnThisMonth: number;
+  paidChurnInPeriod: number;
+  untrialChurnInPeriod: number;
   lastUpdated: string;
   note?: string;
   error?: string;
 }
 
-export async function GET(): Promise<NextResponse<ResponseBody>> {
+export async function GET(request: NextRequest): Promise<NextResponse<ResponseBody>> {
+  const rangeParam = request.nextUrl.searchParams.get("range");
+  const range: ChurnRange = VALID_RANGES.includes(rangeParam as ChurnRange)
+    ? (rangeParam as ChurnRange)
+    : "month";
+
   try {
-    const metrics = await getSiteMarginSubscriptionMetrics();
+    const metrics = await getSiteMarginSubscriptionMetrics(range);
 
     return NextResponse.json({
       ...metrics,
@@ -36,8 +44,8 @@ export async function GET(): Promise<NextResponse<ResponseBody>> {
         trialConversionRate: 0,
         canceledOrganizations: 0,
         pastDueOrganizations: 0,
-        paidChurnThisMonth: 0,
-        untrialChurnThisMonth: 0,
+        paidChurnInPeriod: 0,
+        untrialChurnInPeriod: 0,
         lastUpdated: new Date().toISOString(),
         error: message,
       },
