@@ -1,4 +1,4 @@
-import { cacheGet, cacheSet } from "./cache";
+import { cacheGetEncrypted, cacheSetEncrypted } from "./cache";
 import type {
   KarbonTask,
   KarbonTaskStatus,
@@ -205,11 +205,11 @@ export async function getKarbonTasks(
   options: { forceRefresh?: boolean } = {},
 ): Promise<KarbonTask[]> {
   if (!options.forceRefresh) {
-    const hit = await cacheGet<KarbonTask[]>(TASKS_KEY);
+    const hit = await cacheGetEncrypted<KarbonTask[]>(TASKS_KEY);
     if (hit) return hit.filter((t) => !excludedStaffIds.includes(t.assigneeId));
   }
   const fresh = await fetchKarbonTasks();
-  await cacheSet(TASKS_KEY, fresh, TASKS_TTL);
+  await cacheSetEncrypted(TASKS_KEY, fresh, TASKS_TTL);
   return fresh.filter((t) => !excludedStaffIds.includes(t.assigneeId));
 }
 
@@ -218,11 +218,11 @@ export async function getKarbonWorkItems(
   options: { forceRefresh?: boolean } = {},
 ): Promise<KarbonWorkItem[]> {
   if (!options.forceRefresh) {
-    const hit = await cacheGet<KarbonWorkItem[]>(WORK_KEY);
+    const hit = await cacheGetEncrypted<KarbonWorkItem[]>(WORK_KEY);
     if (hit) return hit.filter((w) => !excludedStaffIds.includes(w.assigneeId));
   }
   const fresh = await fetchKarbonWorkItems();
-  await cacheSet(WORK_KEY, fresh, WORK_TTL);
+  await cacheSetEncrypted(WORK_KEY, fresh, WORK_TTL);
   return fresh.filter((w) => !excludedStaffIds.includes(w.assigneeId));
 }
 
@@ -250,11 +250,11 @@ export async function getKarbonUsers(
   options: { forceRefresh?: boolean } = {},
 ): Promise<KarbonUser[]> {
   if (!options.forceRefresh) {
-    const hit = await cacheGet<KarbonUser[]>(USERS_KEY);
+    const hit = await cacheGetEncrypted<KarbonUser[]>(USERS_KEY);
     if (hit) return hit.filter((u) => !excludedStaffIds.includes(u.id));
   }
   const fresh = await fetchKarbonUsers();
-  await cacheSet(USERS_KEY, fresh, USERS_TTL);
+  await cacheSetEncrypted(USERS_KEY, fresh, USERS_TTL);
   return fresh.filter((u) => !excludedStaffIds.includes(u.id));
 }
 

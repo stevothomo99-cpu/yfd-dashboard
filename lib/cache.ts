@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { encryptSecret, decryptSecret } from "./crypto";
 
 const NAMESPACE = "yfd:";
 
@@ -92,4 +93,42 @@ export async function cached<T>(
 
 export function isKvConfigured(): boolean {
   return isConfigured();
+}
+
+// Encrypted variants, for cached data containing sensitive business/PII
+// information (e.g. XPM/Karbon staff, timesheets, invoices, tasks) rather
+// than short-lived tokens. A decrypt failure (key rotation, or a stale
+// unencrypted value from before this existed) is treated as a cache miss.
+export async function cacheGetEncrypted<T>(key: string): Promise<T | null> {
+  const raw = await cacheGet<string>(key);
+  if (raw === null) return null;
+  try {
+    return JSON.parse(decryptSecret(raw)) as T;
+  } catch (err) {
+    console.error(
+      `[cache] Failed to decrypt cached value for key "${key}", treating as cache miss:`,
+      err,
+    );
+    return null;
+  }
+}
+
+export async function cacheSetEncrypted<T>(
+  key: string,
+  value: T,
+  ttlSeconds?: number,
+): Promise<void> {
+  await cacheSet(key, encryptSecret(JSON.stringify(value)), ttlSeconds);
+}
+
+export async function cachedEncrypted<T>(
+  key: string,
+  ttlSeconds: number,
+  loader: () => Promise<T>,
+): Promise<T> {
+  const hit = await cacheGetEncrypted<T>(key);
+  if (hit !== null) return hit;
+  const fresh = await loader();
+  await cacheSetEncrypted(key, fresh, ttlSeconds);
+  return fresh;
 }

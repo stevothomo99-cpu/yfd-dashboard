@@ -1,4 +1,4 @@
-import { cacheGet, cacheSet } from "./cache";
+import { cacheGet, cacheSet, cacheGetEncrypted, cacheSetEncrypted } from "./cache";
 import { fyYearFor } from "./utils";
 import { encryptSecret, decryptSecret } from "./crypto";
 import type { XpmStaff, XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
@@ -240,11 +240,11 @@ export async function getXpmStaff(
 ): Promise<XpmStaff[]> {
   const key = STAFF_KEY(partnerName);
   if (!options.forceRefresh) {
-    const hit = await cacheGet<XpmStaff[]>(key);
+    const hit = await cacheGetEncrypted<XpmStaff[]>(key);
     if (hit) return hit;
   }
   const fresh = await fetchXpmStaffForPartner(partnerName);
-  await cacheSet(key, fresh, STAFF_TTL);
+  await cacheSetEncrypted(key, fresh, STAFF_TTL);
   return fresh;
 }
 
@@ -372,12 +372,12 @@ export async function getXpmTimesheets(
 ): Promise<XpmTimesheet[]> {
   const key = TIMESHEETS_KEY(partnerName);
   if (!options.forceRefresh) {
-    const hit = await cacheGet<XpmTimesheet[]>(key);
+    const hit = await cacheGetEncrypted<XpmTimesheet[]>(key);
     if (hit) return hit;
   }
   const staff = await getXpmStaff(partnerName, options);
   const fresh = await fetchXpmTimesheets(staff);
-  await cacheSet(key, fresh, TIMESHEETS_TTL);
+  await cacheSetEncrypted(key, fresh, TIMESHEETS_TTL);
   return fresh;
 }
 
@@ -426,11 +426,11 @@ export async function getXpmInvoices(
 ): Promise<XpmInvoice[]> {
   const key = INVOICES_KEY(partnerName);
   if (!options.forceRefresh) {
-    const hit = await cacheGet<XpmInvoice[]>(key);
+    const hit = await cacheGetEncrypted<XpmInvoice[]>(key);
     if (hit) return hit;
   }
   const fresh = await fetchXpmInvoices(partnerName);
-  await cacheSet(key, fresh, INVOICES_TTL);
+  await cacheSetEncrypted(key, fresh, INVOICES_TTL);
   return fresh;
 }
 
