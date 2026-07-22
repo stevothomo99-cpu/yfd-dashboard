@@ -25,7 +25,7 @@ export async function GET() {
   const results: Record<string, unknown> = {};
 
   try {
-    results.jobList = await xpmFetch("/job.api/list?status=InProgress&from=20000101");
+    results.jobList = await xpmFetch("/job.api/list?status=InProgress&from=20000101&to=20991231");
   } catch (err) {
     results.jobList = { error: err instanceof Error ? err.message : String(err) };
   }
