@@ -246,13 +246,22 @@ function asArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
+// /job.api/list requires a `from` param (yyyyMMdd) -- undocumented until
+// tested against a live tenant, which returns 400 "Required parameter
+// 'from' should be specified" without it. Set far enough in the past that
+// no still-open job is ever excluded by it; this only bounds how far back
+// job *creation* dates are considered, not which jobs are "in progress".
+const JOB_LIST_FROM_DATE = "20000101";
+
 // In-progress jobs owned by the given Partner. Shared by staff and client
 // derivation so both only need one job.api/list call.
 async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
   if (!partnerName) return [];
 
-  const jobs = await xpmFetch<XpmJobListResponse>("/job.api/list?status=InProgress");
+  const jobs = await xpmFetch<XpmJobListResponse>(
+    `/job.api/list?status=InProgress&from=${JOB_LIST_FROM_DATE}`,
+  );
   const jobsArr = asArray(jobs.Response?.Jobs?.Job);
   return jobsArr.filter((job) => job.Partner?.Name === partnerName);
 }
