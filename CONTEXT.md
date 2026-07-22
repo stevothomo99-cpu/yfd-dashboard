@@ -205,7 +205,13 @@ All of these live in Vercel → Project Settings → Environment Variables. Rede
 - Role-based read-only access (currently "full access" is the only tier discussed; `dashboard_users.role` already supports a `"user"` value but nothing in the app treats it differently from `"admin"` yet).
 - UI for deleting/editing `dashboard_users` rows or resetting a password (only create + list exist).
 - Mobile responsive layout — not yet tested/optimized.
-- Email/Slack daily digest.
+- **Email notifications/reminders — planned, provider decided (Resend), not yet built.** Waiting on live XPM API access before starting the XPM-dependent ones. Shortlist, roughly by value:
+  1. Overdue task / BAS deadline digest (daily or weekly, to the CEO) — needs live Karbon/XPM data to be worth sending, so blocked on XPM.
+  2. New dashboard user invite email — ties into a known gap (creating a user via `/settings/users` currently sends nothing; admin has to manually share credentials). No XPM dependency, ready to build whenever.
+  3. Security notifications (MFA enabled/disabled confirmation, maybe new-login alerts). No XPM dependency, ready to build whenever.
+  4. Weekly performance summary digest (leaderboard/billable hours). Needs live data to be meaningful — blocked on XPM.
+  5. Sync failure alerts (email an admin if a scheduled XPM/Karbon/Google sync errors out instead of failing silently). No XPM dependency — about the sync process itself, not the data.
+  Next session: pick up in a new chat once XPM API access comes through (or sooner, to build #2/#3/#5 which don't depend on it).
 
 ---
 
