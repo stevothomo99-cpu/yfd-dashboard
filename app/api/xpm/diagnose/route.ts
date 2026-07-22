@@ -25,7 +25,7 @@ export async function GET() {
   const results: Record<string, unknown> = {};
 
   try {
-    results.jobList = await xpmFetch("/job.api/list?status=InProgress");
+    results.jobList = await xpmFetch("/job.api/list?status=InProgress&from=20000101");
   } catch (err) {
     results.jobList = { error: err instanceof Error ? err.message : String(err) };
   }
@@ -34,6 +34,15 @@ export async function GET() {
     results.staffList = await xpmFetch("/staff.api/list");
   } catch (err) {
     results.staffList = { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  // "Staff" in Xero Practice Manager's own data model may actually be
+  // called "User" at the API resource level -- staff.api/list returned XML
+  // (not a valid v3.1 JSON endpoint), so try the User resource too.
+  try {
+    results.userList = await xpmFetch("/user.api/list");
+  } catch (err) {
+    results.userList = { error: err instanceof Error ? err.message : String(err) };
   }
 
   return NextResponse.json(results);
