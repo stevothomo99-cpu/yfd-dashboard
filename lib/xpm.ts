@@ -252,13 +252,26 @@ function asArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-// /job.api/list requires both `from` and `to` params (yyyyMMdd) --
-// undocumented until tested against a live tenant, which 400s one
-// requirement at a time. Set as wide as realistically possible so this
-// only bounds how far back/forward job *creation* dates are considered,
-// never excluding a genuinely in-progress job.
-const JOB_LIST_FROM_DATE = "20000101";
-const JOB_LIST_TO_DATE = "20991231";
+function formatYyyyMmDd(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+// /job.api/list requires `from`/`to` params (yyyyMMdd) spanning less than
+// a year -- both undocumented until tested against a live tenant (400s one
+// requirement at a time: missing from, then missing to, then "date range
+// ... less than one year"). Computed fresh on every call as a rolling
+// 360-day window ending today, rather than hardcoded dates that would
+// eventually go stale -- trades "might miss a job opened >1yr ago that's
+// still in progress" for "always a valid range, no maintenance".
+export function xpmJobListDateRange(): { from: string; to: string } {
+  const now = new Date();
+  const yearAgo = new Date(now);
+  yearAgo.setUTCDate(yearAgo.getUTCDate() - 360);
+  return { from: formatYyyyMmDd(yearAgo), to: formatYyyyMmDd(now) };
+}
 
 // In-progress jobs owned by the given Partner. Shared by staff and client
 // derivation so both only need one job.api/list call.
@@ -266,8 +279,9 @@ async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
   if (!partnerName) return [];
 
+  const { from, to } = xpmJobListDateRange();
   const jobs = await xpmFetch<XpmJobListResponse>(
-    `/job.api/list?status=InProgress&from=${JOB_LIST_FROM_DATE}&to=${JOB_LIST_TO_DATE}`,
+    `/job.api/list?status=InProgress&from=${from}&to=${to}`,
   );
   const jobsArr = asArray(jobs.Response?.Jobs?.Job);
   return jobsArr.filter((job) => job.Partner?.Name === partnerName);
