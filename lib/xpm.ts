@@ -77,11 +77,80 @@ async function currentRefreshToken(): Promise<string> {
   return process.env.XPM_REFRESH_TOKEN as string;
 }
 
-interface XeroTokenResponse {
+export interface XeroTokenResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
   token_type: string;
+}
+
+// ─── One-time OAuth bootstrap ───────────────────────────────────────────
+//
+// Everything above assumes a refresh token already exists (XPM_REFRESH_TOKEN
+// or a cached rotation of it). These three are only used by
+// app/api/xpm/callback/route.ts, the once-ever consent callback that
+// produces that first refresh token and the tenant ID -- deliberately not
+// gated by isXpmConfigured(), since at this point XPM_REFRESH_TOKEN and
+// XPM_TENANT_ID don't exist yet.
+
+export interface XeroConnection {
+  tenantId: string;
+  tenantName: string;
+}
+
+export async function exchangeXeroAuthorizationCode(
+  code: string,
+  redirectUri: string,
+): Promise<XeroTokenResponse> {
+  if (!process.env.XPM_CLIENT_ID || !process.env.XPM_CLIENT_SECRET) {
+    throw new Error("XPM_CLIENT_ID and XPM_CLIENT_SECRET must be set before completing Xero's OAuth consent.");
+  }
+  const credentials = Buffer.from(
+    `${process.env.XPM_CLIENT_ID}:${process.env.XPM_CLIENT_SECRET}`,
+  ).toString("base64");
+
+  const res = await fetch(IDENTITY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${credentials}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Xero token exchange failed: ${res.status} ${body}`);
+  }
+  return (await res.json()) as XeroTokenResponse;
+}
+
+export async function fetchXeroConnections(accessToken: string): Promise<XeroConnection[]> {
+  const res = await fetch("https://api.xero.com/connections", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Fetching Xero connections failed: ${res.status} ${body}`);
+  }
+  const data = (await res.json()) as { tenantId: string; tenantName: string }[];
+  return data.map((c) => ({ tenantId: c.tenantId, tenantName: c.tenantName }));
+}
+
+// Caches the freshly-exchanged tokens the same way refreshAccessToken()
+// does, so the app can start working immediately once XPM_TENANT_ID is set
+// -- XPM_REFRESH_TOKEN as an env var only ever matters as a cold-start
+// fallback if the cache is later flushed.
+export async function storeInitialXeroTokens(tokens: XeroTokenResponse): Promise<void> {
+  await cacheSet(REFRESH_KEY, encryptSecret(tokens.refresh_token));
+  await cacheSet(REFRESHED_AT_KEY, new Date().toISOString());
+  const accessTtl = Math.max(tokens.expires_in - 5 * 60, 60);
+  await cacheSet(TOKEN_KEY, encryptSecret(tokens.access_token), accessTtl);
 }
 
 async function refreshAccessToken(): Promise<string> {
