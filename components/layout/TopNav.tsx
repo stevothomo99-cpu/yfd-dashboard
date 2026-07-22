@@ -11,23 +11,33 @@ import { initialsOf } from "@/lib/utils";
 // their API routes are untouched, just unlinked, so they're easy to compare
 // against or restore if needed. The standalone Jobs list (/jobs) was
 // retired outright -- jobs now live under each client's tile on /clients.
-const navItems = [
+//
+// Nav is role-gated: Business KPIs/Team/Leaderboard/Settings are
+// company-wide/admin views, only shown to admins. Dashboard/My Work/
+// Clients/Timesheets are every user's own work tools.
+const ADMIN_ONLY_ITEMS = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
   { label: "Leaderboard", href: "/leaderboard" },
-  { label: "Timesheets", href: "/timesheets" },
+];
+const EVERYONE_ITEMS = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "My Work", href: "/my-work" },
   { label: "Clients", href: "/clients" },
-  { label: "Settings", href: "/settings" },
+  { label: "Timesheets", href: "/timesheets" },
 ];
+const SETTINGS_ITEM = { label: "Settings", href: "/settings" };
 
 interface TopNavProps {
   userName: string | null;
+  isAdmin: boolean;
 }
 
-export default function TopNav({ userName }: TopNavProps) {
+export default function TopNav({ userName, isAdmin }: TopNavProps) {
   const pathname = usePathname();
+  const navItems = isAdmin
+    ? [...ADMIN_ONLY_ITEMS, ...EVERYONE_ITEMS, SETTINGS_ITEM]
+    : EVERYONE_ITEMS;
 
   return (
     <div

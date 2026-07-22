@@ -8,10 +8,11 @@ export default async function DashboardLayout({
 }) {
   const session = await auth();
   const userName = session?.user?.name ?? null;
+  const isAdmin = session?.user?.role === "admin";
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f4f0" }}>
-      <TopNav userName={userName} />
+      <TopNav userName={userName} isAdmin={isAdmin} />
       <main style={{ maxWidth: "1400px", margin: "0 auto", padding: "1.5rem 1rem" }}>
         {children}
       </main>
