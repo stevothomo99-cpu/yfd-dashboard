@@ -205,6 +205,12 @@ export async function xpmFetch<T>(path: string, init?: RequestInit): Promise<T> 
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Xero-Tenant-Id", process.env.XPM_TENANT_ID as string);
     headers.set("Accept", "application/json");
+    // Practice Manager 3.1 doesn't actually honour Accept: application/json
+    // for content negotiation without opting into this feature flag --
+    // without it, every response comes back as XML regardless of Accept,
+    // discovered by testing against a live tenant (undocumented in any
+    // comment here before now).
+    headers.set("Xero-Features", "practice-strict-content-type");
     return headers;
   };
 
