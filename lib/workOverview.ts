@@ -5,24 +5,29 @@ import type { XpmTimesheet } from "@/types/xpm";
 // kept separate from lib/workflow.ts (Supabase-backed) and lib/xpm.ts
 // (XPM API client) since these just shape data those two already fetch.
 
-export interface WorkOverviewCounts {
-  basOverdueCount: number;
-  basOpenCount: number;
-  overdueCount: number;
-}
-
 // BAS/IAS is one of the seeded task_types (see migrations/004) -- matched
 // by name since there's no dedicated "is this a BAS task" flag.
 const BAS_TYPE_NAME = "BAS/IAS";
 
-export function computeWorkOverviewCounts(board: TaskWithDetails[], today: string): WorkOverviewCounts {
-  const active = board.filter((t) => !t.statusIsComplete);
-  const overdueCount = active.filter((t) => t.dueDate && t.dueDate < today).length;
+// Returns the actual overdue tasks (not just a count) so the dashboard's
+// Overdue tile can show a mini table, not just a number.
+export function getOverdueTasks(board: TaskWithDetails[], today: string): TaskWithDetails[] {
+  return board
+    .filter((t) => !t.statusIsComplete && t.dueDate && t.dueDate < today)
+    .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
+}
 
-  const basActive = active.filter((t) => t.typeName === BAS_TYPE_NAME);
-  const basOverdueCount = basActive.filter((t) => t.dueDate && t.dueDate < today).length;
-
-  return { basOverdueCount, basOpenCount: basActive.length, overdueCount };
+// Open (non-complete) BAS/IAS tasks -- feeds the BAS Status tile's mini
+// table. Overdue ones sort first.
+export function getBasTasks(board: TaskWithDetails[], today: string): TaskWithDetails[] {
+  return board
+    .filter((t) => !t.statusIsComplete && t.typeName === BAS_TYPE_NAME)
+    .sort((a, b) => {
+      const aOverdue = a.dueDate && a.dueDate < today;
+      const bOverdue = b.dueDate && b.dueDate < today;
+      if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+      return (a.dueDate ?? "").localeCompare(b.dueDate ?? "");
+    });
 }
 
 export interface UtilisationPeriod {
