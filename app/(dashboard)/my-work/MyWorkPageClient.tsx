@@ -32,7 +32,16 @@ const MASTER_VIEWS: { value: MasterView; label: string }[] = [
   { value: "completed", label: "Completed" },
 ];
 
-type SortField = "title" | "customerName" | "jobName" | "typeName" | "statusName" | "assigneeName" | "dueDate";
+type SortField =
+  | "title"
+  | "customerName"
+  | "jobName"
+  | "typeName"
+  | "statusName"
+  | "ownerName"
+  | "assignedToName"
+  | "startDate"
+  | "dueDate";
 type SortDir = "asc" | "desc";
 
 const COLUMNS: { field: SortField; label: string }[] = [
@@ -41,9 +50,33 @@ const COLUMNS: { field: SortField; label: string }[] = [
   { field: "jobName", label: "Job" },
   { field: "typeName", label: "Category" },
   { field: "statusName", label: "Status" },
-  { field: "assigneeName", label: "Assignee" },
+  { field: "ownerName", label: "Owner" },
+  { field: "assignedToName", label: "Assigned to" },
+  { field: "startDate", label: "Start" },
   { field: "dueDate", label: "Due" },
 ];
+
+// Owner is the permanent assignee (tasks.assignee_id); Assigned To is
+// whoever currently has it in practice -- the temp assignee if a temporary
+// reassignment is active, otherwise the same person as Owner.
+function ownerName(t: TaskWithDetails): string {
+  return t.assigneeName ?? "Unassigned";
+}
+function assignedToName(t: TaskWithDetails): string {
+  return t.tempAssigneeName ?? t.assigneeName ?? "Unassigned";
+}
+
+const FIELD_GETTERS: Record<SortField, (t: TaskWithDetails) => string> = {
+  title: (t) => t.title,
+  customerName: (t) => t.customerName,
+  jobName: (t) => t.jobName,
+  typeName: (t) => t.typeName ?? "",
+  statusName: (t) => t.statusName,
+  ownerName,
+  assignedToName,
+  startDate: (t) => t.startDate ?? "9999-99-99",
+  dueDate: (t) => t.dueDate ?? "9999-99-99",
+};
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -72,6 +105,10 @@ export default function MyWorkPageClient({
   const [showFilters, setShowFilters] = useState(false);
   const [clientFilter, setClientFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>({ selected: [], mode: "exclude" });
+  const [ownerFilter, setOwnerFilter] = useState<string>("");
+  const [assignedToFilter, setAssignedToFilter] = useState<string>("");
+  const [startFrom, setStartFrom] = useState<string>("");
+  const [startTo, setStartTo] = useState<string>("");
   const [sortField, setSortField] = useState<SortField>("dueDate");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -98,6 +135,8 @@ export default function MyWorkPageClient({
     () => Array.from(new Set(tasks.map((t) => t.statusName))).sort(),
     [tasks]
   );
+  const ownerOptions = useMemo(() => Array.from(new Set(tasks.map(ownerName))).sort(), [tasks]);
+  const assignedToOptions = useMemo(() => Array.from(new Set(tasks.map(assignedToName))).sort(), [tasks]);
 
   const filtered = useMemo(() => {
     let rows = tasks;
@@ -107,6 +146,10 @@ export default function MyWorkPageClient({
     else if (view === "completed") rows = rows.filter((t) => t.statusIsComplete);
 
     if (clientFilter) rows = rows.filter((t) => t.customerName === clientFilter);
+    if (ownerFilter) rows = rows.filter((t) => ownerName(t) === ownerFilter);
+    if (assignedToFilter) rows = rows.filter((t) => assignedToName(t) === assignedToFilter);
+    if (startFrom) rows = rows.filter((t) => t.startDate && t.startDate >= startFrom);
+    if (startTo) rows = rows.filter((t) => t.startDate && t.startDate <= startTo);
 
     rows = applyStatusFilter(
       rows.map((t) => ({ ...t, rawStatus: t.statusName })),
@@ -124,15 +167,23 @@ export default function MyWorkPageClient({
     }
 
     const dir = sortDir === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => {
-      const av = (a[sortField] ?? "") as string;
-      const bv = (b[sortField] ?? "") as string;
-      if (sortField === "dueDate") {
-        return dir * (av || "9999-99-99").localeCompare(bv || "9999-99-99");
-      }
-      return dir * av.localeCompare(bv);
-    });
-  }, [tasks, view, clientFilter, statusFilter, search, sortField, sortDir, today, weekEnd]);
+    const getField = FIELD_GETTERS[sortField];
+    return [...rows].sort((a, b) => dir * getField(a).localeCompare(getField(b)));
+  }, [
+    tasks,
+    view,
+    clientFilter,
+    statusFilter,
+    ownerFilter,
+    assignedToFilter,
+    startFrom,
+    startTo,
+    search,
+    sortField,
+    sortDir,
+    today,
+    weekEnd,
+  ]);
 
   function handleSort(field: SortField) {
     if (field === sortField) {
@@ -231,6 +282,48 @@ export default function MyWorkPageClient({
             ))}
           </select>
           <StatusFilter options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
+
+          <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} style={selectStyle}>
+            <option value="">All owners</option>
+            {ownerOptions.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+
+          <select value={assignedToFilter} onChange={(e) => setAssignedToFilter(e.target.value)} style={selectStyle}>
+            <option value="">All assigned to</option>
+            {assignedToOptions.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+
+          <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#888780" }}>
+            Start
+            <input type="date" value={startFrom} onChange={(e) => setStartFrom(e.target.value)} style={dateInputStyle} />
+            to
+            <input type="date" value={startTo} onChange={(e) => setStartTo(e.target.value)} style={dateInputStyle} />
+          </label>
+
+          {ownerFilter || assignedToFilter || startFrom || startTo || clientFilter || statusFilter.selected.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setClientFilter("");
+                setOwnerFilter("");
+                setAssignedToFilter("");
+                setStartFrom("");
+                setStartTo("");
+                setStatusFilter({ selected: [], mode: "exclude" });
+              }}
+              style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              Clear all
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -241,7 +334,7 @@ export default function MyWorkPageClient({
       ) : (
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", overflow: "hidden", marginTop: "12px" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1080px" }}>
               <thead>
                 <tr style={{ background: "#f5f4f0", borderBottom: "0.5px solid #e1e0d9" }}>
                   {COLUMNS.map((col) => (
@@ -292,7 +385,9 @@ export default function MyWorkPageClient({
                       <td style={cell}>
                         <Chip label={t.statusName} color={t.statusColor} />
                       </td>
-                      <td style={cell}>{t.assigneeName ?? "Unassigned"}</td>
+                      <td style={cell}>{ownerName(t)}</td>
+                      <td style={cell}>{assignedToName(t)}</td>
+                      <td style={{ ...cell, whiteSpace: "nowrap" }}>{t.startDate ?? "—"}</td>
                       <td style={{ ...cell, whiteSpace: "nowrap" }}>{t.dueDate ?? "—"}</td>
                     </tr>
                   );
@@ -388,6 +483,16 @@ const addFilterStyle: React.CSSProperties = {
   border: "0.5px solid #e1e0d9",
   cursor: "pointer",
   textDecoration: "underline",
+};
+
+const dateInputStyle: React.CSSProperties = {
+  fontSize: "12px",
+  padding: "5px 8px",
+  borderRadius: "6px",
+  border: "0.5px solid #e1e0d9",
+  background: "white",
+  color: "#111111",
+  outline: "none",
 };
 
 const searchStyle: React.CSSProperties = {
