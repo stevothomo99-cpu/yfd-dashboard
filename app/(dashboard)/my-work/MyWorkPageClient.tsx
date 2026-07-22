@@ -127,6 +127,29 @@ export default function MyWorkPageClient({
   const [startTo, setStartTo] = useState<string>("");
   const [sortField, setSortField] = useState<SortField>("dueDate");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [columnOrder, setColumnOrder] = useState<SortField[]>(() => COLUMNS.map((c) => c.field));
+  const [dragField, setDragField] = useState<SortField | null>(null);
+
+  const orderedColumns = useMemo(
+    () => columnOrder.map((field) => COLUMNS.find((c) => c.field === field)!),
+    [columnOrder]
+  );
+
+  function handleColumnDrop(targetField: SortField) {
+    if (!dragField || dragField === targetField) {
+      setDragField(null);
+      return;
+    }
+    setColumnOrder((prev) => {
+      const next = [...prev];
+      const fromIdx = next.indexOf(dragField);
+      const toIdx = next.indexOf(targetField);
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, dragField);
+      return next;
+    });
+    setDragField(null);
+  }
 
   // Shared re-fetch used both by the admin "viewing as" override and by the
   // New Task modal's post-create refresh. Admins pass staffId explicitly (the
@@ -370,12 +393,27 @@ export default function MyWorkPageClient({
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1080px" }}>
               <thead>
                 <tr style={{ background: "#f5f4f0", borderBottom: "0.5px solid #e1e0d9" }}>
-                  {COLUMNS.map((col) => (
+                  {orderedColumns.map((col) => (
                     <th
                       key={col.field}
+                      draggable
+                      onDragStart={() => setDragField(col.field)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handleColumnDrop(col.field);
+                      }}
+                      onDragEnd={() => setDragField(null)}
                       onClick={() => handleSort(col.field)}
-                      style={{ ...thStyle, cursor: "pointer", userSelect: "none" }}
+                      title="Click to sort · drag to reorder"
+                      style={{
+                        ...thStyle,
+                        cursor: "grab",
+                        userSelect: "none",
+                        opacity: dragField === col.field ? 0.4 : 1,
+                      }}
                     >
+                      <span style={{ color: "#c7c5bc", marginRight: "4px" }}>⠿</span>
                       {col.label}
                       {sortField === col.field ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                     </th>
@@ -385,43 +423,23 @@ export default function MyWorkPageClient({
               <tbody>
                 {filtered.map((t) => {
                   const tone = toneOf(t, today, weekEnd);
-                  const isOwner = t.assigneeId === staffId;
                   const textColor = tone === "completed" ? "#a8a69f" : "#111111";
                   const cell: React.CSSProperties = { ...tdStyle, color: textColor };
                   return (
                     <tr key={t.id} style={rowStyle(tone)}>
-                      <td style={{ ...cell, fontWeight: 500 }}>
-                        {t.title}
-                        {t.recurrence !== "none" ? (
-                          <span style={{ marginLeft: "6px", fontSize: "10px", color: "#888780", fontWeight: 400 }}>
-                            ({RECURRENCE_LABEL[t.recurrence]})
-                          </span>
-                        ) : null}
-                        {t.isTemporarilyReassigned ? (
-                          <span
-                            title={
-                              isOwner
-                                ? `Currently with ${t.tempAssigneeName ?? "someone else"} (temporary)`
-                                : `Temporarily assigned ${t.tempAssigneeId === staffId ? "to you" : `to ${t.tempAssigneeName ?? "someone else"}`} -- owned by ${t.assigneeName ?? "someone else"}`
-                            }
-                            style={{ marginLeft: "6px", fontSize: "11px", color: "#9b59b6", cursor: "help" }}
-                          >
-                            ⇄
-                          </span>
-                        ) : null}
-                      </td>
-                      <td style={cell}>{t.customerName}</td>
-                      <td style={cell}>{t.jobName}</td>
-                      <td style={cell}>
-                        {t.typeName ? <Chip label={t.typeName} color={t.typeColor ?? "#888780"} /> : "—"}
-                      </td>
-                      <td style={cell}>
-                        <Chip label={t.statusName} color={t.statusColor} />
-                      </td>
-                      <td style={cell}>{ownerName(t)}</td>
-                      <td style={cell}>{assignedToName(t)}</td>
-                      <td style={{ ...cell, whiteSpace: "nowrap" }}>{t.startDate ?? "—"}</td>
-                      <td style={{ ...cell, whiteSpace: "nowrap" }}>{t.dueDate ?? "—"}</td>
+                      {orderedColumns.map((col) => {
+                        const extra: React.CSSProperties =
+                          col.field === "title"
+                            ? { fontWeight: 500 }
+                            : col.field === "startDate" || col.field === "dueDate"
+                              ? { whiteSpace: "nowrap" }
+                              : {};
+                        return (
+                          <td key={col.field} style={{ ...cell, ...extra }}>
+                            {renderCell(col.field, t, staffId)}
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })}
@@ -443,6 +461,56 @@ export default function MyWorkPageClient({
       ) : null}
     </div>
   );
+}
+
+// Column order (via drag) is independent of which field each column shows,
+// so cell content is looked up by field rather than hardcoded by position.
+function renderCell(field: SortField, t: TaskWithDetails, staffId: string): React.ReactNode {
+  switch (field) {
+    case "title": {
+      const isOwner = t.assigneeId === staffId;
+      return (
+        <>
+          {t.title}
+          {t.recurrence !== "none" ? (
+            <span style={{ marginLeft: "6px", fontSize: "10px", color: "#888780", fontWeight: 400 }}>
+              ({RECURRENCE_LABEL[t.recurrence]})
+            </span>
+          ) : null}
+          {t.isTemporarilyReassigned ? (
+            <span
+              title={
+                isOwner
+                  ? `Currently with ${t.tempAssigneeName ?? "someone else"} (temporary)`
+                  : `Temporarily assigned ${t.tempAssigneeId === staffId ? "to you" : `to ${t.tempAssigneeName ?? "someone else"}`} -- owned by ${t.assigneeName ?? "someone else"}`
+              }
+              style={{ marginLeft: "6px", fontSize: "11px", color: "#9b59b6", cursor: "help" }}
+            >
+              ⇄
+            </span>
+          ) : null}
+        </>
+      );
+    }
+    case "customerName":
+      return t.customerName;
+    case "jobName":
+      return t.jobName;
+    case "typeName":
+      return t.typeName ? <Chip label={t.typeName} color={t.typeColor ?? "#888780"} /> : "—";
+    case "statusName":
+      return <Chip label={t.statusName} color={t.statusColor} />;
+    case "ownerName":
+      return ownerName(t);
+    case "assignedToName":
+      return assignedToName(t);
+    case "startDate":
+      return t.startDate ?? "—";
+    case "dueDate":
+      return t.dueDate ?? "—";
+    default:
+      return null;
+  }
 }
 
 function toneOf(t: TaskWithDetails, today: string, weekEnd: string): "overdue" | "week" | "normal" | "completed" {
