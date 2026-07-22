@@ -1,6 +1,15 @@
 import { auth } from "@/auth";
 import MyWorkPageClient from "./MyWorkPageClient";
-import { getStaffByEmail, getWorkBoardForStaff, listStaff } from "@/lib/workflow";
+import {
+  getInProgressJobsForPartner,
+  getPartners,
+  getStaffByEmail,
+  getWorkBoardForStaff,
+  listStaff,
+  listStatuses,
+  listTaskTypes,
+} from "@/lib/workflow";
+import type { JobWithCustomer } from "@/types/workflow";
 
 // Server entry point for the per-user Work Item board. Identity is resolved
 // strictly from the logged-in session's email, matched (case-insensitively)
@@ -24,6 +33,20 @@ export default async function MyWorkPage() {
   const activeStaff = sessionStaff ?? (isAdmin ? allStaff[0] ?? null : null);
   const tasks = activeStaff ? await getWorkBoardForStaff(activeStaff) : [];
 
+  // Reference data for the "+ New Task" modal -- small datasets (single-digit
+  // partners/managers/jobs today), fetched up front server-side same as
+  // /jobs, so the modal never has to refetch on open.
+  const [partners, staffForForm, statuses, taskTypes] = await Promise.all([
+    getPartners(),
+    isAdmin ? Promise.resolve(allStaff) : listStaff(),
+    listStatuses(),
+    listTaskTypes(),
+  ]);
+  const jobsByPartner = await Promise.all(partners.map((p) => getInProgressJobsForPartner(p.id)));
+  const jobsById = new Map<string, JobWithCustomer>();
+  for (const jobs of jobsByPartner) for (const job of jobs) jobsById.set(job.id, job);
+  const allJobs = Array.from(jobsById.values());
+
   return (
     <MyWorkPageClient
       allStaff={allStaff}
@@ -32,6 +55,10 @@ export default async function MyWorkPage() {
       defaultStaffId={activeStaff?.id ?? null}
       defaultStaffName={activeStaff?.name ?? null}
       initialTasks={tasks}
+      jobs={allJobs}
+      staffOptions={staffForForm}
+      statuses={statuses}
+      taskTypes={taskTypes}
     />
   );
 }

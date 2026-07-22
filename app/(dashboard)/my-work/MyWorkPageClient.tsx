@@ -1,9 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
-import type { TaskWithDetails, WorkflowStaff } from "@/types/workflow";
+import NewTaskModal from "@/components/dashboard/NewTaskModal";
+import type {
+  JobWithCustomer,
+  TaskWithDetails,
+  WorkflowStaff,
+  WorkflowStatus,
+  WorkflowTaskType,
+} from "@/types/workflow";
 
 interface MyWorkPageClientProps {
   allStaff: WorkflowStaff[];
@@ -12,6 +19,10 @@ interface MyWorkPageClientProps {
   defaultStaffId: string | null;
   defaultStaffName: string | null;
   initialTasks: TaskWithDetails[];
+  jobs: JobWithCustomer[];
+  staffOptions: WorkflowStaff[];
+  statuses: WorkflowStatus[];
+  taskTypes: WorkflowTaskType[];
 }
 
 const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
@@ -95,10 +106,15 @@ export default function MyWorkPageClient({
   defaultStaffId,
   defaultStaffName,
   initialTasks,
+  jobs,
+  staffOptions,
+  statuses,
+  taskTypes,
 }: MyWorkPageClientProps) {
   const [staffId, setStaffId] = useState<string | null>(defaultStaffId);
   const [tasks, setTasks] = useState<TaskWithDetails[]>(initialTasks);
   const [loading, setLoading] = useState(false);
+  const [showNewTask, setShowNewTask] = useState(false);
 
   const [view, setView] = useState<MasterView>("all");
   const [search, setSearch] = useState("");
@@ -112,16 +128,29 @@ export default function MyWorkPageClient({
   const [sortField, setSortField] = useState<SortField>("dueDate");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
+  // Shared re-fetch used both by the admin "viewing as" override and by the
+  // New Task modal's post-create refresh. Admins pass staffId explicitly (the
+  // board they're currently viewing); everyone else's board is resolved from
+  // their session email server-side, so staffId is only ever forwarded when
+  // this session is an admin (matching the auth rule in the API route).
+  const refreshTasks = useCallback(
+    async (nextStaffId: string | null) => {
+      setLoading(true);
+      try {
+        const url = isAdmin && nextStaffId ? `/api/workflow/my-work?staffId=${nextStaffId}` : "/api/workflow/my-work";
+        const res = await fetch(url);
+        const data = await res.json();
+        setTasks(data.tasks ?? []);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [isAdmin]
+  );
+
   async function handleStaffChange(nextStaffId: string) {
     setStaffId(nextStaffId);
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/workflow/my-work?staffId=${nextStaffId}`);
-      const data = await res.json();
-      setTasks(data.tasks ?? []);
-    } finally {
-      setLoading(false);
-    }
+    await refreshTasks(nextStaffId);
   }
 
   const today = todayIso();
@@ -256,6 +285,10 @@ export default function MyWorkPageClient({
 
         <button type="button" onClick={() => setShowFilters((s) => !s)} style={addFilterStyle}>
           {showFilters ? "Hide filters" : "+ Add filter"}
+        </button>
+
+        <button type="button" onClick={() => setShowNewTask(true)} style={newTaskButtonStyle}>
+          + New Task
         </button>
 
         <input
@@ -397,6 +430,17 @@ export default function MyWorkPageClient({
           </div>
         </div>
       )}
+
+      {showNewTask ? (
+        <NewTaskModal
+          onClose={() => setShowNewTask(false)}
+          onCreated={() => refreshTasks(staffId)}
+          jobs={jobs}
+          staff={staffOptions}
+          statuses={statuses}
+          taskTypes={taskTypes}
+        />
+      ) : null}
     </div>
   );
 }
@@ -483,6 +527,17 @@ const addFilterStyle: React.CSSProperties = {
   border: "0.5px solid #e1e0d9",
   cursor: "pointer",
   textDecoration: "underline",
+};
+
+const newTaskButtonStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 500,
+  padding: "6px 12px",
+  borderRadius: "999px",
+  background: "#111111",
+  color: "white",
+  border: "none",
+  cursor: "pointer",
 };
 
 const dateInputStyle: React.CSSProperties = {
