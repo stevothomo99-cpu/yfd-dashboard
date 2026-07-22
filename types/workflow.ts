@@ -103,3 +103,41 @@ export interface CreateTaskInput {
   typeId?: string | null;
   recurrence?: RecurrenceInterval;
 }
+
+// Summary card data for the /clients tile grid, built from customers/jobs/
+// tasks -- replaces the old Karbon-derived ClientTile mock data. YTD
+// invoiced/BAS/revenue-breakdown aren't included: those depend on XPM
+// invoice data being linked via customers.xpm_client_id, which the
+// dummy/trial customers don't have set yet.
+export interface ClientSummary {
+  id: string;
+  name: string;
+  managerName: string | null;
+  overdueCount: number;
+  inProgressCount: number;
+  completedCount: number;
+}
+
+export interface CustomerNote {
+  id: string;
+  customerId: string;
+  authorName: string;
+  authorEmail: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export interface CustomerFile {
+  id: string;
+  customerId: string;
+  fileName: string;
+  storagePath: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  uploadedByName: string | null;
+  uploadedByEmail: string | null;
+  createdAt: string;
+  // Only populated when listing -- a fresh, time-limited signed URL, not
+  // stored anywhere (the bucket is private).
+  downloadUrl?: string;
+}

@@ -1,6 +1,9 @@
 import { getSupabaseAdmin } from "./supabase";
 import type {
+  ClientSummary,
   CreateTaskInput,
+  CustomerFile,
+  CustomerNote,
   JobWithCustomer,
   RecurrenceInterval,
   StaffRole,
@@ -469,4 +472,223 @@ export async function reassignTaskTemporarily(
     return false;
   }
   return true;
+}
+
+// Every task under every job attached to a given customer -- feeds the
+// /clients drawer's task list.
+export async function getTasksForCustomer(customerId: string): Promise<TaskWithDetails[]> {
+  const admin = getSupabaseAdmin();
+  const { data: jobs, error } = await admin.from("jobs").select("id").eq("customer_id", customerId).returns<
+    { id: string }[]
+  >();
+  if (error) {
+    console.error("[workflow] getTasksForCustomer failed:", error.message);
+    return [];
+  }
+  return getTasksForJobIds((jobs ?? []).map((j) => j.id));
+}
+
+// Builds the /clients tile-grid summary for every customer: manager (from
+// their job(s)) and task counts by tone. "Multiple" is shown for a client
+// whose jobs have more than one distinct manager.
+export async function getClientSummaries(): Promise<ClientSummary[]> {
+  const admin = getSupabaseAdmin();
+  const [{ data: customers, error: customersError }, { data: allTasks, error: tasksError }, lookups] =
+    await Promise.all([
+      admin.from("customers").select("id, xpm_client_id, name, partner_id").order("name").returns<CustomerRow[]>(),
+      admin.from("tasks").select("*").returns<TaskRow[]>(),
+      fetchLookupMaps(),
+    ]);
+
+  if (customersError) console.error("[workflow] getClientSummaries (customers) failed:", customersError.message);
+  if (tasksError) console.error("[workflow] getClientSummaries (tasks) failed:", tasksError.message);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const jobs = Array.from(lookups.jobsById.values());
+
+  return (customers ?? []).map((c) => {
+    const customerJobs = jobs.filter((j) => j.customer_id === c.id);
+    const jobIds = new Set(customerJobs.map((j) => j.id));
+    const managerIds = new Set(customerJobs.map((j) => j.manager_id).filter((id): id is string => Boolean(id)));
+
+    let managerName: string | null = null;
+    if (managerIds.size === 1) {
+      managerName = lookups.staffById.get(Array.from(managerIds)[0])?.name ?? null;
+    } else if (managerIds.size > 1) {
+      managerName = "Multiple";
+    }
+
+    let overdueCount = 0;
+    let inProgressCount = 0;
+    let completedCount = 0;
+    for (const t of allTasks ?? []) {
+      if (!jobIds.has(t.job_id)) continue;
+      const isComplete = lookups.statusesById.get(t.status_id)?.is_complete ?? false;
+      if (isComplete) completedCount += 1;
+      else if (t.due_date && t.due_date < today) overdueCount += 1;
+      else inProgressCount += 1;
+    }
+
+    return { id: c.id, name: c.name, managerName, overdueCount, inProgressCount, completedCount };
+  });
+}
+
+interface CustomerNoteRow {
+  id: string;
+  customer_id: string;
+  author_name: string;
+  author_email: string | null;
+  body: string;
+  created_at: string;
+}
+
+function mapCustomerNote(row: CustomerNoteRow): CustomerNote {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    authorName: row.author_name,
+    authorEmail: row.author_email,
+    body: row.body,
+    createdAt: row.created_at,
+  };
+}
+
+export async function getCustomerNotes(customerId: string): Promise<CustomerNote[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_notes")
+    .select("*")
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: false })
+    .returns<CustomerNoteRow[]>();
+
+  if (error) {
+    console.error("[workflow] getCustomerNotes failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(mapCustomerNote);
+}
+
+export async function addCustomerNote(
+  customerId: string,
+  authorName: string,
+  authorEmail: string | null,
+  body: string
+): Promise<CustomerNote | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_notes")
+    .insert({ customer_id: customerId, author_name: authorName, author_email: authorEmail, body })
+    .select("*")
+    .single<CustomerNoteRow>();
+
+  if (error) {
+    console.error("[workflow] addCustomerNote failed:", error.message);
+    return null;
+  }
+  return mapCustomerNote(data);
+}
+
+interface CustomerFileRow {
+  id: string;
+  customer_id: string;
+  file_name: string;
+  storage_path: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_by_name: string | null;
+  uploaded_by_email: string | null;
+  created_at: string;
+}
+
+const FILES_BUCKET = "client-files";
+const SIGNED_URL_TTL_SECONDS = 600;
+
+function mapCustomerFile(row: CustomerFileRow): CustomerFile {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    fileName: row.file_name,
+    storagePath: row.storage_path,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    uploadedByName: row.uploaded_by_name,
+    uploadedByEmail: row.uploaded_by_email,
+    createdAt: row.created_at,
+  };
+}
+
+// Lists a customer's files with a fresh, time-limited signed download URL
+// on each -- the bucket is private, so nothing is ever served unsigned.
+export async function getCustomerFiles(customerId: string): Promise<CustomerFile[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_files")
+    .select("*")
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: false })
+    .returns<CustomerFileRow[]>();
+
+  if (error) {
+    console.error("[workflow] getCustomerFiles failed:", error.message);
+    return [];
+  }
+
+  return Promise.all(
+    (data ?? []).map(async (row) => {
+      const file = mapCustomerFile(row);
+      const { data: signed, error: signedError } = await admin.storage
+        .from(FILES_BUCKET)
+        .createSignedUrl(row.storage_path, SIGNED_URL_TTL_SECONDS);
+      if (signedError) {
+        console.error("[workflow] createSignedUrl failed for", row.storage_path, signedError.message);
+        return file;
+      }
+      return { ...file, downloadUrl: signed?.signedUrl };
+    })
+  );
+}
+
+// Uploads the file's bytes to Storage, then records its metadata. Returns
+// null (and logs) if either step fails -- callers should treat that as a
+// failed upload, not a partial one, since an orphaned storage object with
+// no metadata row is harmless (just unreachable dead weight).
+export async function uploadCustomerFile(
+  customerId: string,
+  file: File,
+  uploadedByName: string,
+  uploadedByEmail: string | null
+): Promise<CustomerFile | null> {
+  const admin = getSupabaseAdmin();
+  const storagePath = `${customerId}/${crypto.randomUUID()}-${file.name}`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  const { error: uploadError } = await admin.storage
+    .from(FILES_BUCKET)
+    .upload(storagePath, bytes, { contentType: file.type || undefined });
+
+  if (uploadError) {
+    console.error("[workflow] uploadCustomerFile (storage) failed:", uploadError.message);
+    return null;
+  }
+
+  const { data, error } = await admin
+    .from("customer_files")
+    .insert({
+      customer_id: customerId,
+      file_name: file.name,
+      storage_path: storagePath,
+      content_type: file.type || null,
+      size_bytes: file.size,
+      uploaded_by_name: uploadedByName,
+      uploaded_by_email: uploadedByEmail,
+    })
+    .select("*")
+    .single<CustomerFileRow>();
+
+  if (error) {
+    console.error("[workflow] uploadCustomerFile (metadata) failed:", error.message);
+    return null;
+  }
+  return mapCustomerFile(data);
 }
