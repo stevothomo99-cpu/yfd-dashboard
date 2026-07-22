@@ -229,27 +229,47 @@ export async function xpmFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return (await res.json()) as T;
 }
 
+interface XpmJobParty {
+  uuid: string;
+  name: string;
+}
+
+// Real flat shape confirmed against a live tenant -- the previous
+// Response.Jobs.Job nested-envelope guess never matched, so
+// fetchXpmJobsForPartner silently returned [] always (jobs.Response was
+// always undefined), which is why nothing ever actually synced before now.
 interface XpmJob {
-  Partner?: { UUID: string; Name: string };
-  Manager?: { UUID: string; Name: string };
-  Client?: { UUID: string; Name: string };
+  uuid: string;
+  name: string;
+  client?: XpmJobParty;
+  manager?: XpmJobParty;
+  partner?: XpmJobParty;
+  assigned?: XpmJobParty[];
+  state?: string;
 }
 
 interface XpmJobListResponse {
-  Response?: {
-    Jobs?: { Job?: XpmJob | XpmJob[] };
-  };
+  jobs?: XpmJob[];
+  status?: string;
 }
 
-interface XpmStaffDetailResponse {
-  Response?: {
-    Staff?: { UUID: string; Name: string; Email?: string };
-  };
+// Real flat shape confirmed against a live tenant, same story as jobs --
+// {staffList: [...], status: "OK"}, not a Response.Staff envelope. This one
+// call replaces the old per-manager staff.api/get/:id loop entirely.
+export interface XpmStaffRecord {
+  uuid: string;
+  name: string;
+  email: string;
 }
 
-function asArray<T>(value: T | T[] | undefined): T[] {
-  if (value === undefined) return [];
-  return Array.isArray(value) ? value : [value];
+interface XpmStaffListResponse {
+  staffList?: XpmStaffRecord[];
+  status?: string;
+}
+
+export async function fetchAllXpmStaffRecords(): Promise<XpmStaffRecord[]> {
+  const res = await xpmFetch<XpmStaffListResponse>("/staff.api/list");
+  return res.staffList ?? [];
 }
 
 function formatYyyyMmDd(d: Date): string {
@@ -273,9 +293,14 @@ export function xpmJobListDateRange(): { from: string; to: string } {
   return { from: formatYyyyMmDd(yearAgo), to: formatYyyyMmDd(now) };
 }
 
-// In-progress jobs owned by the given Partner. Shared by staff and client
-// derivation so both only need one job.api/list call.
-async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
+// In-progress jobs whose job-level "partner" field matches the given name
+// -- this is the Partner filter: the admin-configured name (e.g. "Steve
+// Thomas") scopes which jobs are "ours" out of the whole tenant, since XPM
+// jobs can carry a different senior staff member as their own job-level
+// partner. Shared by staff and client derivation so both only need one
+// job.api/list call. Exported (not just used internally) so the
+// staff/customers/jobs sync can pull the full job records too.
+export async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
   if (!partnerName) return [];
 
@@ -283,8 +308,7 @@ async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
   const jobs = await xpmFetch<XpmJobListResponse>(
     `/job.api/list?status=InProgress&from=${from}&to=${to}`,
   );
-  const jobsArr = asArray(jobs.Response?.Jobs?.Job);
-  return jobsArr.filter((job) => job.Partner?.Name === partnerName);
+  return (jobs.jobs ?? []).filter((job) => job.partner?.name === partnerName);
 }
 
 export interface XpmClientRef {
@@ -295,8 +319,8 @@ export interface XpmClientRef {
 function uniqueClientsFromJobs(jobs: XpmJob[]): XpmClientRef[] {
   const seen = new Map<string, XpmClientRef>();
   for (const job of jobs) {
-    if (job.Client?.UUID && !seen.has(job.Client.UUID)) {
-      seen.set(job.Client.UUID, { id: job.Client.UUID, name: job.Client.Name ?? "" });
+    if (job.client?.uuid && !seen.has(job.client.uuid)) {
+      seen.set(job.client.uuid, { id: job.client.uuid, name: job.client.name ?? "" });
     }
   }
   return Array.from(seen.values());
@@ -307,28 +331,30 @@ export async function fetchXpmClientsForPartner(partnerName: string): Promise<Xp
   return uniqueClientsFromJobs(jobs);
 }
 
+// Whoever appears as `manager` on the Partner-filtered jobs -- this is our
+// "Staff" role (not "Manager"; the job.manager field is the person actually
+// doing the work under the Partner filter's book of business, confirmed
+// directly). Sourced from the one-call staff.api/list instead of the old
+// per-manager staff.api/get/:id loop, which assumed a Response.Staff
+// envelope that never matched the real flat shape and always silently
+// returned nothing.
 export async function fetchXpmStaffForPartner(partnerName: string): Promise<XpmStaff[]> {
   const jobsArr = await fetchXpmJobsForPartner(partnerName);
 
   const managerIds = new Set<string>();
   for (const job of jobsArr) {
-    if (job.Manager?.UUID) managerIds.add(job.Manager.UUID);
+    if (job.manager?.uuid) managerIds.add(job.manager.uuid);
   }
+  if (managerIds.size === 0) return [];
 
-  const details = await Promise.all(
-    Array.from(managerIds).map((id) =>
-      xpmFetch<XpmStaffDetailResponse>(`/staff.api/get/${id}`).catch(() => null),
-    ),
-  );
-
-  return details
-    .map((d) => d?.Response?.Staff)
-    .filter((s): s is { UUID: string; Name: string; Email?: string } => Boolean(s))
+  const allStaff = await fetchAllXpmStaffRecords();
+  return allStaff
+    .filter((s) => managerIds.has(s.uuid))
     .map((s) => ({
-      id: s.UUID,
-      name: s.Name,
-      email: s.Email ?? "",
-      role: "Manager" as const,
+      id: s.uuid,
+      name: s.name,
+      email: s.email,
+      role: "Staff" as const,
       included: true,
     }));
 }
@@ -360,6 +386,14 @@ export async function getXpmStaff(
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+// Xero's XML-derived JSON collapses a single-item list to a bare object
+// instead of a one-element array -- still relied on by the time.api
+// parsing below, which hasn't been re-confirmed against a live tenant yet.
+function asArray<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function pickStr(obj: Record<string, unknown>, keys: string[]): string {
