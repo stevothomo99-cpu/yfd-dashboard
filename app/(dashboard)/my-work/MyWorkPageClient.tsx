@@ -118,10 +118,18 @@ export default function MyWorkPageClient({
 
   const [view, setView] = useState<MasterView>("all");
   const [search, setSearch] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [clientFilter, setClientFilter] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>({ selected: [], mode: "exclude" });
-  const [ownerFilter, setOwnerFilter] = useState<string>("");
+  // Defaults to excluding whatever status(es) are marked complete, so a
+  // completed backlog doesn't clutter the default view -- computed from the
+  // actual data rather than hardcoding "Completed" as a literal.
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(() => ({
+    selected: Array.from(new Set(initialTasks.filter((t) => t.statusIsComplete).map((t) => t.statusName))),
+    mode: "exclude",
+  }));
+  // Defaults to "Me" -- the logged-in viewer's own board, not the full
+  // Partner/Manager rollup -- but stays fully changeable via the dropdown.
+  const [ownerFilter, setOwnerFilter] = useState<string>(defaultStaffName ?? "");
   const [assignedToFilter, setAssignedToFilter] = useState<string>("");
   const [startFrom, setStartFrom] = useState<string>("");
   const [startTo, setStartTo] = useState<string>("");
@@ -187,7 +195,10 @@ export default function MyWorkPageClient({
     () => Array.from(new Set(tasks.map((t) => t.statusName))).sort(),
     [tasks]
   );
-  const ownerOptions = useMemo(() => Array.from(new Set(tasks.map(ownerName))).sort(), [tasks]);
+  const ownerOptions = useMemo(
+    () => Array.from(new Set([...(defaultStaffName ? [defaultStaffName] : []), ...tasks.map(ownerName)])).sort(),
+    [tasks, defaultStaffName]
+  );
   const assignedToOptions = useMemo(() => Array.from(new Set(tasks.map(assignedToName))).sort(), [tasks]);
 
   const filtered = useMemo(() => {
@@ -203,10 +214,15 @@ export default function MyWorkPageClient({
     if (startFrom) rows = rows.filter((t) => t.startDate && t.startDate >= startFrom);
     if (startTo) rows = rows.filter((t) => t.startDate && t.startDate <= startTo);
 
-    rows = applyStatusFilter(
-      rows.map((t) => ({ ...t, rawStatus: t.statusName })),
-      statusFilter
-    );
+    // The master "Completed" view is an explicit request to see completed
+    // items -- don't let the default exclude-completed status filter fight
+    // it and produce an empty list.
+    if (view !== "completed") {
+      rows = applyStatusFilter(
+        rows.map((t) => ({ ...t, rawStatus: t.statusName })),
+        statusFilter
+      );
+    }
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
