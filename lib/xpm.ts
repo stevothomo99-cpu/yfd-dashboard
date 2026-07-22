@@ -316,7 +316,7 @@ export interface XpmClientRef {
   name: string;
 }
 
-function uniqueClientsFromJobs(jobs: XpmJob[]): XpmClientRef[] {
+export function uniqueClientsFromJobs(jobs: XpmJob[]): XpmClientRef[] {
   const seen = new Map<string, XpmClientRef>();
   for (const job of jobs) {
     if (job.client?.uuid && !seen.has(job.client.uuid)) {

@@ -17,11 +17,24 @@ interface XpmStaffResponse {
   message?: string;
 }
 
+interface WorkflowSyncResult {
+  partnerName: string;
+  staffUpserted: number;
+  staffRemoved: number;
+  customersUpserted: number;
+  customersRemoved: number;
+  jobsUpserted: number;
+  jobsRemoved: number;
+}
+
 export default function SettingsPageClient({ initial }: { initial: SettingsSnapshot }) {
   const [partnerName, setPartnerName] = useState(initial.partnerName);
   const [snapshot, setSnapshot] = useState(initial);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workflowSyncing, setWorkflowSyncing] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [workflowResult, setWorkflowResult] = useState<WorkflowSyncResult | null>(null);
 
   async function persistExclusions(roster: SettingsSnapshot["roster"]) {
     const excludedStaffIds = roster
@@ -90,6 +103,21 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
       setError(err instanceof Error ? err.message : "Sync failed.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleWorkflowSync() {
+    setWorkflowSyncing(true);
+    setWorkflowError(null);
+    try {
+      const res = await fetch("/api/xpm/sync-workflow", { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Sync failed.");
+      setWorkflowResult(body as WorkflowSyncResult);
+    } catch (err) {
+      setWorkflowError(err instanceof Error ? err.message : "Sync failed.");
+    } finally {
+      setWorkflowSyncing(false);
     }
   }
 
@@ -190,6 +218,53 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
           ✓ Last synced at{" "}
           {new Date(snapshot.syncedAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
         </div>
+      </div>
+
+      <div
+        style={{
+          background: "white",
+          border: "0.5px solid #e1e0d9",
+          borderRadius: "14px",
+          padding: "1.4rem 1.5rem",
+          marginBottom: "14px",
+        }}
+      >
+        <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111", marginBottom: "4px" }}>
+          Live workflow data
+        </div>
+        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
+          Replaces the staff/client/job records that power My Work, Clients, and Dashboard with the
+          Partner filter&rsquo;s current XPM data. Dashboard tasks aren&rsquo;t touched, except that a
+          job leaving the in-progress list takes its tasks with it.
+        </div>
+
+        {workflowError ? <Banner tone="error">{workflowError}</Banner> : null}
+
+        <button
+          type="button"
+          disabled={!partnerName.trim() || workflowSyncing}
+          onClick={handleWorkflowSync}
+          style={{
+            fontSize: "13px",
+            fontWeight: 500,
+            padding: "10px 22px",
+            borderRadius: "8px",
+            background: !partnerName.trim() || workflowSyncing ? "#b4b2a9" : "#2a78d6",
+            color: "white",
+            border: "none",
+            cursor: !partnerName.trim() || workflowSyncing ? "not-allowed" : "pointer",
+          }}
+        >
+          {workflowSyncing ? "Syncing…" : "Sync workflow data from XPM"}
+        </button>
+
+        {workflowResult ? (
+          <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
+            ✓ Staff {workflowResult.staffUpserted} synced / {workflowResult.staffRemoved} removed &middot;
+            Clients {workflowResult.customersUpserted} synced / {workflowResult.customersRemoved} removed
+            &middot; Jobs {workflowResult.jobsUpserted} synced / {workflowResult.jobsRemoved} removed
+          </div>
+        ) : null}
       </div>
 
       <div
