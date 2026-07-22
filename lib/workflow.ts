@@ -107,12 +107,16 @@ function mapJob(row: JobRow): WorkflowJob {
   };
 }
 
+// Case-insensitive match, since the login email and the XPM staff email it
+// must match are entered by different people at different times (login
+// creation vs. XPM staff sync) -- same convention as lib/staffLink.ts's
+// Karbon<->XPM email join.
 export async function getStaffByEmail(email: string): Promise<WorkflowStaff | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("staff")
     .select("id, xpm_staff_id, name, email, role, included")
-    .eq("email", email)
+    .ilike("email", email)
     .maybeSingle<StaffRow>();
 
   if (error) {
@@ -317,6 +321,68 @@ export async function getTasksForStaff(staffId: string): Promise<TaskWithDetails
   return Array.from(byId.values())
     .map((row) => hydrateTask(row, lookups))
     .sort((a, b) => (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
+}
+
+async function getTasksForJobIds(jobIds: string[]): Promise<TaskWithDetails[]> {
+  if (jobIds.length === 0) return [];
+
+  const admin = getSupabaseAdmin();
+  const [{ data, error }, lookups] = await Promise.all([
+    admin.from("tasks").select("*").in("job_id", jobIds).returns<TaskRow[]>(),
+    fetchLookupMaps(),
+  ]);
+
+  if (error) {
+    console.error("[workflow] getTasksForJobIds failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => hydrateTask(row, lookups));
+}
+
+function dedupeAndSortTasks(taskLists: TaskWithDetails[][]): TaskWithDetails[] {
+  const byId = new Map<string, TaskWithDetails>();
+  for (const list of taskLists) for (const task of list) byId.set(task.id, task);
+  return Array.from(byId.values()).sort((a, b) =>
+    (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99")
+  );
+}
+
+// A Manager's board: every task under a job they manage (their team's work),
+// plus anything personally assigned/temporarily handed to them directly.
+export async function getTasksForManager(managerId: string): Promise<TaskWithDetails[]> {
+  const managedJobs = await getInProgressJobsForManager(managerId);
+  const [jobTasks, personalTasks] = await Promise.all([
+    getTasksForJobIds(managedJobs.map((j) => j.id)),
+    getTasksForStaff(managerId),
+  ]);
+  return dedupeAndSortTasks([jobTasks, personalTasks]);
+}
+
+// A Partner's board: every task under every job attached to their Partner
+// scope (a practice-wide roll-up), plus any personal assignments.
+export async function getTasksForPartner(partnerId: string): Promise<TaskWithDetails[]> {
+  const partnerJobs = await getInProgressJobsForPartner(partnerId);
+  const [jobTasks, personalTasks] = await Promise.all([
+    getTasksForJobIds(partnerJobs.map((j) => j.id)),
+    getTasksForStaff(partnerId),
+  ]);
+  return dedupeAndSortTasks([jobTasks, personalTasks]);
+}
+
+// Dispatches to the right scope for a staff member's own "My Work" board,
+// based on their position in the Partner > Manager > Staff hierarchy --
+// Partners get a practice-wide roll-up, Managers get their team's work,
+// plain Staff get just their own board.
+export async function getWorkBoardForStaff(staff: WorkflowStaff): Promise<TaskWithDetails[]> {
+  switch (staff.role) {
+    case "Partner":
+      return getTasksForPartner(staff.id);
+    case "Manager":
+      return getTasksForManager(staff.id);
+    default:
+      return getTasksForStaff(staff.id);
+  }
 }
 
 export async function listStatuses(): Promise<WorkflowStatus[]> {

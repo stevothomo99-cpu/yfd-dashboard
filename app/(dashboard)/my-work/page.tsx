@@ -1,27 +1,36 @@
 import { auth } from "@/auth";
 import MyWorkPageClient from "./MyWorkPageClient";
-import { getStaffByEmail, getTasksForStaff, listStaff } from "@/lib/workflow";
+import { getStaffByEmail, getWorkBoardForStaff, listStaff } from "@/lib/workflow";
 
-// Server entry point for the per-user Work Item board. In production this
-// will resolve strictly from the logged-in session (session.user.email ->
-// staff row); for this prototype phase, if no staff row matches the
-// session's email, a "viewing as" selector is offered so the shape of the
-// per-user board can be trialled for any staff member without every
-// dashboard_users row needing a matching staff row yet.
+// Server entry point for the per-user Work Item board. Identity is resolved
+// strictly from the logged-in session's email, matched (case-insensitively)
+// against staff.email -- the same email a person's XPM user record uses, so
+// the two are expected to already line up (see lib/staffLink.ts for the
+// same convention applied to Karbon<->XPM). The board itself is scoped by
+// that staff member's place in the Partner > Manager > Staff hierarchy (see
+// lib/workflow.ts's getWorkBoardForStaff): a Partner sees a practice-wide
+// roll-up, a Manager sees their team's work, plain Staff see just their own.
+//
+// Admins get an override dropdown (for QA / helping a colleague), since
+// dashboard_users isn't fully linked to every staff row yet -- everyone else
+// only ever sees their own resolved board.
 export default async function MyWorkPage() {
   const session = await auth();
-  const allStaff = await listStaff();
+  const isAdmin = session?.user?.role === "admin";
 
   const sessionStaff = session?.user?.email ? await getStaffByEmail(session.user.email) : null;
-  const defaultStaff = sessionStaff ?? allStaff[0] ?? null;
+  const allStaff = isAdmin ? await listStaff() : [];
 
-  const tasks = defaultStaff ? await getTasksForStaff(defaultStaff.id) : [];
+  const activeStaff = sessionStaff ?? (isAdmin ? allStaff[0] ?? null : null);
+  const tasks = activeStaff ? await getWorkBoardForStaff(activeStaff) : [];
 
   return (
     <MyWorkPageClient
       allStaff={allStaff}
-      defaultStaffId={defaultStaff?.id ?? null}
-      isSessionMatch={Boolean(sessionStaff)}
+      isAdmin={isAdmin}
+      hasSessionMatch={Boolean(sessionStaff)}
+      defaultStaffId={activeStaff?.id ?? null}
+      defaultStaffName={activeStaff?.name ?? null}
       initialTasks={tasks}
     />
   );

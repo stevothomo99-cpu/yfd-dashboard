@@ -6,8 +6,10 @@ import type { TaskWithDetails, WorkflowStaff } from "@/types/workflow";
 
 interface MyWorkPageClientProps {
   allStaff: WorkflowStaff[];
+  isAdmin: boolean;
+  hasSessionMatch: boolean;
   defaultStaffId: string | null;
-  isSessionMatch: boolean;
+  defaultStaffName: string | null;
   initialTasks: TaskWithDetails[];
 }
 
@@ -26,8 +28,10 @@ function todayIso(): string {
 
 export default function MyWorkPageClient({
   allStaff,
+  isAdmin,
+  hasSessionMatch,
   defaultStaffId,
-  isSessionMatch,
+  defaultStaffName,
   initialTasks,
 }: MyWorkPageClientProps) {
   const [staffId, setStaffId] = useState<string | null>(defaultStaffId);
@@ -60,13 +64,17 @@ export default function MyWorkPageClient({
     };
   }, [tasks, today]);
 
-  const selectedStaff = allStaff.find((s) => s.id === staffId);
-
   if (!staffId) {
     return (
       <div>
         <PageHeader title="My Work" subtitle="Overdue, due-today, and upcoming work items" />
-        <EmptyState message="No staff records yet -- add a row to the staff table to trial this view." />
+        <EmptyState
+          message={
+            hasSessionMatch
+              ? "No staff records yet -- add a row to the staff table to trial this view."
+              : "No staff record is linked to your login email yet. Ask an admin to add one with a matching email so your board can be resolved."
+          }
+        />
       </div>
     );
   }
@@ -75,24 +83,27 @@ export default function MyWorkPageClient({
     <div>
       <PageHeader
         title="My Work"
-        subtitle="Prototype -- per-user work item board, replacing Karbon's task list"
+        subtitle={
+          isAdmin
+            ? "Practice work items, scoped by Partner > Manager > Staff -- resolved from your login email"
+            : "Your work items, scoped by your role -- resolved from your login email"
+        }
       />
 
-      <div style={{ display: "flex", gap: "8px", alignItems: "center", padding: "12px 0 18px", flexWrap: "wrap" }}>
-        <select value={staffId} onChange={(e) => handleStaffChange(e.target.value)} style={selectStyle}>
-          {allStaff.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.role})
-            </option>
-          ))}
-        </select>
-        {!isSessionMatch ? (
+      {isAdmin ? (
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", padding: "12px 0 18px", flexWrap: "wrap" }}>
+          <select value={staffId} onChange={(e) => handleStaffChange(e.target.value)} style={selectStyle}>
+            {allStaff.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.role})
+              </option>
+            ))}
+          </select>
           <span style={{ fontSize: "11px", color: "#888780" }}>
-            Prototype: no staff row matches your login yet, so &quot;{selectedStaff?.name}&quot; is shown by
-            default -- use the dropdown to view any staff member&apos;s board.
+            Admin override -- {hasSessionMatch ? "defaults to your own board" : `no staff row matches your login, showing ${defaultStaffName ?? "the first staff member"} by default`}.
           </span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <EmptyState message="Loading…" />
@@ -167,11 +178,23 @@ function TaskGroup({
 
 function TaskCard({ task, staffId }: { task: TaskWithDetails; staffId: string }) {
   const isOwner = task.assigneeId === staffId;
-  const reassignmentNote = task.isTemporarilyReassigned
-    ? isOwner
-      ? `Currently with ${task.tempAssigneeName ?? "someone else"} (temporary)`
-      : `Temporarily assigned to you -- owned by ${task.assigneeName ?? "someone else"}`
-    : null;
+  const isTempAssignee = task.tempAssigneeId === staffId;
+
+  let reassignmentNote: string | null = null;
+  if (task.isTemporarilyReassigned) {
+    if (isOwner) {
+      reassignmentNote = `Currently with ${task.tempAssigneeName ?? "someone else"} (temporary)`;
+    } else if (isTempAssignee) {
+      reassignmentNote = `Temporarily assigned to you -- owned by ${task.assigneeName ?? "someone else"}`;
+    } else {
+      reassignmentNote = `Temporarily with ${task.tempAssigneeName ?? "someone else"} -- owned by ${task.assigneeName ?? "someone else"}`;
+    }
+  }
+
+  // Rollup boards (Partner/Manager) show tasks personally owned by other
+  // people, so the assignee needs to be visible -- on a plain Staff board
+  // it's always "you", so omit the redundant label.
+  const showOwnerLabel = !isOwner && task.assigneeName;
 
   return (
     <div
@@ -190,6 +213,7 @@ function TaskCard({ task, staffId }: { task: TaskWithDetails; staffId: string })
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{task.title}</div>
         <div style={{ fontSize: "12px", color: "#888780" }}>
           {task.customerName} · {task.jobName}
+          {showOwnerLabel ? ` · ${task.assigneeName}` : ""}
         </div>
         {reassignmentNote ? (
           <div style={{ fontSize: "11px", color: "#9b59b6", fontWeight: 500 }}>{reassignmentNote}</div>
