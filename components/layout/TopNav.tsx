@@ -6,13 +6,17 @@ import { signOut } from "next-auth/react";
 import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import { initialsOf } from "@/lib/utils";
 
+// Karbon Tasks (/tasks) and BAS Status (/bas) are quarantined from nav while
+// the XPM-native work-item system (Jobs / My Work) replaces them -- the
+// pages and their API routes are untouched, just unlinked, so they're easy
+// to compare against or restore if needed.
 const navItems = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Timesheets", href: "/timesheets" },
-  { label: "Karbon Tasks", href: "/tasks" },
-  { label: "BAS Status", href: "/bas" },
+  { label: "Jobs", href: "/jobs" },
+  { label: "My Work", href: "/my-work" },
   { label: "Clients", href: "/clients" },
   { label: "Settings", href: "/settings" },
 ];
