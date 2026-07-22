@@ -64,6 +64,10 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   for (const job of jobs) {
     if (job.manager?.uuid) managerIds.add(job.manager.uuid);
   }
+  // The Partner is sometimes also their own job's manager (e.g. an internal
+  // job) -- exclude their uuid here so they don't appear twice in the same
+  // upsert batch (once as Partner, once as Staff), which Postgres rejects.
+  managerIds.delete(partnerRecord.uuid);
   const managerRecords = allStaff.filter((s) => managerIds.has(s.uuid));
   const clients = uniqueClientsFromJobs(jobs);
 
