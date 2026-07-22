@@ -5,6 +5,7 @@ import type {
   CustomerFile,
   CustomerNote,
   JobWithCustomer,
+  JobWithManager,
   RecurrenceInterval,
   StaffRole,
   TaskWithDetails,
@@ -472,6 +473,32 @@ export async function reassignTaskTemporarily(
     return false;
   }
   return true;
+}
+
+// Every job attached to a given customer, with its manager's name -- feeds
+// the /clients drawer's Jobs section (the standalone /jobs page was
+// retired in favour of jobs living under each client's tile).
+export async function getJobsForCustomer(customerId: string): Promise<JobWithManager[]> {
+  const admin = getSupabaseAdmin();
+  const [{ data: jobs, error }, lookups] = await Promise.all([
+    admin
+      .from("jobs")
+      .select("id, customer_id, xpm_job_id, name, partner_id, manager_id")
+      .eq("customer_id", customerId)
+      .order("name")
+      .returns<JobRow[]>(),
+    fetchLookupMaps(),
+  ]);
+
+  if (error) {
+    console.error("[workflow] getJobsForCustomer failed:", error.message);
+    return [];
+  }
+
+  return (jobs ?? []).map((row) => ({
+    ...mapJob(row),
+    managerName: row.manager_id ? lookups.staffById.get(row.manager_id)?.name ?? null : null,
+  }));
 }
 
 // Every task under every job attached to a given customer -- feeds the

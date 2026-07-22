@@ -7,15 +7,16 @@ import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import { initialsOf } from "@/lib/utils";
 
 // Karbon Tasks (/tasks) and BAS Status (/bas) are quarantined from nav while
-// the XPM-native work-item system (Jobs / My Work) replaces them -- the
-// pages and their API routes are untouched, just unlinked, so they're easy
-// to compare against or restore if needed.
+// the XPM-native work-item system (My Work) replaces them -- the pages and
+// their API routes are untouched, just unlinked, so they're easy to compare
+// against or restore if needed. The standalone Jobs list (/jobs) was
+// retired outright -- jobs now live under each client's tile on /clients.
 const navItems = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Timesheets", href: "/timesheets" },
-  { label: "Jobs", href: "/jobs" },
+  { label: "Dashboard", href: "/dashboard" },
   { label: "My Work", href: "/my-work" },
   { label: "Clients", href: "/clients" },
   { label: "Settings", href: "/settings" },

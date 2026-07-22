@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import StaffAvatar from "./StaffAvatar";
 import { initialsOf } from "@/lib/utils";
-import type { ClientSummary, CustomerFile, CustomerNote, TaskWithDetails } from "@/types/workflow";
+import type { ClientSummary, CustomerFile, CustomerNote, JobWithManager, TaskWithDetails } from "@/types/workflow";
 
 interface Props {
   tile: ClientSummary | null;
@@ -28,6 +28,7 @@ function fmtBytes(bytes: number | null): string {
 }
 
 export default function TileDrawer({ tile, onClose }: Props) {
+  const [jobs, setJobs] = useState<JobWithManager[]>([]);
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [notes, setNotes] = useState<CustomerNote[]>([]);
   const [files, setFiles] = useState<CustomerFile[]>([]);
@@ -45,12 +46,14 @@ export default function TileDrawer({ tile, onClose }: Props) {
       setLoading(true);
       setError(null);
       try {
-        const [taskData, noteData, fileData] = await Promise.all([
+        const [jobData, taskData, noteData, fileData] = await Promise.all([
+          fetch(`/api/workflow/customers/${tile.id}/jobs`).then((r) => r.json()),
           fetch(`/api/workflow/customers/${tile.id}/tasks`).then((r) => r.json()),
           fetch(`/api/workflow/customers/${tile.id}/notes`).then((r) => r.json()),
           fetch(`/api/workflow/customers/${tile.id}/files`).then((r) => r.json()),
         ]);
         if (cancelled) return;
+        setJobs(jobData.jobs ?? []);
         setTasks(taskData.tasks ?? []);
         setNotes(noteData.notes ?? []);
         setFiles(fileData.files ?? []);
@@ -178,6 +181,24 @@ export default function TileDrawer({ tile, onClose }: Props) {
           <div style={{ fontSize: "12px", color: "#888780", padding: "12px 0" }}>Loading…</div>
         ) : (
           <>
+            <Section title={`Jobs · ${jobs.length}`}>
+              {jobs.length === 0 ? (
+                <Empty label="No jobs on this client yet." />
+              ) : (
+                <Stack>
+                  {jobs.map((j) => (
+                    <div
+                      key={j.id}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafaf8", borderRadius: "8px", padding: "10px 12px" }}
+                    >
+                      <span style={{ fontSize: "13px", color: "#111111" }}>{j.name}</span>
+                      <span style={{ fontSize: "12px", color: "#888780" }}>{j.managerName ?? "Unassigned"}</span>
+                    </div>
+                  ))}
+                </Stack>
+              )}
+            </Section>
+
             <Section title={`Overdue · ${overdue.length}`}>
               {overdue.length === 0 ? <Empty label="No overdue tasks." /> : <Stack>{overdue.map((t) => <WorkItemRow key={t.id} task={t} accent="#e24b4a" />)}</Stack>}
             </Section>

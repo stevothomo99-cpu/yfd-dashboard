@@ -33,6 +33,10 @@ export interface JobWithCustomer extends WorkflowJob {
   customerName: string;
 }
 
+export interface JobWithManager extends WorkflowJob {
+  managerName: string | null;
+}
+
 export type RecurrenceInterval =
   | "none"
   | "daily"
