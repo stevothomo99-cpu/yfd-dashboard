@@ -33,7 +33,7 @@ interface SubscriptionMetricsTileProps {
 }
 
 export function SubscriptionMetricsTile({ businessName }: SubscriptionMetricsTileProps) {
-  const [range, setRange] = useState<ChurnRange>("month");
+  const [range, setRange] = useState<ChurnRange>("week");
   const [metrics, setMetrics] = useState<FocablyMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 

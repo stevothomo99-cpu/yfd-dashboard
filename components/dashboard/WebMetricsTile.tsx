@@ -40,7 +40,7 @@ const periodLabels: Record<TimePeriod, string> = {
 };
 
 export function WebMetricsTile({ productKey, productName }: WebMetricsTileProps) {
-  const [period, setPeriod] = useState<TimePeriod>("month");
+  const [period, setPeriod] = useState<TimePeriod>("week");
   const [searchConsole, setSearchConsole] = useState<SearchConsoleMetrics | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsMetrics | null>(null);
   const [loading, setLoading] = useState(true);

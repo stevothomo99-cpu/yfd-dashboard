@@ -33,7 +33,7 @@ interface SiteMarginMetricsTileProps {
 }
 
 export function SiteMarginMetricsTile({ businessName }: SiteMarginMetricsTileProps) {
-  const [range, setRange] = useState<ChurnRange>("month");
+  const [range, setRange] = useState<ChurnRange>("week");
   const [metrics, setMetrics] = useState<SiteMarginMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
