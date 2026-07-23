@@ -25,30 +25,35 @@ export async function GET(request: NextRequest) {
   const tenantIdsParam = request.nextUrl.searchParams.get("tenantIds");
   if (tenantIdsParam) {
     const tenantIds = tenantIdsParam.split(",").map((id) => id.trim()).filter(Boolean);
+    // Org and invoices are fetched independently (not Promise.all'd
+    // together) and each failure caught on its own -- a 500 fetching
+    // Invoices shouldn't hide whether the token is even authorized for that
+    // tenant at all (that's what /Organisation's 401 vs 200 tells us).
     const results = await Promise.all(
       tenantIds.map(async (tenantId) => {
-        try {
-          const [org, invoiceData] = await Promise.all([
-            xeroAccountingFetchForTenant<{ Organisations?: { Name?: string; LegalName?: string }[] }>(
-              tenantId,
-              "/Organisation",
-            ),
-            xeroAccountingFetchForTenant<Record<string, unknown>>(
-              tenantId,
-              `/Invoices?where=${encodeURIComponent('Type=="ACCREC"')}&page=1&summaryOnly=true`,
-            ),
-          ]);
-          const invoices = Array.isArray(invoiceData.Invoices) ? invoiceData.Invoices : [];
-          return {
-            tenantId,
-            organisationName: org.Organisations?.[0]?.Name ?? null,
-            legalName: org.Organisations?.[0]?.LegalName ?? null,
-            invoiceCount: invoices.length,
-            sample: invoices.slice(0, 2),
-          };
-        } catch (err) {
-          return { tenantId, error: err instanceof Error ? err.message : String(err) };
-        }
+        const org = await xeroAccountingFetchForTenant<{
+          Organisations?: { Name?: string; LegalName?: string }[];
+        }>(tenantId, "/Organisation").catch((err) => ({
+          error: err instanceof Error ? err.message : String(err),
+        }));
+
+        const invoiceData = await xeroAccountingFetchForTenant<Record<string, unknown>>(
+          tenantId,
+          `/Invoices?where=${encodeURIComponent('Type=="ACCREC"')}&page=1&summaryOnly=true`,
+        ).catch((err) => ({ error: err instanceof Error ? err.message : String(err) }));
+
+        const invoices =
+          "Invoices" in invoiceData && Array.isArray(invoiceData.Invoices) ? invoiceData.Invoices : [];
+
+        return {
+          tenantId,
+          organisationName: "Organisations" in org ? org.Organisations?.[0]?.Name ?? null : null,
+          legalName: "Organisations" in org ? org.Organisations?.[0]?.LegalName ?? null : null,
+          organisationError: "error" in org ? org.error : null,
+          invoiceCount: invoices.length,
+          sample: invoices.slice(0, 2),
+          invoiceError: "error" in invoiceData ? invoiceData.error : null,
+        };
       }),
     );
     return NextResponse.json({ tenants: results });
