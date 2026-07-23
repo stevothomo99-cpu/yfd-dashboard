@@ -2,12 +2,20 @@
 
 import { useEffect, useState } from "react";
 import StaffAvatar from "./StaffAvatar";
+import CopyTaskModal from "./CopyTaskModal";
+import SaveTemplateModal from "./SaveTemplateModal";
+import ApplyTemplateModal from "./ApplyTemplateModal";
 import { initialsOf } from "@/lib/utils";
 import type { ClientSummary, CustomerFile, CustomerNote, JobWithManager, TaskWithDetails } from "@/types/workflow";
 
 interface Props {
   tile: ClientSummary | null;
   onClose: () => void;
+  // Every client (id/name only) -- feeds the destination-client picker in
+  // the "Copy task" and "Apply template" modals. Passed down from
+  // ClientsPageClient.tsx, which already loads the full tile list for its
+  // own grid, rather than fetching a second copy here.
+  allClients: { id: string; name: string }[];
 }
 
 function todayIso(): string {
@@ -27,7 +35,7 @@ function fmtBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function TileDrawer({ tile, onClose }: Props) {
+export default function TileDrawer({ tile, onClose, allClients }: Props) {
   const [jobs, setJobs] = useState<JobWithManager[]>([]);
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [notes, setNotes] = useState<CustomerNote[]>([]);
@@ -37,6 +45,15 @@ export default function TileDrawer({ tile, onClose }: Props) {
   const [submittingNote, setSubmittingNote] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyingTask, setCopyingTask] = useState<TaskWithDetails | null>(null);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [showApplyTemplate, setShowApplyTemplate] = useState(false);
+
+  async function refreshTasks() {
+    if (!tile) return;
+    const data = await fetch(`/api/workflow/customers/${tile.id}/tasks`).then((r) => r.json());
+    setTasks(data.tasks ?? []);
+  }
 
   useEffect(() => {
     if (!tile) return;
@@ -199,16 +216,37 @@ export default function TileDrawer({ tile, onClose }: Props) {
               )}
             </Section>
 
+            <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+              <button type="button" onClick={() => setShowSaveTemplate(true)} style={ghostButtonStyle}>
+                Save tasks as template
+              </button>
+              <button type="button" onClick={() => setShowApplyTemplate(true)} style={ghostButtonStyle}>
+                Apply template
+              </button>
+            </div>
+
             <Section title={`Overdue · ${overdue.length}`}>
-              {overdue.length === 0 ? <Empty label="No overdue tasks." /> : <Stack>{overdue.map((t) => <WorkItemRow key={t.id} task={t} accent="#e24b4a" />)}</Stack>}
+              {overdue.length === 0 ? (
+                <Empty label="No overdue tasks." />
+              ) : (
+                <Stack>{overdue.map((t) => <WorkItemRow key={t.id} task={t} accent="#e24b4a" onCopy={setCopyingTask} />)}</Stack>
+              )}
             </Section>
 
             <Section title={`In progress · ${inProgress.length}`}>
-              {inProgress.length === 0 ? <Empty label="Nothing in progress." /> : <Stack>{inProgress.map((t) => <WorkItemRow key={t.id} task={t} accent="#2a78d6" />)}</Stack>}
+              {inProgress.length === 0 ? (
+                <Empty label="Nothing in progress." />
+              ) : (
+                <Stack>{inProgress.map((t) => <WorkItemRow key={t.id} task={t} accent="#2a78d6" onCopy={setCopyingTask} />)}</Stack>
+              )}
             </Section>
 
             <Section title={`Completed · ${completed.length}`}>
-              {completed.length === 0 ? <Empty label="No completed tasks yet." /> : <Stack>{completed.map((t) => <WorkItemRow key={t.id} task={t} accent="#1baf7a" />)}</Stack>}
+              {completed.length === 0 ? (
+                <Empty label="No completed tasks yet." />
+              ) : (
+                <Stack>{completed.map((t) => <WorkItemRow key={t.id} task={t} accent="#1baf7a" onCopy={setCopyingTask} />)}</Stack>
+              )}
             </Section>
           </>
         )}
@@ -311,11 +349,46 @@ export default function TileDrawer({ tile, onClose }: Props) {
           )}
         </Section>
       </div>
+
+      {copyingTask ? (
+        <CopyTaskModal
+          task={copyingTask}
+          clients={allClients}
+          onClose={() => setCopyingTask(null)}
+          onCopied={refreshTasks}
+        />
+      ) : null}
+
+      {showSaveTemplate ? (
+        <SaveTemplateModal
+          customerName={tile.name}
+          tasks={tasks}
+          onClose={() => setShowSaveTemplate(false)}
+          onSaved={() => {}}
+        />
+      ) : null}
+
+      {showApplyTemplate ? (
+        <ApplyTemplateModal
+          clients={allClients}
+          initialClientId={tile.id}
+          onClose={() => setShowApplyTemplate(false)}
+          onApplied={refreshTasks}
+        />
+      ) : null}
     </div>
   );
 }
 
-function WorkItemRow({ task, accent }: { task: TaskWithDetails; accent: string }) {
+function WorkItemRow({
+  task,
+  accent,
+  onCopy,
+}: {
+  task: TaskWithDetails;
+  accent: string;
+  onCopy: (task: TaskWithDetails) => void;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -326,7 +399,14 @@ function WorkItemRow({ task, accent }: { task: TaskWithDetails; accent: string }
           {task.jobName} · {task.assigneeName ?? "Unassigned"} · Due {task.dueDate ?? "—"}
         </div>
       </div>
-      <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: accent, marginLeft: "12px", flexShrink: 0 }} />
+      <button
+        type="button"
+        onClick={() => onCopy(task)}
+        style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", flexShrink: 0, marginLeft: "8px" }}
+      >
+        Copy…
+      </button>
+      <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: accent, marginLeft: "8px", flexShrink: 0 }} />
     </div>
   );
 }
@@ -349,3 +429,14 @@ function Stack({ children }: { children: React.ReactNode }) {
 function Empty({ label }: { label: string }) {
   return <div style={{ fontSize: "12px", color: "#888780", padding: "4px 0" }}>{label}</div>;
 }
+
+const ghostButtonStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 500,
+  padding: "6px 14px",
+  borderRadius: "999px",
+  background: "white",
+  color: "#444441",
+  border: "0.5px solid #e1e0d9",
+  cursor: "pointer",
+};

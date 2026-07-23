@@ -61,6 +61,15 @@ export default function ClientsPageClient({ tiles: allTiles, staffOptions, hours
     [tiles, hoursByClientId],
   );
 
+  // Destination-client picker for the drawer's "Copy task" / "Apply
+  // template" actions -- every client in the practice, not just the ones
+  // matching the current filter/search, so those actions aren't limited by
+  // whatever the grid happens to be showing right now.
+  const allClientOptions = useMemo(
+    () => allTiles.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    [allTiles],
+  );
+
   return (
     <div>
       <PageHeader title="Clients" subtitle="Tile view · sorted by status · click a tile to drill in" />
@@ -160,7 +169,7 @@ export default function ClientsPageClient({ tiles: allTiles, staffOptions, hours
         </div>
       )}
 
-      <TileDrawer tile={activeTile} onClose={() => setActiveTile(null)} />
+      <TileDrawer tile={activeTile} onClose={() => setActiveTile(null)} allClients={allClientOptions} />
     </div>
   );
 }

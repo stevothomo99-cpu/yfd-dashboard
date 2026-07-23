@@ -168,3 +168,28 @@ export interface CustomerFile {
   // stored anywhere (the bucket is private).
   downloadUrl?: string;
 }
+
+// A reusable, named set of tasks (title/type/recurrence only -- see
+// migrations/008_task_templates.sql) that can be applied to any job to
+// bulk-create fresh, unscheduled, unassigned tasks from it.
+export interface TaskTemplateItem {
+  id: string;
+  templateId: string;
+  title: string;
+  typeId: string | null;
+  typeName: string | null;
+  typeColor: string | null;
+  recurrence: RecurrenceInterval;
+  sortOrder: number;
+}
+
+export interface TaskTemplateSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  itemCount: number;
+}
+
+export interface TaskTemplateWithItems extends TaskTemplateSummary {
+  items: TaskTemplateItem[];
+}

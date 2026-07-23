@@ -9,6 +9,9 @@ import type {
   JobWithManager,
   RecurrenceInterval,
   StaffRole,
+  TaskTemplateItem,
+  TaskTemplateSummary,
+  TaskTemplateWithItems,
   TaskWithDetails,
   UpdateTaskInput,
   WorkflowCustomer,
@@ -815,4 +818,232 @@ export async function uploadCustomerFile(
     return null;
   }
   return mapCustomerFile(data);
+}
+
+// The status a fresh, unstarted task should land in -- lowest sort_order
+// among statuses not marked complete (falls back to the first status if
+// every status is somehow marked complete). Same rule NewTaskModal.tsx
+// applies client-side for its own default; used here so copied/templated
+// tasks never inherit a source task's "Completed" status.
+async function defaultOpenStatusId(): Promise<string | null> {
+  const statuses = await listStatuses();
+  const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
+  return openStatus?.id ?? statuses[0]?.id ?? null;
+}
+
+// Copies a task onto a (usually different) job/client: same title/type/
+// recurrence, but a fresh due_date/start_date (left null -- a copied task's
+// timing is specific to the client/job it came from, not something that
+// should silently carry over onto someone else's schedule), no assignee
+// (the destination client likely has a different responsible staff member),
+// and the default open status rather than whatever the source task's
+// status was (in particular, never copies over "Completed").
+export async function copyTaskToJob(
+  taskId: string,
+  destinationJobId: string
+): Promise<{ id: string } | null> {
+  const admin = getSupabaseAdmin();
+  const { data: source, error } = await admin
+    .from("tasks")
+    .select("title, type_id, recurrence")
+    .eq("id", taskId)
+    .single<{ title: string; type_id: string | null; recurrence: RecurrenceInterval }>();
+
+  if (error || !source) {
+    console.error("[workflow] copyTaskToJob (fetch source) failed:", error?.message);
+    return null;
+  }
+
+  const statusId = await defaultOpenStatusId();
+  if (!statusId) {
+    console.error("[workflow] copyTaskToJob: no statuses configured");
+    return null;
+  }
+
+  return createTask({
+    jobId: destinationJobId,
+    title: source.title,
+    typeId: source.type_id,
+    recurrence: source.recurrence,
+    statusId,
+  });
+}
+
+interface TaskTemplateRow {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+interface TaskTemplateItemRow {
+  id: string;
+  template_id: string;
+  title: string;
+  type_id: string | null;
+  recurrence: RecurrenceInterval;
+  sort_order: number;
+}
+
+// Saves the given tasks' shape (title/type/recurrence only -- deliberately
+// not due_date/start_date/assignee_id/status_id/completed_at, since a
+// template is a reusable shape, not a snapshot of one client's actual
+// schedule/staffing/progress) as a new named template.
+export async function saveTasksAsTemplate(
+  name: string,
+  taskIds: string[]
+): Promise<{ id: string } | null> {
+  if (taskIds.length === 0) {
+    console.error("[workflow] saveTasksAsTemplate: no task ids given");
+    return null;
+  }
+
+  const admin = getSupabaseAdmin();
+  const { data: sourceTasks, error: fetchError } = await admin
+    .from("tasks")
+    .select("id, title, type_id, recurrence")
+    .in("id", taskIds)
+    .returns<{ id: string; title: string; type_id: string | null; recurrence: RecurrenceInterval }[]>();
+
+  if (fetchError || !sourceTasks || sourceTasks.length === 0) {
+    console.error("[workflow] saveTasksAsTemplate (fetch source tasks) failed:", fetchError?.message);
+    return null;
+  }
+
+  // Preserve the caller's chosen order (taskIds), not whatever order the
+  // DB happened to return rows in.
+  const byId = new Map(sourceTasks.map((t) => [t.id, t]));
+  const orderedTasks = taskIds.map((id) => byId.get(id)).filter((t): t is NonNullable<typeof t> => Boolean(t));
+
+  const { data: template, error: templateError } = await admin
+    .from("task_templates")
+    .insert({ name })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (templateError || !template) {
+    console.error("[workflow] saveTasksAsTemplate (create template) failed:", templateError?.message);
+    return null;
+  }
+
+  const { error: itemsError } = await admin.from("task_template_items").insert(
+    orderedTasks.map((t, index) => ({
+      template_id: template.id,
+      title: t.title,
+      type_id: t.type_id,
+      recurrence: t.recurrence,
+      sort_order: index,
+    }))
+  );
+
+  if (itemsError) {
+    console.error("[workflow] saveTasksAsTemplate (create items) failed:", itemsError.message);
+    return null;
+  }
+
+  return template;
+}
+
+export async function listTaskTemplates(): Promise<TaskTemplateSummary[]> {
+  const admin = getSupabaseAdmin();
+  const [{ data: templates, error: templatesError }, { data: items, error: itemsError }] = await Promise.all([
+    admin.from("task_templates").select("id, name, created_at").order("created_at", { ascending: false }).returns<TaskTemplateRow[]>(),
+    admin.from("task_template_items").select("template_id").returns<{ template_id: string }[]>(),
+  ]);
+
+  if (templatesError) {
+    console.error("[workflow] listTaskTemplates failed:", templatesError.message);
+    return [];
+  }
+  if (itemsError) console.error("[workflow] listTaskTemplates (item counts) failed:", itemsError.message);
+
+  const countByTemplateId = new Map<string, number>();
+  for (const item of items ?? []) {
+    countByTemplateId.set(item.template_id, (countByTemplateId.get(item.template_id) ?? 0) + 1);
+  }
+
+  return (templates ?? []).map((t) => ({
+    id: t.id,
+    name: t.name,
+    createdAt: t.created_at,
+    itemCount: countByTemplateId.get(t.id) ?? 0,
+  }));
+}
+
+export async function getTaskTemplate(templateId: string): Promise<TaskTemplateWithItems | null> {
+  const admin = getSupabaseAdmin();
+  const [{ data: template, error: templateError }, { data: items, error: itemsError }, lookups] = await Promise.all([
+    admin.from("task_templates").select("id, name, created_at").eq("id", templateId).single<TaskTemplateRow>(),
+    admin
+      .from("task_template_items")
+      .select("id, template_id, title, type_id, recurrence, sort_order")
+      .eq("template_id", templateId)
+      .order("sort_order")
+      .returns<TaskTemplateItemRow[]>(),
+    fetchLookupMaps(),
+  ]);
+
+  if (templateError || !template) {
+    console.error("[workflow] getTaskTemplate failed:", templateError?.message);
+    return null;
+  }
+  if (itemsError) console.error("[workflow] getTaskTemplate (items) failed:", itemsError.message);
+
+  const mappedItems: TaskTemplateItem[] = (items ?? []).map((i) => {
+    const type = i.type_id ? lookups.taskTypesById.get(i.type_id) : undefined;
+    return {
+      id: i.id,
+      templateId: i.template_id,
+      title: i.title,
+      typeId: i.type_id,
+      typeName: type?.name ?? null,
+      typeColor: type?.color ?? null,
+      recurrence: i.recurrence,
+      sortOrder: i.sort_order,
+    };
+  });
+
+  return {
+    id: template.id,
+    name: template.name,
+    createdAt: template.created_at,
+    itemCount: mappedItems.length,
+    items: mappedItems,
+  };
+}
+
+// Bulk-creates fresh tasks on destinationJobId from a template's items --
+// same "no dates, no assignee, default open status" rule as copyTaskToJob,
+// since applying a template should never smuggle in stale scheduling from
+// whichever client the template was originally captured from.
+export async function applyTemplateToJob(
+  templateId: string,
+  destinationJobId: string
+): Promise<{ created: number } | null> {
+  const template = await getTaskTemplate(templateId);
+  if (!template) return null;
+  if (template.items.length === 0) return { created: 0 };
+
+  const statusId = await defaultOpenStatusId();
+  if (!statusId) {
+    console.error("[workflow] applyTemplateToJob: no statuses configured");
+    return null;
+  }
+
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("tasks").insert(
+    template.items.map((item) => ({
+      job_id: destinationJobId,
+      title: item.title,
+      type_id: item.typeId,
+      recurrence: item.recurrence,
+      status_id: statusId,
+    }))
+  );
+
+  if (error) {
+    console.error("[workflow] applyTemplateToJob failed:", error.message);
+    return null;
+  }
+
+  return { created: template.items.length };
 }
