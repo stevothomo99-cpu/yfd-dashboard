@@ -359,10 +359,26 @@ export const TIMESHEETS: XpmTimesheet[] = STAFF.flatMap((s) => {
     const date = isoDaysAgo(daysAgo);
     const rows: XpmTimesheet[] = [];
     if (billableHours > 0) {
-      rows.push({ staffId: s.id, date, hours: billableHours, billable: true, clientId: client.id, jobId: `${client.id}-job` });
+      rows.push({
+        staffId: s.id,
+        date,
+        hours: billableHours,
+        billable: true,
+        clientId: client.id,
+        jobId: `${client.id}-job`,
+        taskName: null,
+      });
     }
     if (nonBillableHours > 0) {
-      rows.push({ staffId: s.id, date, hours: nonBillableHours, billable: false, clientId: client.id, jobId: `${client.id}-job` });
+      rows.push({
+        staffId: s.id,
+        date,
+        hours: nonBillableHours,
+        billable: false,
+        clientId: client.id,
+        jobId: `${client.id}-job`,
+        taskName: null,
+      });
     }
     return rows;
   });

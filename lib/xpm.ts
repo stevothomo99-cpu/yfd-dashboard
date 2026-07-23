@@ -239,6 +239,7 @@ interface XpmJobParty {
 // fetchXpmJobsForPartner silently returned [] always (jobs.Response was
 // always undefined), which is why nothing ever actually synced before now.
 interface XpmJob {
+  id: string;
   uuid: string;
   name: string;
   client?: XpmJobParty;
@@ -545,43 +546,82 @@ function extractListRows(
   return [];
 }
 
-// A single Time entry may split its minutes across billable/non-billable —
-// emit one XpmTimesheet row per non-zero portion.
-function timeEntryRows(row: Record<string, unknown>, staffId: string): XpmTimesheet[] {
-  const date = pickDate(row, ["Date", "StartTime"]);
-  const clientId = pickRefId(row, ["Client"]);
-  const jobId = pickRefId(row, ["Job"]);
+// Real flat shape confirmed against a live tenant: {times: [...], status:
+// "OK"}, each entry {uuid, job: {id, name}, task: {uuid, name}, staff:
+// {uuid, name}, date, minutes, billable, note, webUrl} -- no client field
+// at all. Time entries reference a job by its short "id" (e.g. "Y100805"),
+// not the uuid jobs are keyed by elsewhere in this file, so attributing an
+// entry to a client goes through a job-id->client lookup built from the
+// confirmed job list, not anything on the entry itself. task.name (e.g.
+// "YFD - Leave" vs "YFD - Idle" vs "YFD - General Admin") is what
+// distinguishes Leave from other internal, non-billable work within the
+// single internal job -- confirmed via the XPM job's own task list.
+export interface XpmTimeEntry {
+  uuid: string;
+  job?: { id: string; name: string };
+  task?: { uuid: string; name: string };
+  date: string;
+  minutes: number;
+  billable: boolean;
+}
 
-  const billableMinutes = pickNum(row, ["BillableMinutes"]);
-  const nonBillableMinutes = pickNum(row, ["NonBillableMinutes"]);
+interface XpmTimeListResponse {
+  times?: XpmTimeEntry[];
+  status?: string;
+}
 
-  if (billableMinutes > 0 || nonBillableMinutes > 0) {
-    const rows: XpmTimesheet[] = [];
-    if (billableMinutes > 0) {
-      rows.push({ staffId, date, hours: billableMinutes / 60, billable: true, clientId, jobId });
-    }
-    if (nonBillableMinutes > 0) {
-      rows.push({ staffId, date, hours: nonBillableMinutes / 60, billable: false, clientId, jobId });
-    }
-    return rows;
+async function fetchXpmTimeEntriesForStaff(
+  staffId: string,
+  from: string,
+  to: string,
+): Promise<XpmTimeEntry[]> {
+  const res = await xpmFetch<XpmTimeListResponse>(`/time.api/staff/${staffId}?from=${from}&to=${to}`);
+  return res.times ?? [];
+}
+
+// Every time entry logged by any staff member (not just Partner/Staff-role
+// people we track) against a job under one of the Partner's clients --
+// querying the whole tenant's staff roster, not just recognised managers,
+// catches hours logged by anyone else assigned to those jobs too (there is
+// no time.api-by-client endpoint, only time.api-by-staff).
+export async function fetchXpmTimesheetsForPartner(
+  partnerName: string,
+  from: string,
+  to: string,
+): Promise<XpmTimesheet[]> {
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+
+  const [jobs, allStaff] = await Promise.all([
+    fetchXpmJobsForPartner(partnerName),
+    fetchAllXpmStaffRecords(),
+  ]);
+
+  const clientByJobId = new Map<string, string>();
+  for (const job of jobs) {
+    if (job.client?.uuid) clientByJobId.set(job.id, job.client.uuid);
   }
 
-  const minutes = pickNum(row, ["Minutes", "Duration"]);
-  const billable = typeof row.Billable === "boolean" ? row.Billable : true;
-  return [{ staffId, date, hours: minutes / 60, billable, clientId, jobId }];
-}
-
-async function fetchXpmTimeForStaff(staffId: string): Promise<XpmTimesheet[]> {
-  const res = await xpmFetch<Record<string, unknown>>(`/time.api/staff/${staffId}`);
-  const rows = extractListRows(res, ["Time", "TimeEntries", "Times"], ["Item", "TimeEntry", "Time"]);
-  return rows.flatMap((row) => timeEntryRows(row, staffId));
-}
-
-export async function fetchXpmTimesheets(staff: { id: string }[]): Promise<XpmTimesheet[]> {
-  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
   const perStaff = await Promise.all(
-    staff.map((s) => fetchXpmTimeForStaff(s.id).catch(() => [] as XpmTimesheet[])),
+    allStaff.map(async (s) => {
+      const entries = await fetchXpmTimeEntriesForStaff(s.uuid, from, to).catch(() => [] as XpmTimeEntry[]);
+      const rows: XpmTimesheet[] = [];
+      for (const e of entries) {
+        const clientId = e.job?.id ? clientByJobId.get(e.job.id) : undefined;
+        if (!clientId || !e.job) continue;
+        rows.push({
+          staffId: s.uuid,
+          date: e.date.slice(0, 10),
+          hours: e.minutes / 60,
+          billable: e.billable,
+          clientId,
+          jobId: e.job.id,
+          taskName: e.task?.name ?? null,
+        });
+      }
+      return rows;
+    }),
   );
+
   return perStaff.flat();
 }
 
@@ -594,8 +634,8 @@ export async function getXpmTimesheets(
     const hit = await cacheGetEncrypted<XpmTimesheet[]>(key);
     if (hit) return hit;
   }
-  const staff = await getXpmStaff(partnerName, options);
-  const fresh = await fetchXpmTimesheets(staff);
+  const { from, to } = xpmJobListDateRange();
+  const fresh = await fetchXpmTimesheetsForPartner(partnerName, from, to);
   await cacheSetEncrypted(key, fresh, TIMESHEETS_TTL);
   return fresh;
 }

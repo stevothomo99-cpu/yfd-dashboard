@@ -15,6 +15,10 @@ export interface XpmTimesheet {
   billable: boolean;
   clientId: string;
   jobId: string;
+  // The XPM task this entry was logged against within its job (e.g. "YFD -
+  // Leave", "YFD - Idle", or a client job's own task name) -- distinguishes
+  // Leave from other non-billable internal work.
+  taskName: string | null;
 }
 
 export type XpmServiceType =

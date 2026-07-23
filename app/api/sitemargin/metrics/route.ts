@@ -30,7 +30,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ResponseBo
     return NextResponse.json({
       ...metrics,
       lastUpdated: new Date().toISOString(),
-      note: "Churn data (subscription_canceled, trial_expired) available after Phase 2 (Stripe) ships. Currently showing trial_started only.",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
