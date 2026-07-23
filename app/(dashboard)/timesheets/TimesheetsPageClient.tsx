@@ -8,6 +8,7 @@ import {
   computeWagesUtilisation,
   UTILISATION_PERIODS,
   type UtilisationPeriodKey,
+  type ClientHoursBreakdown,
 } from "@/lib/workOverview";
 import type { XpmTimesheet } from "@/types/xpm";
 
@@ -27,6 +28,106 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function ClientBreakdownList({ byClient, totalHours }: { byClient: ClientHoursBreakdown[]; totalHours: number }) {
+  if (byClient.length === 0) {
+    return <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>No client-coded time logged for this period.</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {byClient.map((c, i) => {
+        const pct = totalHours > 0 ? Math.round((c.hours / totalHours) * 100) : 0;
+        return (
+          <div
+            key={c.clientId}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              padding: "10px 0",
+              borderBottom: i < byClient.length - 1 ? "0.5px solid #e1e0d9" : "none",
+            }}
+          >
+            <div style={{ flex: 1, fontSize: "13px", color: "#111111" }}>{c.clientName}</div>
+            <div style={{ width: "160px", height: "6px", background: "#f5f4f0", borderRadius: "3px", overflow: "hidden" }}>
+              <div style={{ width: pct + "%", height: "100%", background: "#2a78d6" }} />
+            </div>
+            <div style={{ width: "70px", textAlign: "right", fontSize: "12px", color: "#444441" }}>{c.hours.toFixed(1)}h</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmployeeRow({
+  staff,
+  timesheets,
+  period,
+  today,
+  clientNamesMap,
+  expanded,
+  onToggle,
+}: {
+  staff: StaffOption;
+  timesheets: XpmTimesheet[];
+  period: UtilisationPeriodKey;
+  today: string;
+  clientNamesMap: Map<string, string>;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const staffIds = useMemo(() => [staff.id], [staff.id]);
+  const utilisation = useMemo(
+    () => computeWagesUtilisation(timesheets, staffIds, period, today),
+    [timesheets, staffIds, period, today],
+  );
+  const byClient = useMemo(
+    () => (expanded ? computeHoursByClient(timesheets, staffIds, period, today, clientNamesMap) : []),
+    [expanded, timesheets, staffIds, period, today, clientNamesMap],
+  );
+
+  const nonBillable = utilisation.leaveHours + utilisation.idleHours;
+  const loggedTotal = utilisation.clientHours + nonBillable;
+  const billablePct = loggedTotal > 0 ? Math.round((utilisation.clientHours / loggedTotal) * 100) : null;
+
+  return (
+    <div style={{ borderBottom: "0.5px solid #e1e0d9" }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+          width: "100%",
+          padding: "10px 0",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <div style={{ fontSize: "11px", color: "#888780", width: "12px" }}>{expanded ? "▾" : "▸"}</div>
+        <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
+        <div style={{ width: "90px", textAlign: "right", fontSize: "12px", color: "#444441" }}>
+          {utilisation.clientHours.toFixed(1)}h billable
+        </div>
+        <div style={{ width: "110px", textAlign: "right", fontSize: "12px", color: "#888780" }}>
+          {nonBillable.toFixed(1)}h non-billable
+        </div>
+        <div style={{ width: "60px", textAlign: "right", fontSize: "12px", fontWeight: 500, color: billablePct !== null && billablePct < 50 ? "#e24b4a" : "#444441" }}>
+          {billablePct !== null ? `${billablePct}%` : "—"}
+        </div>
+      </button>
+      {expanded ? (
+        <div style={{ padding: "0 0 12px 24px" }}>
+          <ClientBreakdownList byClient={byClient} totalHours={utilisation.clientHours} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function TimesheetsPageClient({
   timesheets,
   staffOptions,
@@ -34,24 +135,21 @@ export default function TimesheetsPageClient({
   message,
 }: TimesheetsPageClientProps) {
   const [period, setPeriod] = useState<UtilisationPeriodKey>("week");
-  const [staffId, setStaffId] = useState("");
+  const [showTimeByClient, setShowTimeByClient] = useState(false);
+  const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
 
-  const staffIds = useMemo(
-    () => (staffId ? [staffId] : staffOptions.map((s) => s.id)),
-    [staffId, staffOptions],
-  );
-
+  const allStaffIds = useMemo(() => staffOptions.map((s) => s.id), [staffOptions]);
   const today = todayIso();
   const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
 
   const utilisation = useMemo(
-    () => computeWagesUtilisation(timesheets, staffIds, period, today),
-    [timesheets, staffIds, period, today],
+    () => computeWagesUtilisation(timesheets, allStaffIds, period, today),
+    [timesheets, allStaffIds, period, today],
   );
 
   const byClient = useMemo(
-    () => computeHoursByClient(timesheets, staffIds, period, today, clientNamesMap),
-    [timesheets, staffIds, period, today, clientNamesMap],
+    () => computeHoursByClient(timesheets, allStaffIds, period, today, clientNamesMap),
+    [timesheets, allStaffIds, period, today, clientNamesMap],
   );
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
@@ -79,52 +177,29 @@ export default function TimesheetsPageClient({
         </div>
       ) : null}
 
-      <div style={{ display: "flex", gap: "8px", alignItems: "center", padding: "0 0 14px", flexWrap: "wrap" }}>
-        <select
-          value={staffId}
-          onChange={(e) => setStaffId(e.target.value)}
-          style={{
-            fontSize: "12px",
-            padding: "7px 10px",
-            borderRadius: "8px",
-            border: "0.5px solid #e1e0d9",
-            background: "white",
-            color: staffId ? "#111111" : "#888780",
-            outline: "none",
-          }}
-        >
-          <option value="">All staff</option>
-          {staffOptions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          {UTILISATION_PERIODS.map((p) => {
-            const active = p.value === period;
-            return (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setPeriod(p.value)}
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  padding: "6px 12px",
-                  borderRadius: "999px",
-                  background: active ? "#111111" : "white",
-                  color: active ? "white" : "#444441",
-                  border: "0.5px solid " + (active ? "#111111" : "#e1e0d9"),
-                  cursor: "pointer",
-                }}
-              >
-                {p.label}
-              </button>
-            );
-          })}
-        </div>
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "0 0 14px" }}>
+        {UTILISATION_PERIODS.map((p) => {
+          const active = p.value === period;
+          return (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => setPeriod(p.value)}
+              style={{
+                fontSize: "12px",
+                fontWeight: 500,
+                padding: "6px 12px",
+                borderRadius: "999px",
+                background: active ? "#111111" : "white",
+                color: active ? "white" : "#444441",
+                border: "0.5px solid " + (active ? "#111111" : "#e1e0d9"),
+                cursor: "pointer",
+              }}
+            >
+              {p.label}
+            </button>
+          );
+        })}
       </div>
 
       <div
@@ -152,50 +227,62 @@ export default function TimesheetsPageClient({
           border: "0.5px solid #e1e0d9",
           borderRadius: "14px",
           padding: "1.1rem 1.2rem",
+          marginBottom: "14px",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "14px" }}>
-          <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Time by client</div>
+        <button
+          type="button"
+          onClick={() => setShowTimeByClient((v) => !v)}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            width: "100%",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: showTimeByClient ? "14px" : 0,
+          }}
+        >
+          <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>
+            {showTimeByClient ? "▾" : "▸"} Time by client (all staff)
+          </div>
           <div style={{ fontSize: "11px", color: "#888780" }}>{totalClientHours.toFixed(1)} hrs total</div>
+        </button>
+
+        {showTimeByClient ? <ClientBreakdownList byClient={byClient} totalHours={totalClientHours} /> : null}
+      </div>
+
+      <div
+        style={{
+          background: "white",
+          border: "0.5px solid #e1e0d9",
+          borderRadius: "14px",
+          padding: "1.1rem 1.2rem",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>By employee</div>
+          <div style={{ fontSize: "11px", color: "#888780" }}>Click a name for their client breakdown</div>
         </div>
 
-        {byClient.length === 0 ? (
-          <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>
-            No client-coded time logged for this period.
-          </div>
+        {staffOptions.length === 0 ? (
+          <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>No staff to show.</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {byClient.map((c, i) => {
-              const pct = totalClientHours > 0 ? Math.round((c.hours / totalClientHours) * 100) : 0;
-              return (
-                <div
-                  key={c.clientId}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    padding: "10px 0",
-                    borderBottom: i < byClient.length - 1 ? "0.5px solid #e1e0d9" : "none",
-                  }}
-                >
-                  <div style={{ flex: 1, fontSize: "13px", color: "#111111" }}>{c.clientName}</div>
-                  <div
-                    style={{
-                      width: "160px",
-                      height: "6px",
-                      background: "#f5f4f0",
-                      borderRadius: "3px",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div style={{ width: pct + "%", height: "100%", background: "#2a78d6" }} />
-                  </div>
-                  <div style={{ width: "70px", textAlign: "right", fontSize: "12px", color: "#444441" }}>
-                    {c.hours.toFixed(1)}h
-                  </div>
-                </div>
-              );
-            })}
+          <div>
+            {staffOptions.map((s) => (
+              <EmployeeRow
+                key={s.id}
+                staff={s}
+                timesheets={timesheets}
+                period={period}
+                today={today}
+                clientNamesMap={clientNamesMap}
+                expanded={expandedStaffId === s.id}
+                onToggle={() => setExpandedStaffId((cur) => (cur === s.id ? null : s.id))}
+              />
+            ))}
           </div>
         )}
       </div>
