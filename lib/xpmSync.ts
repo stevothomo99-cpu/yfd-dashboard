@@ -73,23 +73,29 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
 
   const admin = getSupabaseAdmin();
 
-  // -- Staff: Partner + everyone who manages one of their jobs --
-  const staffUpserts = [
-    {
-      xpm_staff_id: partnerRecord.uuid,
-      name: partnerRecord.name,
-      email: partnerRecord.email,
-      role: "Partner" as const,
-      included: true,
-    },
-    ...managerRecords.map((s) => ({
-      xpm_staff_id: s.uuid,
-      name: s.name,
-      email: s.email,
-      role: "Staff" as const,
-      included: true,
-    })),
-  ];
+  // -- Staff: Partner + everyone who manages one of their jobs. Deduped by
+  // xpm_staff_id (Map, so a later entry for the same id just overwrites the
+  // earlier one) -- Postgres rejects an upsert whose VALUES list touches
+  // the same ON CONFLICT key twice, and XPM's own data has repeatedly shown
+  // up with unexpected self-references (e.g. the Partner also managing one
+  // of their own jobs), so dedup defensively rather than chasing each case
+  // individually. --
+  const staffById = new Map<
+    string,
+    { xpm_staff_id: string; name: string; email: string; role: "Partner" | "Staff"; included: true }
+  >();
+  staffById.set(partnerRecord.uuid, {
+    xpm_staff_id: partnerRecord.uuid,
+    name: partnerRecord.name,
+    email: partnerRecord.email,
+    role: "Partner",
+    included: true,
+  });
+  for (const s of managerRecords) {
+    if (staffById.has(s.uuid)) continue;
+    staffById.set(s.uuid, { xpm_staff_id: s.uuid, name: s.name, email: s.email, role: "Staff", included: true });
+  }
+  const staffUpserts = Array.from(staffById.values());
 
   const { data: upsertedStaff, error: staffUpsertError } = await admin
     .from("staff")
@@ -103,12 +109,14 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   const partnerLocalId = staffIdByXpmId.get(partnerRecord.uuid);
   if (!partnerLocalId) throw new Error("Partner staff upsert did not return an id.");
 
-  // -- Customers: every client attached to one of the Partner's jobs --
-  const customerUpserts = clients.map((c) => ({
-    xpm_client_id: c.id,
-    name: c.name,
-    partner_id: partnerLocalId,
-  }));
+  // -- Customers: every client attached to one of the Partner's jobs
+  // (deduped by xpm_client_id, same reasoning as staff above) --
+  const customerById = new Map<string, { xpm_client_id: string; name: string; partner_id: string }>();
+  for (const c of clients) {
+    if (customerById.has(c.id)) continue;
+    customerById.set(c.id, { xpm_client_id: c.id, name: c.name, partner_id: partnerLocalId });
+  }
+  const customerUpserts = Array.from(customerById.values());
 
   const { data: upsertedCustomers, error: customerUpsertError } = await admin
     .from("customers")
@@ -120,16 +128,23 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     (upsertedCustomers ?? []).map((c) => [c.xpm_client_id as string, c.id as string]),
   );
 
-  // -- Jobs --
-  const jobUpserts = jobs
-    .filter((job) => job.client?.uuid && customerIdByXpmId.has(job.client.uuid))
-    .map((job) => ({
+  // -- Jobs (deduped by xpm_job_id, same reasoning as staff above) --
+  const jobById = new Map<
+    string,
+    { xpm_job_id: string; customer_id: string; name: string; partner_id: string; manager_id: string | null }
+  >();
+  for (const job of jobs) {
+    if (!job.client?.uuid || !customerIdByXpmId.has(job.client.uuid)) continue;
+    if (jobById.has(job.uuid)) continue;
+    jobById.set(job.uuid, {
       xpm_job_id: job.uuid,
-      customer_id: customerIdByXpmId.get(job.client!.uuid)!,
+      customer_id: customerIdByXpmId.get(job.client.uuid)!,
       name: job.name,
       partner_id: partnerLocalId,
       manager_id: job.manager?.uuid ? staffIdByXpmId.get(job.manager.uuid) ?? null : null,
-    }));
+    });
+  }
+  const jobUpserts = Array.from(jobById.values());
 
   const { error: jobUpsertError } =
     jobUpserts.length > 0

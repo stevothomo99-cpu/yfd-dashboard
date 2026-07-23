@@ -293,22 +293,53 @@ export function xpmJobListDateRange(): { from: string; to: string } {
   return { from: formatYyyyMmDd(yearAgo), to: formatYyyyMmDd(now) };
 }
 
+// A single from/to call only ever sees jobs within that ~360-day window --
+// confirmed against a live tenant that plenty of still-"In Progress" jobs
+// (e.g. FY25 engagements) started well over a year ago and would be
+// silently missed by one call. Xero's per-call span limit forces us to
+// page across multiple rolling windows and merge by uuid instead. 8
+// windows (~8 years) is generous headroom for a practice whose oldest
+// still-open jobs seen so far go back to mid-2024.
+const JOB_LIST_WINDOW_COUNT = 8;
+
+function jobListWindowBounds(windowsAgo: number): { from: string; to: string } {
+  const to = new Date();
+  to.setUTCDate(to.getUTCDate() - windowsAgo * 360);
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - 360);
+  return { from: formatYyyyMmDd(from), to: formatYyyyMmDd(to) };
+}
+
+async function fetchAllInProgressXpmJobs(): Promise<XpmJob[]> {
+  const windows = Array.from({ length: JOB_LIST_WINDOW_COUNT }, (_, i) => jobListWindowBounds(i));
+  const responses = await Promise.all(
+    windows.map(({ from, to }) =>
+      xpmFetch<XpmJobListResponse>(`/job.api/list?status=InProgress&from=${from}&to=${to}`),
+    ),
+  );
+
+  const byUuid = new Map<string, XpmJob>();
+  for (const res of responses) {
+    for (const job of res.jobs ?? []) {
+      if (!byUuid.has(job.uuid)) byUuid.set(job.uuid, job);
+    }
+  }
+  return Array.from(byUuid.values());
+}
+
 // In-progress jobs whose job-level "partner" field matches the given name
 // -- this is the Partner filter: the admin-configured name (e.g. "Steve
 // Thomas") scopes which jobs are "ours" out of the whole tenant, since XPM
 // jobs can carry a different senior staff member as their own job-level
 // partner. Shared by staff and client derivation so both only need one
-// job.api/list call. Exported (not just used internally) so the
+// job-list fetch. Exported (not just used internally) so the
 // staff/customers/jobs sync can pull the full job records too.
 export async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
   if (!partnerName) return [];
 
-  const { from, to } = xpmJobListDateRange();
-  const jobs = await xpmFetch<XpmJobListResponse>(
-    `/job.api/list?status=InProgress&from=${from}&to=${to}`,
-  );
-  return (jobs.jobs ?? []).filter((job) => job.partner?.name === partnerName);
+  const jobs = await fetchAllInProgressXpmJobs();
+  return jobs.filter((job) => job.partner?.name === partnerName);
 }
 
 export interface XpmClientRef {
