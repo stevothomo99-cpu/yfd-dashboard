@@ -34,10 +34,19 @@ interface ClientsPageClientProps {
   timesheets: XpmTimesheet[];
   staffIds: string[];
   clientNamesById: Record<string, string>;
+  // Xero Accounting revenue per client (keyed by our internal customer id,
+  // not xpm_client_id -- matched by exact name server-side since there's no
+  // stored link to a Xero contact), prefetched for all four period buttons
+  // up front so the slicer doesn't need a client-side round trip.
+  revenueByPeriodByClientId: Record<UtilisationPeriodKey, Record<string, number>>;
 }
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function fmtCurrency(value: number): string {
+  return `$${Math.round(value).toLocaleString("en-AU")}`;
 }
 
 export default function ClientsPageClient({
@@ -46,6 +55,7 @@ export default function ClientsPageClient({
   timesheets,
   staffIds,
   clientNamesById,
+  revenueByPeriodByClientId,
 }: ClientsPageClientProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -60,6 +70,7 @@ export default function ClientsPageClient({
     return Object.fromEntries(byClient.map((c) => [c.clientId, c.hours]));
   }, [timesheets, staffIds, hoursPeriod, clientNamesMap]);
 
+  const revenueByClientId = revenueByPeriodByClientId[hoursPeriod];
   const hoursPeriodLabel = UTILISATION_PERIODS.find((p) => p.value === hoursPeriod)?.label ?? "";
 
   // Only offer staff who actually manage at least one client -- no point
@@ -85,6 +96,13 @@ export default function ClientsPageClient({
     [tiles, hoursByClientId],
   );
 
+  const totalRevenue = useMemo(
+    () => tiles.reduce((acc, t) => acc + (revenueByClientId[t.id] ?? 0), 0),
+    [tiles, revenueByClientId],
+  );
+
+  const revenuePerHour = totalHoursLogged > 0 ? totalRevenue / totalHoursLogged : null;
+
   // Destination-client picker for the drawer's "Copy task" / "Apply
   // template" actions -- every client in the practice, not just the ones
   // matching the current filter/search, so those actions aren't limited by
@@ -102,6 +120,8 @@ export default function ClientsPageClient({
         <div style={{ display: "flex", gap: "18px", flexWrap: "wrap" }}>
           <SummaryStat label="Clients" value={tiles.length.toString()} />
           <SummaryStat label={`Hours logged (${hoursPeriodLabel})`} value={totalHoursLogged.toFixed(1)} />
+          <SummaryStat label={`Revenue (${hoursPeriodLabel})`} value={fmtCurrency(totalRevenue)} />
+          <SummaryStat label={`$/hr (${hoursPeriodLabel})`} value={revenuePerHour !== null ? fmtCurrency(revenuePerHour) : "—"} />
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           {UTILISATION_PERIODS.map((p) => {
@@ -214,6 +234,7 @@ export default function ClientsPageClient({
               tile={t}
               hoursLogged={t.xpmClientId ? hoursByClientId[t.xpmClientId] : undefined}
               hoursPeriodLabel={hoursPeriodLabel}
+              revenue={revenueByClientId[t.id]}
               onClick={() => setActiveTile(t)}
             />
           ))}

@@ -20,6 +20,10 @@ interface Props {
   tile: ClientSummary;
   hoursLogged?: number;
   hoursPeriodLabel?: string;
+  // Revenue from Xero Accounting invoices (not XPM) for the same period as
+  // hoursLogged -- undefined if Xero Accounting isn't connected or this
+  // client didn't match a Xero contact by exact name.
+  revenue?: number;
   onClick?: () => void;
 }
 
@@ -27,7 +31,11 @@ function fmtDate(d: string): string {
   return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
 
-export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, onClick }: Props) {
+function fmtCurrency(value: number): string {
+  return `$${Math.round(value).toLocaleString("en-AU")}`;
+}
+
+export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenue, onClick }: Props) {
   const status = statusOf(tile);
 
   return (
@@ -77,12 +85,19 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, onClic
         ) : (
           <span />
         )}
-        {hoursLogged !== undefined ? (
-          <div style={{ fontSize: "11px", color: "#888780" }}>
-            <span style={{ color: "#444441", fontWeight: 500 }}>{hoursLogged.toFixed(1)}</span> hrs
-            {hoursPeriodLabel ? ` (${hoursPeriodLabel})` : ""}
-          </div>
-        ) : null}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "2px" }}>
+          {hoursLogged !== undefined ? (
+            <div style={{ fontSize: "11px", color: "#888780" }}>
+              <span style={{ color: "#444441", fontWeight: 500 }}>{hoursLogged.toFixed(1)}</span> hrs
+              {hoursPeriodLabel ? ` (${hoursPeriodLabel})` : ""}
+            </div>
+          ) : null}
+          {revenue !== undefined ? (
+            <div style={{ fontSize: "11px", color: "#888780" }}>
+              <span style={{ color: "#444441", fontWeight: 500 }}>{fmtCurrency(revenue)}</span> revenue
+            </div>
+          ) : null}
+        </div>
       </div>
     </button>
   );

@@ -68,7 +68,10 @@ function startOfWeekMonday(d: Date): Date {
 
 // Quarters here are the four fixed calendar quarters (ending 31 Mar / 30
 // Jun / 30 Sep / 31 Dec), not FY-numbered quarters -- confirmed directly.
-function periodBounds(period: UtilisationPeriodKey, today: Date): { start: Date; end: Date } {
+// Exported so callers outside this file (e.g. the Clients page's Xero
+// Accounting revenue fetch) can compute the same date range a period button
+// means here, without re-deriving FY/quarter/week logic themselves.
+export function periodBounds(period: UtilisationPeriodKey, today: Date): { start: Date; end: Date } {
   switch (period) {
     case "week": {
       const start = startOfWeekMonday(today);
