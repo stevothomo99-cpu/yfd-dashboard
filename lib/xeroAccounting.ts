@@ -254,6 +254,34 @@ export interface XeroRevenueByClient {
   revenue: number;
 }
 
+// Xero rejects a `where` filter combined with summaryOnly=true (confirmed
+// live: "The supplied filter is unavailable on this endpoint when using the
+// summaryOnly flag"), so full invoice bodies are fetched instead -- heavier
+// per page, but the only way to keep server-side date/status filtering.
+// Paged at Xero's default 100-per-page until a page comes back empty; the
+// cap is just a runaway-loop backstop, not an expected ceiling for a single
+// week/month/quarter/FY window.
+const INVOICE_FETCH_PAGE_CAP = 20;
+
+async function fetchAllInvoicesInRange(fromIso: string, toIso: string): Promise<XeroInvoiceRow[]> {
+  const [fromY, fromM, fromD] = fromIso.split("-").map(Number);
+  const [toY, toM, toD] = toIso.split("-").map(Number);
+  const where =
+    `Type=="ACCREC"&&(Status=="AUTHORISED"||Status=="PAID")` +
+    `&&Date>=DateTime(${fromY},${fromM},${fromD})&&Date<=DateTime(${toY},${toM},${toD})`;
+
+  const all: XeroInvoiceRow[] = [];
+  for (let page = 1; page <= INVOICE_FETCH_PAGE_CAP; page++) {
+    const res = await xeroAccountingFetch<XeroInvoiceListResponse>(
+      `/Invoices?where=${encodeURIComponent(where)}&page=${page}`,
+    );
+    const rows = res.Invoices ?? [];
+    if (rows.length === 0) break;
+    all.push(...rows);
+  }
+  return all;
+}
+
 // Revenue is counted as invoice SubTotal (ex-GST) on ACCREC (sales)
 // invoices in AUTHORISED or PAID status within the date range -- DRAFT/
 // VOIDED/DELETED invoices aren't real revenue. Matched to XPM clients by
@@ -265,18 +293,10 @@ export async function fetchRevenueByClientName(
 ): Promise<XeroRevenueByClient[]> {
   if (!isXeroAccountingConfigured()) throw new XeroAccountingNotConfiguredError();
 
-  const [fromY, fromM, fromD] = fromIso.split("-").map(Number);
-  const [toY, toM, toD] = toIso.split("-").map(Number);
-  const where =
-    `Type=="ACCREC"&&(Status=="AUTHORISED"||Status=="PAID")` +
-    `&&Date>=DateTime(${fromY},${fromM},${fromD})&&Date<=DateTime(${toY},${toM},${toD})`;
-
-  const res = await xeroAccountingFetch<XeroInvoiceListResponse>(
-    `/Invoices?where=${encodeURIComponent(where)}&summaryOnly=true`,
-  );
+  const rows = await fetchAllInvoicesInRange(fromIso, toIso);
 
   const totals = new Map<string, number>();
-  for (const inv of res.Invoices ?? []) {
+  for (const inv of rows) {
     const name = inv.Contact?.Name;
     if (!name) continue;
     totals.set(name, (totals.get(name) ?? 0) + (inv.SubTotal ?? 0));
@@ -304,15 +324,6 @@ export async function getRevenueByClientName(fromIso: string, toIso: string): Pr
 export async function fetchTotalRevenue(fromIso: string, toIso: string): Promise<number> {
   if (!isXeroAccountingConfigured()) throw new XeroAccountingNotConfiguredError();
 
-  const [fromY, fromM, fromD] = fromIso.split("-").map(Number);
-  const [toY, toM, toD] = toIso.split("-").map(Number);
-  const where =
-    `Type=="ACCREC"&&(Status=="AUTHORISED"||Status=="PAID")` +
-    `&&Date>=DateTime(${fromY},${fromM},${fromD})&&Date<=DateTime(${toY},${toM},${toD})`;
-
-  const res = await xeroAccountingFetch<XeroInvoiceListResponse>(
-    `/Invoices?where=${encodeURIComponent(where)}&summaryOnly=true`,
-  );
-
-  return (res.Invoices ?? []).reduce((sum, inv) => sum + (inv.SubTotal ?? 0), 0);
+  const rows = await fetchAllInvoicesInRange(fromIso, toIso);
+  return rows.reduce((sum, inv) => sum + (inv.SubTotal ?? 0), 0);
 }
