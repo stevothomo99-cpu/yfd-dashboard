@@ -19,6 +19,7 @@ const TOP_BORDER: Record<TileStatus, string> = {
 interface Props {
   tile: ClientSummary;
   hoursLogged?: number;
+  hoursPeriodLabel?: string;
   onClick?: () => void;
 }
 
@@ -26,7 +27,7 @@ function fmtDate(d: string): string {
   return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
 
-export default function ClientTile({ tile, hoursLogged, onClick }: Props) {
+export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, onClick }: Props) {
   const status = statusOf(tile);
 
   return (
@@ -78,7 +79,8 @@ export default function ClientTile({ tile, hoursLogged, onClick }: Props) {
         )}
         {hoursLogged !== undefined ? (
           <div style={{ fontSize: "11px", color: "#888780" }}>
-            <span style={{ color: "#444441", fontWeight: 500 }}>{hoursLogged.toFixed(1)}</span> hrs (FY)
+            <span style={{ color: "#444441", fontWeight: 500 }}>{hoursLogged.toFixed(1)}</span> hrs
+            {hoursPeriodLabel ? ` (${hoursPeriodLabel})` : ""}
           </div>
         ) : null}
       </div>

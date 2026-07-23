@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import ClientTile, { statusOf, type TileStatus } from "@/components/dashboard/ClientTile";
 import TileDrawer from "@/components/dashboard/TileDrawer";
+import { computeHoursByClient, UTILISATION_PERIODS, type UtilisationPeriodKey } from "@/lib/workOverview";
 import type { ClientSummary } from "@/types/workflow";
+import type { XpmTimesheet } from "@/types/xpm";
 
 type Filter = "all" | TileStatus;
 
@@ -29,14 +31,36 @@ interface StaffOption {
 interface ClientsPageClientProps {
   tiles: ClientSummary[];
   staffOptions: StaffOption[];
-  hoursByClientId: Record<string, number>;
+  timesheets: XpmTimesheet[];
+  staffIds: string[];
+  clientNamesById: Record<string, string>;
 }
 
-export default function ClientsPageClient({ tiles: allTiles, staffOptions, hoursByClientId }: ClientsPageClientProps) {
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export default function ClientsPageClient({
+  tiles: allTiles,
+  staffOptions,
+  timesheets,
+  staffIds,
+  clientNamesById,
+}: ClientsPageClientProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [staffId, setStaffId] = useState("");
   const [activeTile, setActiveTile] = useState<ClientSummary | null>(null);
+  const [hoursPeriod, setHoursPeriod] = useState<UtilisationPeriodKey>("fy");
+
+  const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
+
+  const hoursByClientId = useMemo(() => {
+    const byClient = computeHoursByClient(timesheets, staffIds, hoursPeriod, todayIso(), clientNamesMap);
+    return Object.fromEntries(byClient.map((c) => [c.clientId, c.hours]));
+  }, [timesheets, staffIds, hoursPeriod, clientNamesMap]);
+
+  const hoursPeriodLabel = UTILISATION_PERIODS.find((p) => p.value === hoursPeriod)?.label ?? "";
 
   // Only offer staff who actually manage at least one client -- no point
   // listing someone with an empty result every time.
@@ -74,9 +98,35 @@ export default function ClientsPageClient({ tiles: allTiles, staffOptions, hours
     <div>
       <PageHeader title="Clients" subtitle="Tile view · sorted by status · click a tile to drill in" />
 
-      <div style={{ display: "flex", gap: "18px", padding: "0 0 14px", flexWrap: "wrap" }}>
-        <SummaryStat label="Clients" value={tiles.length.toString()} />
-        <SummaryStat label="Hours logged (FY)" value={totalHoursLogged.toFixed(1)} />
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: "18px", padding: "0 0 14px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "18px", flexWrap: "wrap" }}>
+          <SummaryStat label="Clients" value={tiles.length.toString()} />
+          <SummaryStat label={`Hours logged (${hoursPeriodLabel})`} value={totalHoursLogged.toFixed(1)} />
+        </div>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          {UTILISATION_PERIODS.map((p) => {
+            const active = p.value === hoursPeriod;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setHoursPeriod(p.value)}
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  padding: "6px 12px",
+                  borderRadius: "999px",
+                  background: active ? "#111111" : "white",
+                  color: active ? "white" : "#444441",
+                  border: "0.5px solid " + (active ? "#111111" : "#e1e0d9"),
+                  cursor: "pointer",
+                }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: "8px", alignItems: "center", padding: "0 0 18px", flexWrap: "wrap" }}>
@@ -163,6 +213,7 @@ export default function ClientsPageClient({ tiles: allTiles, staffOptions, hours
               key={t.id}
               tile={t}
               hoursLogged={t.xpmClientId ? hoursByClientId[t.xpmClientId] : undefined}
+              hoursPeriodLabel={hoursPeriodLabel}
               onClick={() => setActiveTile(t)}
             />
           ))}
