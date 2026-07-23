@@ -9,9 +9,9 @@ import PageHeader from "@/components/dashboard/PageHeader";
 
 interface XeroSalesMetrics {
   monthTotal: number;
-  ytdTotal: number;
+  fyTotal: number;
   monthHours: number;
-  ytdHours: number;
+  fyHours: number;
   error?: string;
 }
 
@@ -186,9 +186,9 @@ export default function PersonalDashboard() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">YTD Total</p>
+                  <p className="text-sm text-muted-foreground">FY Total</p>
                   <p className="text-2xl font-bold">
-                    {loading ? "..." : xeroSales?.ytdTotal ? `$${(xeroSales.ytdTotal / 1000).toFixed(1)}k` : "$0"}
+                    {loading ? "..." : xeroSales?.fyTotal ? `$${(xeroSales.fyTotal / 1000).toFixed(1)}k` : "$0"}
                   </p>
                 </div>
               </div>
@@ -198,8 +198,8 @@ export default function PersonalDashboard() {
                   <p className="text-2xl font-bold">{loading ? "..." : (xeroSales?.monthHours ?? 0).toFixed(1)}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Hours Logged (YTD)</p>
-                  <p className="text-2xl font-bold">{loading ? "..." : (xeroSales?.ytdHours ?? 0).toFixed(1)}</p>
+                  <p className="text-sm text-muted-foreground">Hours Logged (FY)</p>
+                  <p className="text-2xl font-bold">{loading ? "..." : (xeroSales?.fyHours ?? 0).toFixed(1)}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -210,9 +210,9 @@ export default function PersonalDashboard() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">$/hr (YTD)</p>
+                  <p className="text-sm text-muted-foreground">$/hr (FY)</p>
                   <p className="text-2xl font-bold">
-                    {loading ? "..." : fmtPerHour(xeroSales?.ytdTotal ?? 0, xeroSales?.ytdHours ?? 0)}
+                    {loading ? "..." : fmtPerHour(xeroSales?.fyTotal ?? 0, xeroSales?.fyHours ?? 0)}
                   </p>
                 </div>
               </div>
