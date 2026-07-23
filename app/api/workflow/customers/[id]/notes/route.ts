@@ -20,14 +20,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const { id } = await params;
-  const body = (await request.json()) as { body?: string };
+  const body = (await request.json()) as { body?: string; title?: string };
   const text = body.body?.trim();
   if (!text) {
     return NextResponse.json({ error: "Note body is required" }, { status: 400 });
   }
+  const title = body.title?.trim() || null;
 
   const authorName = session.user.name ?? session.user.email ?? "Unknown";
-  const note = await addCustomerNote(id, authorName, session.user.email ?? null, text);
+  const note = await addCustomerNote(id, authorName, session.user.email ?? null, text, title);
   if (!note) {
     return NextResponse.json({ error: "Failed to save note" }, { status: 500 });
   }

@@ -148,9 +148,11 @@ export interface ClientSummary {
 export interface CustomerNote {
   id: string;
   customerId: string;
+  title: string | null;
   authorName: string;
   authorEmail: string | null;
   body: string;
+  pinned: boolean;
   createdAt: string;
 }
 

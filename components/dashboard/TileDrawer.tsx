@@ -41,8 +41,10 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
   const [notes, setNotes] = useState<CustomerNote[]>([]);
   const [files, setFiles] = useState<CustomerFile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
+  const [togglingPinId, setTogglingPinId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyingTask, setCopyingTask] = useState<TaskWithDetails | null>(null);
@@ -111,16 +113,44 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
       const res = await fetch(`/api/workflow/customers/${tile.id}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: noteText.trim() }),
+        body: JSON.stringify({ title: noteTitle.trim() || undefined, body: noteText.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save note");
-      setNotes((prev) => [data.note, ...prev]);
+      // New notes are never pinned, so they always land after any existing
+      // pinned ones -- appending, not prepending, keeps that order without
+      // needing a full re-fetch/re-sort.
+      setNotes((prev) => [...prev.filter((n) => n.pinned), data.note, ...prev.filter((n) => !n.pinned)]);
+      setNoteTitle("");
       setNoteText("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save note");
     } finally {
       setSubmittingNote(false);
+    }
+  }
+
+  async function handleTogglePin(note: CustomerNote) {
+    setTogglingPinId(note.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workflow/notes/${note.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: !note.pinned }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update note");
+      setNotes((prev) => {
+        const updated = prev.map((n) => (n.id === note.id ? (data.note as CustomerNote) : n));
+        const pinned = updated.filter((n) => n.pinned);
+        const rest = updated.filter((n) => !n.pinned);
+        return [...pinned, ...rest];
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update note");
+    } finally {
+      setTogglingPinId(null);
     }
   }
 
@@ -253,6 +283,20 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
 
         <Section title={`Notes · ${notes.length}`}>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
+            <input
+              type="text"
+              value={noteTitle}
+              onChange={(e) => setNoteTitle(e.target.value)}
+              placeholder="Title (optional)…"
+              style={{
+                fontSize: "13px",
+                padding: "8px 10px",
+                borderRadius: "8px",
+                border: "0.5px solid #e1e0d9",
+                outline: "none",
+                fontFamily: "inherit",
+              }}
+            />
             <textarea
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
@@ -294,8 +338,44 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
           ) : (
             <Stack>
               {notes.map((n) => (
-                <div key={n.id} style={{ background: "#fafaf8", borderRadius: "8px", padding: "10px 12px" }}>
-                  <div style={{ fontSize: "13px", color: "#111111", whiteSpace: "pre-wrap" }}>{n.body}</div>
+                <div
+                  key={n.id}
+                  style={{
+                    background: n.pinned ? "#fdf6e3" : "#fafaf8",
+                    border: n.pinned ? "0.5px solid #eda100" : "0.5px solid transparent",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      {n.title ? (
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111", marginBottom: "2px" }}>
+                          {n.title}
+                        </div>
+                      ) : null}
+                      <div style={{ fontSize: "13px", color: "#111111", whiteSpace: "pre-wrap" }}>{n.body}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePin(n)}
+                      disabled={togglingPinId === n.id}
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        color: n.pinned ? "#a8710a" : "#888780",
+                        background: n.pinned ? "#faecc8" : "transparent",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: togglingPinId === n.id ? "default" : "pointer",
+                        padding: "3px 8px",
+                        flexShrink: 0,
+                        opacity: togglingPinId === n.id ? 0.6 : 1,
+                      }}
+                    >
+                      {n.pinned ? "Pinned" : "Pin"}
+                    </button>
+                  </div>
                   <div style={{ fontSize: "11px", color: "#888780", marginTop: "6px" }}>
                     {n.authorName} · {new Date(n.createdAt).toLocaleString("en-AU")}
                   </div>

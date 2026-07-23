@@ -663,9 +663,11 @@ export async function getClientSummaries(): Promise<ClientSummary[]> {
 interface CustomerNoteRow {
   id: string;
   customer_id: string;
+  title: string | null;
   author_name: string;
   author_email: string | null;
   body: string;
+  pinned: boolean;
   created_at: string;
 }
 
@@ -673,19 +675,25 @@ function mapCustomerNote(row: CustomerNoteRow): CustomerNote {
   return {
     id: row.id,
     customerId: row.customer_id,
+    title: row.title,
     authorName: row.author_name,
     authorEmail: row.author_email,
     body: row.body,
+    pinned: row.pinned,
     createdAt: row.created_at,
   };
 }
 
+// Pinned notes first (most-recently-pinned first among those), then
+// everything else newest-first -- lets a Partner/Manager keep an important
+// note visible at the top of a growing list without it aging out.
 export async function getCustomerNotes(customerId: string): Promise<CustomerNote[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("customer_notes")
     .select("*")
     .eq("customer_id", customerId)
+    .order("pinned", { ascending: false })
     .order("created_at", { ascending: false })
     .returns<CustomerNoteRow[]>();
 
@@ -700,17 +708,34 @@ export async function addCustomerNote(
   customerId: string,
   authorName: string,
   authorEmail: string | null,
-  body: string
+  body: string,
+  title: string | null
 ): Promise<CustomerNote | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("customer_notes")
-    .insert({ customer_id: customerId, author_name: authorName, author_email: authorEmail, body })
+    .insert({ customer_id: customerId, author_name: authorName, author_email: authorEmail, body, title })
     .select("*")
     .single<CustomerNoteRow>();
 
   if (error) {
     console.error("[workflow] addCustomerNote failed:", error.message);
+    return null;
+  }
+  return mapCustomerNote(data);
+}
+
+export async function setCustomerNotePinned(noteId: string, pinned: boolean): Promise<CustomerNote | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_notes")
+    .update({ pinned })
+    .eq("id", noteId)
+    .select("*")
+    .single<CustomerNoteRow>();
+
+  if (error) {
+    console.error("[workflow] setCustomerNotePinned failed:", error.message);
     return null;
   }
   return mapCustomerNote(data);
