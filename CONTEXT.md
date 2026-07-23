@@ -64,7 +64,18 @@ OAuth 2.0 (Xero Developer portal), auto-refreshed from `XPM_REFRESH_TOKEN`. `Xpm
 | `GET/POST /api/xpm/staff` | Staff filtered to Partner = CEO name (Manager role on Partner's jobs) |
 | `GET /api/xpm/timesheets` | Billable/non-billable hours, week/month/YTD |
 | `GET /api/xpm/invoices` | YTD invoiced per client |
-| `GET/POST /api/xpm/sales` | **YFD business tile data.** Sums XPM invoices into `monthTotal` (1st of month → today) and `ytdTotal` (Jan 1 → today, calendar year). POST forces a cache refresh. |
+
+Note: the `/personal` "YFD — Sales" tile no longer reads from here -- it reads real invoicing from Xero Accounting instead (§4.1a), since XPM's `invoice.api` isn't YFD's actual invoicing system.
+
+### 4.1a Xero Accounting (revenue) — `lib/xeroAccounting.ts`
+A separate Xero product/connection from Practice Manager above -- connects to YFD's own Xero Accounting organisation (where invoices to clients are actually issued), not the Practice Manager tenant. One-time OAuth bootstrap at `/api/xero-accounting/authorize` (admin-gated) → `/api/xero-accounting/callback`; see `.env.example` for the `XERO_ACCOUNTING_*` env vars (reuses `XPM_TOKEN_ENCRYPTION_KEY`).
+
+| Endpoint | Fetches |
+|---|---|
+| `GET/POST /api/xero-accounting/sales` | **YFD business tile data.** Sums ACCREC/AUTHORISED\|PAID invoice `SubTotal` (ex-GST) into `monthTotal` (1st of month → today) and `ytdTotal` (Jan 1 → today, calendar year). |
+| `GET /api/xero-accounting/diagnose` | Admin debug endpoint -- dumps a raw `/Invoices` sample to confirm shape against the live tenant. |
+
+`fetchRevenueByClientName(fromIso, toIso)` also groups revenue by Xero contact name, matched to XPM clients by exact name (no stored link exists between the two systems).
 
 Note: `XPM_BASE_URL` must point at API **v3.1** (`https://api.xero.com/practicemanager/3.1`) — v3.0 only returns XML, and `lib/xpm.ts` expects JSON.
 
@@ -97,10 +108,10 @@ Also its own Supabase project. Env vars: `SUPABASE_SITEMARGIN_URL`, `SUPABASE_SI
 
 ## 5. `/personal` Dashboard — Current Layout
 
-1. **Sales Pipeline** (3-col grid): `BusinessKpiTile` for FocablyED and SiteMargin (HubSpot deal data), plus a YFD tile showing Xero month/YTD sales totals (`xeroSales` state, from `/api/xpm/sales`).
+1. **Sales Pipeline** (3-col grid): `BusinessKpiTile` for FocablyED and SiteMargin (HubSpot deal data), plus a YFD tile showing Xero month/YTD sales totals (`xeroSales` state, from `/api/xero-accounting/sales`).
 2. **Web Metrics** (2-col grid, heading shows current period e.g. "Web Metrics (24h)"): `WebMetricsTile` × 2 (SiteMargin, FocablyED). Each tile has its own 24h/week/month button row (raised/shadowed button style) that re-fetches both Search Console and Analytics data for that product at the selected period via `handleWebMetricsPeriodChange(days)`, which hits both Google endpoints with a `?days=` query param.
 3. **User & Churn Metrics**: `SubscriptionMetricsTile` (FocablyED) and `SiteMarginMetricsTile` (SiteMargin).
-4. Manual **Refresh** button — re-fetches all 6 data sources (HubSpot POST, XPM sales POST, Focably, SiteMargin, Search Console, Analytics).
+4. Manual **Refresh** button — re-fetches all 6 data sources (HubSpot POST, Xero Accounting sales POST, Focably, SiteMargin, Search Console, Analytics).
 
 Key components: `components/dashboard/WebMetricsTile.tsx` (unified Search Console + Analytics side-by-side, replaced the earlier separate `SearchConsoleMetricsTile`/`AnalyticsMetricsTile`, which are still in the tree but unused), `components/dashboard/BusinessKpiTile.tsx`, `components/ui/skeleton.tsx` (loading placeholder — required by `WebMetricsTile`, was missing and broke the Turbopack build once).
 

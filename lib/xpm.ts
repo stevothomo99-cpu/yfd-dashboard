@@ -336,16 +336,14 @@ export function xpmJobListDateRange(): { from: string; to: string } {
   return { from: formatYyyyMmDd(yearAgo), to: formatYyyyMmDd(now) };
 }
 
-// A single from/to call only ever sees jobs within that ~360-day window --
-// confirmed against a live tenant that plenty of still-"In Progress" jobs
-// (e.g. FY25 engagements) started well over a year ago and would be
-// silently missed by one call. Xero's per-call span limit forces us to
-// page across multiple rolling windows and merge by uuid instead. 8
-// windows (~8 years) is generous headroom for a practice whose oldest
-// still-open jobs seen so far go back to mid-2024.
-const JOB_LIST_WINDOW_COUNT = 8;
-
-function jobListWindowBounds(windowsAgo: number): { from: string; to: string } {
+// A single from/to call only ever sees rows within that ~360-day window --
+// confirmed against a live tenant for job.api/list (plenty of still-"In
+// Progress" jobs, e.g. FY25 engagements, started well over a year ago and
+// would be silently missed by one call) and the same span limit applies to
+// invoice.api/list. Xero's per-call span limit forces us to page across
+// multiple rolling windows and merge by id instead. Shared by both list
+// endpoints below.
+function rollingWindowBounds(windowsAgo: number): { from: string; to: string } {
   const to = new Date();
   to.setUTCDate(to.getUTCDate() - windowsAgo * 360);
   const from = new Date(to);
@@ -353,8 +351,12 @@ function jobListWindowBounds(windowsAgo: number): { from: string; to: string } {
   return { from: formatYyyyMmDd(from), to: formatYyyyMmDd(to) };
 }
 
+// 8 windows (~8 years) is generous headroom for a practice whose oldest
+// still-open jobs seen so far go back to mid-2024.
+const JOB_LIST_WINDOW_COUNT = 8;
+
 async function fetchAllInProgressXpmJobs(): Promise<XpmJob[]> {
-  const windows = Array.from({ length: JOB_LIST_WINDOW_COUNT }, (_, i) => jobListWindowBounds(i));
+  const windows = Array.from({ length: JOB_LIST_WINDOW_COUNT }, (_, i) => rollingWindowBounds(i));
   const responses = await Promise.all(
     windows.map(({ from, to }) =>
       xpmFetch<XpmJobListResponse>(`/job.api/list?status=InProgress&from=${from}&to=${to}`),
@@ -647,6 +649,14 @@ export async function getXpmTimesheets(
 // revenue-by-service-type breakdowns won't be accurate until then.
 const DEFAULT_SERVICE_TYPE: XpmServiceType = "Bookkeeping";
 
+// Same undocumented-until-tested span limit as job.api/list -- confirmed
+// live that /invoice.api/list 400s without a `from` param at all (in the
+// same yyyyMMdd format), so it's paged across rolling windows and merged by
+// id the same way. Only 3 windows (~3 years) since invoices are filtered
+// down to the current + previous FY below anyway -- one window of headroom
+// in case a FY boundary doesn't land cleanly inside a single ~360-day span.
+const INVOICE_LIST_WINDOW_COUNT = 3;
+
 export async function fetchXpmInvoices(partnerName: string): Promise<XpmInvoice[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
 
@@ -654,11 +664,24 @@ export async function fetchXpmInvoices(partnerName: string): Promise<XpmInvoice[
   const clientNames = new Map(clients.map((c) => [c.id, c.name]));
   const clientIds = new Set(clients.map((c) => c.id));
 
-  const res = await xpmFetch<Record<string, unknown>>("/invoice.api/list");
-  const rows = extractListRows(res, ["Invoices", "InvoiceList"], ["Invoice", "Item"]);
+  const windows = Array.from({ length: INVOICE_LIST_WINDOW_COUNT }, (_, i) => rollingWindowBounds(i));
+  const responses = await Promise.all(
+    windows.map(({ from, to }) =>
+      xpmFetch<Record<string, unknown>>(`/invoice.api/list?from=${from}&to=${to}`),
+    ),
+  );
+
+  const rowsById = new Map<string, Record<string, unknown>>();
+  for (const res of responses) {
+    for (const row of extractListRows(res, ["Invoices", "InvoiceList"], ["Invoice", "Item"])) {
+      const id = pickStr(row, ["UUID", "ID"]);
+      if (!rowsById.has(id)) rowsById.set(id, row);
+    }
+  }
+
   const currentFy = fyYearFor(new Date());
 
-  return rows
+  return Array.from(rowsById.values())
     .map((row) => {
       const clientId = pickRefId(row, ["Client"]);
       const date = pickDate(row, ["Date"]);
@@ -673,9 +696,8 @@ export async function fetchXpmInvoices(partnerName: string): Promise<XpmInvoice[
       } satisfies XpmInvoice;
     })
     .filter((inv) => clientIds.has(inv.clientId))
-    // Bound the unscoped /invoice.api/list result to recent FYs only — the
-    // same "full tenant history" risk that the Karbon WorkItems fetch had
-    // before it got a date filter.
+    // Bound the result to recent FYs only — the same "full tenant history"
+    // risk that the Karbon WorkItems fetch had before it got a date filter.
     .filter((inv) => inv.fyYear >= currentFy - 1);
 }
 

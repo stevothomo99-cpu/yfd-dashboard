@@ -49,7 +49,7 @@ export default function PersonalDashboard() {
       try {
         const [kpisRes, xeroRes] = await Promise.all([
           fetch("/api/hubspot/deals"),
-          fetch("/api/xpm/sales"),
+          fetch("/api/xero-accounting/sales"),
         ]);
 
         const kpisData: DealKPIs = await kpisRes.json();
@@ -79,7 +79,7 @@ export default function PersonalDashboard() {
     try {
       const [kpisRes, xeroRes] = await Promise.all([
         fetch("/api/hubspot/deals", { method: "POST" }),
-        fetch("/api/xpm/sales", { method: "POST" }),
+        fetch("/api/xero-accounting/sales", { method: "POST" }),
       ]);
 
       const kpisData: DealKPIs = await kpisRes.json();

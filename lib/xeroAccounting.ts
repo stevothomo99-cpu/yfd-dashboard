@@ -271,3 +271,23 @@ export async function fetchRevenueByClientName(
 
   return Array.from(totals.entries()).map(([clientName, revenue]) => ({ clientName, revenue }));
 }
+
+// Same revenue definition as fetchRevenueByClientName (ACCREC, AUTHORISED/
+// PAID, SubTotal ex-GST) but a single practice-wide total rather than a
+// per-client breakdown -- feeds the /personal "YFD — Sales" KPI tile, which
+// only ever wants Month/YTD totals, not a client list.
+export async function fetchTotalRevenue(fromIso: string, toIso: string): Promise<number> {
+  if (!isXeroAccountingConfigured()) throw new XeroAccountingNotConfiguredError();
+
+  const [fromY, fromM, fromD] = fromIso.split("-").map(Number);
+  const [toY, toM, toD] = toIso.split("-").map(Number);
+  const where =
+    `Type=="ACCREC"&&(Status=="AUTHORISED"||Status=="PAID")` +
+    `&&Date>=DateTime(${fromY},${fromM},${fromD})&&Date<=DateTime(${toY},${toM},${toD})`;
+
+  const res = await xeroAccountingFetch<XeroInvoiceListResponse>(
+    `/Invoices?where=${encodeURIComponent(where)}&summaryOnly=true`,
+  );
+
+  return (res.Invoices ?? []).reduce((sum, inv) => sum + (inv.SubTotal ?? 0), 0);
+}
