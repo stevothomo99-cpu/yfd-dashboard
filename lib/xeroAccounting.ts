@@ -181,12 +181,25 @@ async function getAccessToken(): Promise<string> {
 
 export async function xeroAccountingFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!isXeroAccountingConfigured()) throw new XeroAccountingNotConfiguredError();
+  return xeroAccountingFetchForTenant<T>(process.env.XERO_ACCOUNTING_TENANT_ID as string, path, init);
+}
+
+// Same as xeroAccountingFetch, but for an explicit tenant id rather than
+// whatever XERO_ACCOUNTING_TENANT_ID currently is -- lets
+// /api/xero-accounting/diagnose check other candidate tenants from the same
+// Xero login (e.g. an account with several orgs) without having to change
+// env vars and redeploy just to compare them.
+export async function xeroAccountingFetchForTenant<T>(
+  tenantId: string,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
   const url = API_BASE_URL + path;
 
   const buildHeaders = (token: string) => {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    headers.set("Xero-Tenant-Id", process.env.XERO_ACCOUNTING_TENANT_ID as string);
+    headers.set("Xero-Tenant-Id", tenantId);
     headers.set("Accept", "application/json");
     return headers;
   };
