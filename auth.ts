@@ -45,6 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: dashboardUser.username,
           email: dashboardUser.email,
           role: dashboardUser.role,
+          mustChangePassword: dashboardUser.must_change_password,
         };
       },
     }),

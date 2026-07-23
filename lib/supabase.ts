@@ -49,7 +49,10 @@ export interface DashboardUser {
   role: "admin" | "user";
   created_at: string;
   mfa_enabled: boolean;
+  must_change_password: boolean;
 }
+
+const DASHBOARD_USER_COLUMNS = "id, email, username, role, created_at, mfa_enabled, must_change_password";
 
 /**
  * Looks up a dashboard_users row by username or email, then verifies the
@@ -68,14 +71,14 @@ export async function verifyDashboardUserPassword(
 
     let { data: dashboardUser } = await admin
       .from("dashboard_users")
-      .select("id, email, username, role, created_at, mfa_enabled")
+      .select(DASHBOARD_USER_COLUMNS)
       .eq("username", usernameOrEmail)
       .maybeSingle<DashboardUser>();
 
     if (!dashboardUser) {
       const byEmail = await admin
         .from("dashboard_users")
-        .select("id, email, username, role, created_at, mfa_enabled")
+        .select(DASHBOARD_USER_COLUMNS)
         .eq("email", usernameOrEmail)
         .maybeSingle<DashboardUser>();
       dashboardUser = byEmail.data;
@@ -95,6 +98,47 @@ export async function verifyDashboardUserPassword(
   } catch (err) {
     console.error("[verifyDashboardUserPassword]", err);
     return null;
+  }
+}
+
+// Looks up a dashboard_users row by email only -- feeds the forgot-password
+// flow, which needs to know if an email belongs to a real account before
+// deciding whether to trigger Supabase's recovery email (see
+// app/api/auth/forgot-password/route.ts). Callers must not use this to leak
+// account existence back to the caller of that endpoint.
+export async function getDashboardUserByEmail(email: string): Promise<DashboardUser | null> {
+  if (!isSupabaseConfigured()) return null;
+  const admin = getSupabaseAdmin();
+  const { data } = await admin
+    .from("dashboard_users")
+    .select(DASHBOARD_USER_COLUMNS)
+    .eq("email", email)
+    .maybeSingle<DashboardUser>();
+  return data ?? null;
+}
+
+// Sets a user's real Supabase Auth password directly (used by both the
+// forced/voluntary in-app change-password flow, which already has an
+// authenticated session, and isn't needed by the forgot-password flow --
+// that one lets Supabase's own recovery session update the password
+// client-side instead). Also used right after account creation is NOT
+// needed here since /api/admin/users sets the initial password itself via
+// auth.admin.createUser.
+export async function updateDashboardUserPassword(userId: string, newPassword: string): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.auth.admin.updateUserById(userId, { password: newPassword });
+  if (error) {
+    console.error("[updateDashboardUserPassword]", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function setMustChangePassword(userId: string, value: boolean): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("dashboard_users").update({ must_change_password: value }).eq("id", userId);
+  if (error) {
+    console.error("[setMustChangePassword]", error.message);
   }
 }
 

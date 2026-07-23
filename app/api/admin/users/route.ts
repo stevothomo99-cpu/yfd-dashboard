@@ -66,6 +66,9 @@ export async function POST(request: NextRequest) {
           email,
           username,
           role,
+          // The admin just picked this password themselves -- force the new
+          // user to set their own on first login (see auth.config.ts).
+          must_change_password: true,
         },
       ]);
 
