@@ -272,6 +272,48 @@ export async function fetchAllXpmStaffRecords(): Promise<XpmStaffRecord[]> {
   return res.staffList ?? [];
 }
 
+// Clients carry their own Partner/Manager assignment directly -- confirmed
+// against a live tenant's client detail page ("Partner: Steve Thomas,
+// Manager: Joel Buenviaje"), where the API's field names turned out to be
+// accountManager (Partner) and jobManager (Manager). This is the real
+// Partner filter: it's an assignment on the client itself, not something
+// that has to be inferred from whichever jobs happen to be in a date
+// window. isArchived/isDeleted come back as "Yes"/"No" strings, not
+// booleans, and archived+deleted clients ARE included in the list response
+// by default (confirmed: a tenant with far fewer active clients still
+// returned 225 total) -- so both must be filtered out client-side.
+interface XpmClientRecord {
+  uuid: string;
+  name: string;
+  isArchived?: string;
+  isDeleted?: string;
+  accountManager?: XpmJobParty;
+  jobManager?: XpmJobParty;
+}
+
+interface XpmClientListResponse {
+  clients?: XpmClientRecord[];
+  status?: string;
+}
+
+async function fetchAllXpmClientRecords(): Promise<XpmClientRecord[]> {
+  const res = await xpmFetch<XpmClientListResponse>("/client.api/list");
+  return res.clients ?? [];
+}
+
+function isActiveXpmClient(c: XpmClientRecord): boolean {
+  return c.isArchived !== "Yes" && c.isDeleted !== "Yes";
+}
+
+// Active clients whose accountManager (Partner) matches the given name --
+// shared by client/staff/job derivation so they all agree on exactly which
+// clients are "ours" out of the whole tenant.
+async function fetchActiveXpmClientsForPartner(partnerName: string): Promise<XpmClientRecord[]> {
+  if (!partnerName) return [];
+  const clients = await fetchAllXpmClientRecords();
+  return clients.filter((c) => isActiveXpmClient(c) && c.accountManager?.name === partnerName);
+}
+
 function formatYyyyMmDd(d: Date): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -327,54 +369,48 @@ async function fetchAllInProgressXpmJobs(): Promise<XpmJob[]> {
   return Array.from(byUuid.values());
 }
 
-// In-progress jobs whose job-level "partner" field matches the given name
-// -- this is the Partner filter: the admin-configured name (e.g. "Steve
-// Thomas") scopes which jobs are "ours" out of the whole tenant, since XPM
-// jobs can carry a different senior staff member as their own job-level
-// partner. Shared by staff and client derivation so both only need one
-// job-list fetch. Exported (not just used internally) so the
-// staff/customers/jobs sync can pull the full job records too.
-export async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
-  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
-  if (!partnerName) return [];
-
-  const jobs = await fetchAllInProgressXpmJobs();
-  return jobs.filter((job) => job.partner?.name === partnerName);
-}
-
 export interface XpmClientRef {
   id: string;
   name: string;
 }
 
-export function uniqueClientsFromJobs(jobs: XpmJob[]): XpmClientRef[] {
-  const seen = new Map<string, XpmClientRef>();
-  for (const job of jobs) {
-    if (job.client?.uuid && !seen.has(job.client.uuid)) {
-      seen.set(job.client.uuid, { id: job.client.uuid, name: job.client.name ?? "" });
-    }
-  }
-  return Array.from(seen.values());
-}
-
 export async function fetchXpmClientsForPartner(partnerName: string): Promise<XpmClientRef[]> {
-  const jobs = await fetchXpmJobsForPartner(partnerName);
-  return uniqueClientsFromJobs(jobs);
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  const clients = await fetchActiveXpmClientsForPartner(partnerName);
+  return clients.map((c) => ({ id: c.uuid, name: c.name }));
 }
 
-// Whoever appears as `manager` on the Partner-filtered jobs -- this is our
-// "Staff" role (not "Manager"; the job.manager field is the person actually
-// doing the work under the Partner filter's book of business, confirmed
-// directly). Sourced from the one-call staff.api/list instead of the old
-// per-manager staff.api/get/:id loop, which assumed a Response.Staff
-// envelope that never matched the real flat shape and always silently
-// returned nothing.
+// Same client roster as above, but carrying each client's jobManager uuid
+// too -- exported (not just used internally) so the staff/customers/jobs
+// sync can assign a job to its client's manager when the job itself
+// doesn't set one directly (several automated/ad-hoc jobs have no manager
+// field at all).
+export interface XpmClientWithManager {
+  id: string;
+  name: string;
+  managerId: string | null;
+}
+
+export async function fetchXpmClientsWithManagerForPartner(
+  partnerName: string,
+): Promise<XpmClientWithManager[]> {
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  const clients = await fetchActiveXpmClientsForPartner(partnerName);
+  return clients.map((c) => ({ id: c.uuid, name: c.name, managerId: c.jobManager?.uuid ?? null }));
+}
+
+// Whoever appears as a Partner-filtered client's `jobManager` -- this is
+// our "Staff" role (not "Manager"; confirmed directly that XPM's own
+// "Manager" label maps to what this dashboard calls Staff). Sourced from
+// the client roster rather than a job list, so it isn't at the mercy of
+// which date window a job happens to fall into.
 export async function fetchXpmStaffForPartner(partnerName: string): Promise<XpmStaff[]> {
-  const jobsArr = await fetchXpmJobsForPartner(partnerName);
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  const clients = await fetchActiveXpmClientsForPartner(partnerName);
 
   const managerIds = new Set<string>();
-  for (const job of jobsArr) {
-    if (job.manager?.uuid) managerIds.add(job.manager.uuid);
+  for (const c of clients) {
+    if (c.jobManager?.uuid) managerIds.add(c.jobManager.uuid);
   }
   if (managerIds.size === 0) return [];
 
@@ -388,6 +424,25 @@ export async function fetchXpmStaffForPartner(partnerName: string): Promise<XpmS
       role: "Staff" as const,
       included: true,
     }));
+}
+
+// In-progress jobs belonging to a client in the Partner's roster -- clients
+// are the source of truth for "is this ours" (see
+// fetchActiveXpmClientsForPartner above); a job's own partner/manager
+// fields are used only for populating job.manager_id, with the client's
+// jobManager as a fallback for jobs that don't set one directly (several
+// automated/ad-hoc jobs have no manager field at all). Exported so the
+// staff/customers/jobs sync can pull the full job records too.
+export async function fetchXpmJobsForPartner(partnerName: string): Promise<XpmJob[]> {
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  if (!partnerName) return [];
+
+  const clients = await fetchActiveXpmClientsForPartner(partnerName);
+  const clientIds = new Set(clients.map((c) => c.uuid));
+  if (clientIds.size === 0) return [];
+
+  const jobs = await fetchAllInProgressXpmJobs();
+  return jobs.filter((job) => job.client?.uuid && clientIds.has(job.client.uuid));
 }
 
 export async function getXpmStaff(

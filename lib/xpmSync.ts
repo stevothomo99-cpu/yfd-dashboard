@@ -2,8 +2,8 @@ import { getSupabaseAdmin } from "./supabase";
 import { getSettings } from "./settings";
 import {
   fetchXpmJobsForPartner,
+  fetchXpmClientsWithManagerForPartner,
   fetchAllXpmStaffRecords,
-  uniqueClientsFromJobs,
   isXpmConfigured,
   XpmNotConfiguredError,
 } from "./xpm";
@@ -16,11 +16,17 @@ import {
 // takes its tasks with it -- consistent with lib/workflow.ts's existing
 // assumption that the jobs table only ever holds current InProgress jobs.
 //
-// Mapping confirmed directly against the live tenant: a job's `partner`
-// field is the Partner filter itself (scopes which jobs are "ours"), and a
-// job's `manager` field is our internal "Staff" role. The Partner named in
-// Settings becomes the sole "Partner" role row; everyone who manages one of
-// their jobs becomes a "Staff" role row.
+// Mapping confirmed directly against the live tenant: clients (not jobs)
+// carry the real Partner/Manager assignment -- a client's accountManager
+// field is the Partner filter itself (scopes which clients are "ours"),
+// and a client's jobManager field is our internal "Staff" role. The
+// Partner named in Settings becomes the sole "Partner" role row; everyone
+// who manages one of their clients becomes a "Staff" role row. Jobs are
+// then matched to whichever of those clients they belong to -- deriving
+// the client roster from jobs instead (the original approach) missed
+// clients whose jobs happened to fall outside job.api/list's date window,
+// and 225 archived/deleted clients get returned by client.api/list
+// alongside the ~90 real active ones, so both flags are filtered out too.
 
 export interface WorkflowSyncResult {
   partnerName: string;
@@ -48,7 +54,8 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     throw new Error("Set a Partner name in Settings before syncing.");
   }
 
-  const [jobs, allStaff] = await Promise.all([
+  const [clients, jobs, allStaff] = await Promise.all([
+    fetchXpmClientsWithManagerForPartner(partnerName),
     fetchXpmJobsForPartner(partnerName),
     fetchAllXpmStaffRecords(),
   ]);
@@ -61,15 +68,15 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   }
 
   const managerIds = new Set<string>();
-  for (const job of jobs) {
-    if (job.manager?.uuid) managerIds.add(job.manager.uuid);
+  for (const c of clients) {
+    if (c.managerId) managerIds.add(c.managerId);
   }
-  // The Partner is sometimes also their own job's manager (e.g. an internal
-  // job) -- exclude their uuid here so they don't appear twice in the same
-  // upsert batch (once as Partner, once as Staff), which Postgres rejects.
+  // The Partner is sometimes also their own client's manager -- exclude
+  // their uuid here so they don't appear twice in the same upsert batch
+  // (once as Partner, once as Staff), which Postgres rejects.
   managerIds.delete(partnerRecord.uuid);
   const managerRecords = allStaff.filter((s) => managerIds.has(s.uuid));
-  const clients = uniqueClientsFromJobs(jobs);
+  const clientManagerId = new Map(clients.map((c) => [c.id, c.managerId]));
 
   const admin = getSupabaseAdmin();
 
@@ -109,7 +116,7 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   const partnerLocalId = staffIdByXpmId.get(partnerRecord.uuid);
   if (!partnerLocalId) throw new Error("Partner staff upsert did not return an id.");
 
-  // -- Customers: every client attached to one of the Partner's jobs
+  // -- Customers: every active client whose accountManager is the Partner
   // (deduped by xpm_client_id, same reasoning as staff above) --
   const customerById = new Map<string, { xpm_client_id: string; name: string; partner_id: string }>();
   for (const c of clients) {
@@ -128,7 +135,10 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     (upsertedCustomers ?? []).map((c) => [c.xpm_client_id as string, c.id as string]),
   );
 
-  // -- Jobs (deduped by xpm_job_id, same reasoning as staff above) --
+  // -- Jobs (deduped by xpm_job_id, same reasoning as staff above). Manager
+  // falls back to the job's client's jobManager when the job itself
+  // doesn't set one (several automated/ad-hoc jobs have no manager field
+  // at all). --
   const jobById = new Map<
     string,
     { xpm_job_id: string; customer_id: string; name: string; partner_id: string; manager_id: string | null }
@@ -136,12 +146,13 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   for (const job of jobs) {
     if (!job.client?.uuid || !customerIdByXpmId.has(job.client.uuid)) continue;
     if (jobById.has(job.uuid)) continue;
+    const managerXpmId = job.manager?.uuid ?? clientManagerId.get(job.client.uuid) ?? null;
     jobById.set(job.uuid, {
       xpm_job_id: job.uuid,
       customer_id: customerIdByXpmId.get(job.client.uuid)!,
       name: job.name,
       partner_id: partnerLocalId,
-      manager_id: job.manager?.uuid ? staffIdByXpmId.get(job.manager.uuid) ?? null : null,
+      manager_id: managerXpmId ? staffIdByXpmId.get(managerXpmId) ?? null : null,
     });
   }
   const jobUpserts = Array.from(jobById.values());
