@@ -43,5 +43,20 @@ export async function GET() {
     results.clientList = { error: err instanceof Error ? err.message : String(err) };
   }
 
+  // Steve Thomas's own uuid (confirmed via staffList) -- a real staff
+  // member likely to have logged both client and internal/leave time.
+  // time.api/staff/:id parsing was written blind before XPM was connected
+  // at all, so its shape (including whether entries carry a Task
+  // reference, needed to tell "YFD - Leave" apart from other internal
+  // tasks like "YFD - Idle") has never been confirmed.
+  try {
+    const { from, to } = xpmJobListDateRange();
+    results.timeSample = await xpmFetch(
+      `/time.api/staff/07e5d4c3-e957-4741-9fbe-d7d94eaf045a?from=${from}&to=${to}`,
+    );
+  } catch (err) {
+    results.timeSample = { error: err instanceof Error ? err.message : String(err) };
+  }
+
   return NextResponse.json(results);
 }
