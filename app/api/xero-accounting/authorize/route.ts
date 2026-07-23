@@ -6,10 +6,18 @@ import { auth } from "@/auth";
 // refresh token back at all. Separate consent from the XPM/Practice
 // Manager connection -- this connects to YFD's own Xero Accounting
 // organisation, not the Practice Manager tenant.
+//
+// accounting.transactions.read is the OLD bundle scope (invoices + credit
+// notes + bank transactions etc. combined) -- confirmed live against this
+// app's actual scope catalog that it's been replaced by granular
+// per-resource scopes (accounting.invoices.read, accounting.payments.read,
+// accounting.banktransactions.read, ...), and the bundle scope isn't in the
+// app's list at all, which is what caused an invalid_scope error. Only
+// Invoices is actually needed here.
 const XERO_ACCOUNTING_SCOPES = [
   "offline_access",
-  "accounting.transactions.read",
   "accounting.contacts.read",
+  "accounting.invoices.read",
 ].join(" ");
 
 // Starts the one-time Xero Accounting OAuth consent flow. Redirects
