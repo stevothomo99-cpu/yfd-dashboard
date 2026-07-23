@@ -108,6 +108,20 @@ export interface CreateTaskInput {
   recurrence?: RecurrenceInterval;
 }
 
+// Same shape as CreateTaskInput but every field optional -- PATCH only
+// touches fields actually present in the request body, so e.g. omitting
+// jobId leaves a task on its existing job rather than clearing it.
+export interface UpdateTaskInput {
+  jobId?: string;
+  title?: string;
+  assigneeId?: string | null;
+  dueDate?: string | null;
+  startDate?: string | null;
+  statusId?: string;
+  typeId?: string | null;
+  recurrence?: RecurrenceInterval;
+}
+
 // Summary card data for the /clients tile grid, built from customers/jobs/
 // tasks -- replaces the old Karbon-derived ClientTile mock data. YTD
 // invoiced/revenue-breakdown aren't included: those depend on XPM invoice

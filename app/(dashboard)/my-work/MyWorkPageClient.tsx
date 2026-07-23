@@ -115,6 +115,7 @@ export default function MyWorkPageClient({
   const [tasks, setTasks] = useState<TaskWithDetails[]>(initialTasks);
   const [loading, setLoading] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
 
   const [view, setView] = useState<MasterView>("all");
   const [search, setSearch] = useState("");
@@ -182,6 +183,28 @@ export default function MyWorkPageClient({
   async function handleStaffChange(nextStaffId: string) {
     setStaffId(nextStaffId);
     await refreshTasks(nextStaffId);
+  }
+
+  // Every task in `tasks` already came back from this session's own
+  // getWorkBoardForStaff() (or, for an admin, a board they deliberately
+  // chose to view) -- the same scope the server's canModifyTask check
+  // enforces on PATCH/DELETE. So the only real client-side gate is "is
+  // there an acting identity at all": admins always have one, and a
+  // non-admin only ever reaches this table once their own staff record
+  // resolved (see the early EmptyState return above otherwise). Hiding the
+  // buttons is just a UX nicety either way -- the API route is the actual
+  // boundary.
+  const canModifyTasks = isAdmin || Boolean(defaultStaffId);
+
+  async function handleDelete(t: TaskWithDetails) {
+    if (!window.confirm(`Delete "${t.title}"? This can't be undone.`)) return;
+    const res = await fetch(`/api/workflow/tasks/${t.id}`, { method: "DELETE" });
+    if (res.ok) {
+      await refreshTasks(staffId);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      window.alert(data.error ?? "Failed to delete task");
+    }
   }
 
   const today = todayIso();
@@ -434,6 +457,7 @@ export default function MyWorkPageClient({
                       {sortField === col.field ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                     </th>
                   ))}
+                  {canModifyTasks ? <th style={{ ...thStyle, cursor: "default" }}>Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -456,6 +480,22 @@ export default function MyWorkPageClient({
                           </td>
                         );
                       })}
+                      {canModifyTasks ? (
+                        <td style={{ ...cell, whiteSpace: "nowrap" }}>
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            <button type="button" onClick={() => setEditingTask(t)} style={rowActionStyle}>
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(t)}
+                              style={{ ...rowActionStyle, color: "#c0392b" }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })}
@@ -473,6 +513,18 @@ export default function MyWorkPageClient({
           staff={staffOptions}
           statuses={statuses}
           taskTypes={taskTypes}
+        />
+      ) : null}
+
+      {editingTask ? (
+        <NewTaskModal
+          onClose={() => setEditingTask(null)}
+          onCreated={() => refreshTasks(staffId)}
+          jobs={jobs}
+          staff={staffOptions}
+          statuses={statuses}
+          taskTypes={taskTypes}
+          editTask={editingTask}
         />
       ) : null}
     </div>
@@ -660,4 +712,15 @@ const tdStyle: React.CSSProperties = {
   padding: "10px 16px",
   fontSize: "13px",
   color: "#111111",
+};
+
+const rowActionStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 500,
+  color: "#444441",
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  padding: "2px 6px",
+  textDecoration: "underline",
 };

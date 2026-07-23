@@ -10,6 +10,7 @@ import type {
   RecurrenceInterval,
   StaffRole,
   TaskWithDetails,
+  UpdateTaskInput,
   WorkflowCustomer,
   WorkflowJob,
   WorkflowStaff,
@@ -240,6 +241,24 @@ export async function getInProgressJobsForPartner(
   return (data ?? []).map(mapJobWithCustomer);
 }
 
+// Every in-progress job a staff member is allowed to create/edit tasks
+// within, per their place in the Partner > Manager > Staff hierarchy --
+// mirrors getWorkBoardForStaff's role dispatch, but for jobs rather than
+// tasks. Partners get their whole Partner-scope roll-up; Managers (and, per
+// this system's real data, "Staff"-role people, who are the actual
+// job-manager tier -- see getInProgressJobsForManager's comment) get only
+// the jobs they personally manage. There's no narrower case: Staff is the
+// bottom of the job-scope hierarchy, so it shares the Manager branch.
+export async function getJobsInScopeForStaff(staff: WorkflowStaff): Promise<JobWithCustomer[]> {
+  switch (staff.role) {
+    case "Partner":
+      return getInProgressJobsForPartner(staff.id);
+    case "Manager":
+    default:
+      return getInProgressJobsForManager(staff.id);
+  }
+}
+
 async function fetchLookupMaps() {
   const admin = getSupabaseAdmin();
   const [{ data: statuses }, { data: taskTypes }, { data: staff }, { data: jobs }, { data: customers }] =
@@ -390,6 +409,16 @@ export async function getWorkBoardForStaff(staff: WorkflowStaff): Promise<TaskWi
   }
 }
 
+// Whether a non-admin staff member may edit/delete taskId -- "theirs"
+// (assigned or temporarily-assigned, same as the My Work board's own-tasks
+// semantics) or anything within their broader Partner/Manager roll-up.
+// getWorkBoardForStaff already computes exactly that per role, so this just
+// reuses it as the source of truth rather than re-deriving the hierarchy.
+export async function canModifyTask(staff: WorkflowStaff, taskId: string): Promise<boolean> {
+  const board = await getWorkBoardForStaff(staff);
+  return board.some((t) => t.id === taskId);
+}
+
 export async function listStatuses(): Promise<WorkflowStatus[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
@@ -451,6 +480,51 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
     return null;
   }
   return data;
+}
+
+// Edits an existing task -- only fields present on patch are touched (see
+// UpdateTaskInput's comment), so e.g. reassigning just the assignee doesn't
+// require re-sending the job/title/etc. Returns the freshly-hydrated task
+// so the caller can drop it straight into its board state without a refetch.
+export async function updateTask(
+  taskId: string,
+  patch: UpdateTaskInput
+): Promise<TaskWithDetails | null> {
+  const admin = getSupabaseAdmin();
+  const update: Record<string, unknown> = {};
+  if (patch.jobId !== undefined) update.job_id = patch.jobId;
+  if (patch.title !== undefined) update.title = patch.title;
+  if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
+  if (patch.dueDate !== undefined) update.due_date = patch.dueDate;
+  if (patch.startDate !== undefined) update.start_date = patch.startDate;
+  if (patch.statusId !== undefined) update.status_id = patch.statusId;
+  if (patch.typeId !== undefined) update.type_id = patch.typeId;
+  if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
+
+  const { data, error } = await admin
+    .from("tasks")
+    .update(update)
+    .eq("id", taskId)
+    .select("*")
+    .single<TaskRow>();
+
+  if (error) {
+    console.error("[workflow] updateTask failed:", error.message);
+    return null;
+  }
+  const lookups = await fetchLookupMaps();
+  return hydrateTask(data, lookups);
+}
+
+export async function deleteTask(taskId: string): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("tasks").delete().eq("id", taskId);
+
+  if (error) {
+    console.error("[workflow] deleteTask failed:", error.message);
+    return false;
+  }
+  return true;
 }
 
 // Hands a task to another staff member temporarily -- the task stays on

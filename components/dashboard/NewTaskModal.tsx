@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type {
   JobWithCustomer,
   RecurrenceInterval,
+  TaskWithDetails,
   WorkflowStaff,
   WorkflowStatus,
   WorkflowTaskType,
@@ -16,6 +17,12 @@ interface NewTaskModalProps {
   staff: WorkflowStaff[];
   statuses: WorkflowStatus[];
   taskTypes: WorkflowTaskType[];
+  // When set, the modal edits this task (PATCH) instead of creating a new
+  // one (POST) -- same form, same fields, just a different submit target
+  // and starting values. jobs/staff are still expected to already be
+  // pre-scoped by the caller (the server-side permission check is the real
+  // boundary either way).
+  editTask?: TaskWithDetails;
 }
 
 const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
@@ -35,15 +42,16 @@ function defaultStatusId(statuses: WorkflowStatus[]): string {
 // Mounted/unmounted by the parent (only rendered while the modal is open),
 // so a fresh instance -- and fresh initial state below -- is all it takes to
 // reset the form each time it's opened; no reset-on-open effect needed.
-export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses, taskTypes }: NewTaskModalProps) {
-  const [jobId, setJobId] = useState("");
-  const [title, setTitle] = useState("");
-  const [typeId, setTypeId] = useState("");
-  const [statusId, setStatusId] = useState(() => defaultStatusId(statuses));
-  const [assigneeId, setAssigneeId] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [recurrence, setRecurrence] = useState<RecurrenceInterval>("none");
+export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses, taskTypes, editTask }: NewTaskModalProps) {
+  const isEdit = Boolean(editTask);
+  const [jobId, setJobId] = useState(editTask?.jobId ?? "");
+  const [title, setTitle] = useState(editTask?.title ?? "");
+  const [typeId, setTypeId] = useState(editTask?.typeId ?? "");
+  const [statusId, setStatusId] = useState(() => editTask?.statusId ?? defaultStatusId(statuses));
+  const [assigneeId, setAssigneeId] = useState(editTask?.assigneeId ?? "");
+  const [dueDate, setDueDate] = useState(editTask?.dueDate ?? "");
+  const [startDate, setStartDate] = useState(editTask?.startDate ?? "");
+  const [recurrence, setRecurrence] = useState<RecurrenceInterval>(editTask?.recurrence ?? "none");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +63,28 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const sortedJobs = [...jobs].sort(
+  // If the task being edited is on a job outside the (already-scoped) jobs
+  // list passed in -- shouldn't normally happen since canModifyTask and
+  // getJobsInScopeForStaff walk the same hierarchy, but defend against it
+  // anyway -- make sure its current job still shows up as a selectable
+  // option rather than silently rendering a blank/invalid select.
+  const jobsWithCurrent =
+    editTask && !jobs.some((j) => j.id === editTask.jobId)
+      ? [
+          ...jobs,
+          {
+            id: editTask.jobId,
+            customerId: "",
+            xpmJobId: null,
+            name: editTask.jobName,
+            partnerId: null,
+            managerId: null,
+            customerName: editTask.customerName,
+          } satisfies JobWithCustomer,
+        ]
+      : jobs;
+
+  const sortedJobs = [...jobsWithCurrent].sort(
     (a, b) => a.customerName.localeCompare(b.customerName) || a.name.localeCompare(b.name)
   );
 
@@ -69,8 +98,9 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/workflow/tasks", {
-        method: "POST",
+      const url = isEdit ? `/api/workflow/tasks/${editTask!.id}` : "/api/workflow/tasks";
+      const res = await fetch(url, {
+        method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId,
@@ -84,11 +114,11 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to create task");
+      if (!res.ok) throw new Error(data.error ?? `Failed to ${isEdit ? "save" : "create"} task`);
       onCreated();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create task");
+      setError(err instanceof Error ? err.message : `Failed to ${isEdit ? "save" : "create"} task`);
     } finally {
       setSubmitting(false);
     }
@@ -123,7 +153,7 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" }}>
-          <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111" }}>New Task</div>
+          <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111" }}>{isEdit ? "Edit Task" : "New Task"}</div>
           <button
             type="button"
             onClick={onClose}
@@ -237,7 +267,7 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
               Cancel
             </button>
             <button type="submit" disabled={submitting} style={{ ...primaryButtonStyle, opacity: submitting ? 0.6 : 1 }}>
-              {submitting ? "Creating…" : "Create task"}
+              {submitting ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save changes" : "Create task"}
             </button>
           </div>
         </form>

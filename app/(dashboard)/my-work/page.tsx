@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import MyWorkPageClient from "./MyWorkPageClient";
 import {
   getInProgressJobsForPartner,
+  getJobsInScopeForStaff,
   getPartners,
   getStaffByEmail,
   getWorkBoardForStaff,
@@ -42,10 +43,21 @@ export default async function MyWorkPage() {
     listStatuses(),
     listTaskTypes(),
   ]);
-  const jobsByPartner = await Promise.all(partners.map((p) => getInProgressJobsForPartner(p.id)));
-  const jobsById = new Map<string, JobWithCustomer>();
-  for (const jobs of jobsByPartner) for (const job of jobs) jobsById.set(job.id, job);
-  const allJobs = Array.from(jobsById.values());
+
+  // Admins keep the full practice-wide job list (they can create/reassign on
+  // any client, no restriction). Everyone else's "+ New Task" job picker is
+  // pre-scoped server-side to what they're actually allowed to create on --
+  // getJobsInScopeForStaff mirrors the create-route's own permission check,
+  // so a non-admin never even sees a job/client they'd be rejected for.
+  let allJobs: JobWithCustomer[];
+  if (isAdmin) {
+    const jobsByPartner = await Promise.all(partners.map((p) => getInProgressJobsForPartner(p.id)));
+    const jobsById = new Map<string, JobWithCustomer>();
+    for (const jobs of jobsByPartner) for (const job of jobs) jobsById.set(job.id, job);
+    allJobs = Array.from(jobsById.values());
+  } else {
+    allJobs = activeStaff ? await getJobsInScopeForStaff(activeStaff) : [];
+  }
 
   return (
     <MyWorkPageClient
