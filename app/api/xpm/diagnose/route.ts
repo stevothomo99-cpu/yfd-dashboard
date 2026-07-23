@@ -3,12 +3,14 @@ import { auth } from "@/auth";
 import { xpmFetch, isXpmConfigured, xpmJobListDateRange } from "@/lib/xpm";
 
 // Admin-only debug endpoint -- dumps raw XPM API responses so real field
-// names can be confirmed against a live tenant before the staff/customers/
-// jobs sync is written, same purpose as /api/google/diagnose. Probing
-// client.api/list now too: clients carry their own Partner/Manager fields
-// directly (confirmed via the XPM UI), which should let the sync filter
-// clients by their own partner instead of deriving clients from a
-// date-windowed job list.
+// names can be confirmed against a live tenant, same purpose as
+// /api/google/diagnose. job.api/staff.api/client.api are already confirmed
+// (see lib/xpm.ts) and dropped from here to keep responses small. Only
+// probing time.api/staff/:id now -- its parsing in lib/xpm.ts was written
+// blind before XPM was ever connected, and it's still unconfirmed whether
+// entries carry a Task reference (needed to tell "YFD - Leave" apart from
+// other tasks like "YFD - Idle" within the single internal job). Returns a
+// count + one sample entry rather than the full array.
 export async function GET() {
   const session = await auth();
   if (!session?.user || session.user.role !== "admin") {
@@ -22,41 +24,23 @@ export async function GET() {
     );
   }
 
-  const results: Record<string, unknown> = {};
+  // Andre De Belen -- a manager with a full client book, likely to have
+  // logged both client and internal/leave time in the window (Steve
+  // Thomas's own timesheet came back empty).
+  const SAMPLE_STAFF_ID = "9c4b9c21-0273-433e-9b76-a440fc85b476";
 
   try {
     const { from, to } = xpmJobListDateRange();
-    results.jobList = await xpmFetch(`/job.api/list?status=InProgress&from=${from}&to=${to}`);
-  } catch (err) {
-    results.jobList = { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  try {
-    results.staffList = await xpmFetch("/staff.api/list");
-  } catch (err) {
-    results.staffList = { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  try {
-    results.clientList = await xpmFetch("/client.api/list");
-  } catch (err) {
-    results.clientList = { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  // Steve Thomas's own uuid (confirmed via staffList) -- a real staff
-  // member likely to have logged both client and internal/leave time.
-  // time.api/staff/:id parsing was written blind before XPM was connected
-  // at all, so its shape (including whether entries carry a Task
-  // reference, needed to tell "YFD - Leave" apart from other internal
-  // tasks like "YFD - Idle") has never been confirmed.
-  try {
-    const { from, to } = xpmJobListDateRange();
-    results.timeSample = await xpmFetch(
-      `/time.api/staff/07e5d4c3-e957-4741-9fbe-d7d94eaf045a?from=${from}&to=${to}`,
+    const raw = await xpmFetch<Record<string, unknown>>(
+      `/time.api/staff/${SAMPLE_STAFF_ID}?from=${from}&to=${to}`,
     );
+    const entries = Object.values(raw).find((v) => Array.isArray(v)) as unknown[] | undefined;
+    return NextResponse.json({
+      keys: Object.keys(raw),
+      count: entries?.length ?? 0,
+      sample: entries?.[0] ?? null,
+    });
   } catch (err) {
-    results.timeSample = { error: err instanceof Error ? err.message : String(err) };
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) });
   }
-
-  return NextResponse.json(results);
 }

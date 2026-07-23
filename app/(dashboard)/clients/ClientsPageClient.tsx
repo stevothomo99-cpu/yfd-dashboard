@@ -21,24 +21,39 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "all-clear", label: "All clear" },
 ];
 
-interface ClientsPageClientProps {
-  tiles: ClientSummary[];
+interface StaffOption {
+  id: string;
+  name: string;
 }
 
-export default function ClientsPageClient({ tiles: allTiles }: ClientsPageClientProps) {
+interface ClientsPageClientProps {
+  tiles: ClientSummary[];
+  staffOptions: StaffOption[];
+}
+
+export default function ClientsPageClient({ tiles: allTiles, staffOptions }: ClientsPageClientProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  const [staffId, setStaffId] = useState("");
   const [activeTile, setActiveTile] = useState<ClientSummary | null>(null);
+
+  // Only offer staff who actually manage at least one client -- no point
+  // listing someone with an empty result every time.
+  const availableStaffOptions = useMemo(() => {
+    const managingIds = new Set(allTiles.flatMap((t) => t.managerIds));
+    return staffOptions.filter((s) => managingIds.has(s.id));
+  }, [allTiles, staffOptions]);
 
   const tiles = useMemo(() => {
     return allTiles
       .filter((t) => {
         if (filter !== "all" && statusOf(t) !== filter) return false;
+        if (staffId && !t.managerIds.includes(staffId)) return false;
         if (search.trim() && !t.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
         return true;
       })
       .sort((a, b) => FILTER_ORDER[statusOf(a)] - FILTER_ORDER[statusOf(b)] || a.name.localeCompare(b.name));
-  }, [allTiles, filter, search]);
+  }, [allTiles, filter, staffId, search]);
 
   return (
     <div>
@@ -67,6 +82,27 @@ export default function ClientsPageClient({ tiles: allTiles }: ClientsPageClient
             </button>
           );
         })}
+        <select
+          value={staffId}
+          onChange={(e) => setStaffId(e.target.value)}
+          style={{
+            marginLeft: "8px",
+            fontSize: "12px",
+            padding: "7px 10px",
+            borderRadius: "8px",
+            border: "0.5px solid #e1e0d9",
+            background: "white",
+            color: staffId ? "#111111" : "#888780",
+            outline: "none",
+          }}
+        >
+          <option value="">All staff</option>
+          {availableStaffOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
         <input
           type="search"
           value={search}

@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "./supabase";
+import { BAS_TYPE_NAME } from "./workOverview";
 import type {
   ClientSummary,
   CreateTaskInput,
@@ -548,15 +549,36 @@ export async function getClientSummaries(): Promise<ClientSummary[]> {
     let overdueCount = 0;
     let inProgressCount = 0;
     let completedCount = 0;
+    let overdueBasCount = 0;
+    let nextDueDate: string | null = null;
     for (const t of allTasks ?? []) {
       if (!jobIds.has(t.job_id)) continue;
       const isComplete = lookups.statusesById.get(t.status_id)?.is_complete ?? false;
+      const isOverdue = Boolean(t.due_date && t.due_date < today);
+
       if (isComplete) completedCount += 1;
-      else if (t.due_date && t.due_date < today) overdueCount += 1;
+      else if (isOverdue) overdueCount += 1;
       else inProgressCount += 1;
+
+      if (isOverdue && !isComplete && lookups.taskTypesById.get(t.type_id ?? "")?.name === BAS_TYPE_NAME) {
+        overdueBasCount += 1;
+      }
+      if (!isComplete && t.due_date && (!nextDueDate || t.due_date < nextDueDate)) {
+        nextDueDate = t.due_date;
+      }
     }
 
-    return { id: c.id, name: c.name, managerName, overdueCount, inProgressCount, completedCount };
+    return {
+      id: c.id,
+      name: c.name,
+      managerName,
+      managerIds: Array.from(managerIds),
+      overdueCount,
+      inProgressCount,
+      completedCount,
+      overdueBasCount,
+      nextDueDate,
+    };
   });
 }
 

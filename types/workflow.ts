@@ -110,16 +110,24 @@ export interface CreateTaskInput {
 
 // Summary card data for the /clients tile grid, built from customers/jobs/
 // tasks -- replaces the old Karbon-derived ClientTile mock data. YTD
-// invoiced/BAS/revenue-breakdown aren't included: those depend on XPM
-// invoice data being linked via customers.xpm_client_id, which the
-// dummy/trial customers don't have set yet.
+// invoiced/revenue-breakdown aren't included: those depend on XPM invoice
+// data being linked via customers.xpm_client_id, which isn't wired up yet.
 export interface ClientSummary {
   id: string;
   name: string;
   managerName: string | null;
+  // Every distinct staff id managing one of this client's jobs -- lets the
+  // Clients page filter by a single staff member even when managerName
+  // shows "Multiple".
+  managerIds: string[];
   overdueCount: number;
   inProgressCount: number;
   completedCount: number;
+  // Overdue tasks specifically typed BAS/IAS, out of overdueCount -- the
+  // single most operationally important thing to surface per client.
+  overdueBasCount: number;
+  // Soonest due date among this client's non-complete tasks, if any.
+  nextDueDate: string | null;
 }
 
 export interface CustomerNote {

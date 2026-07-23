@@ -6,8 +6,10 @@ import type { XpmTimesheet } from "@/types/xpm";
 // (XPM API client) since these just shape data those two already fetch.
 
 // BAS/IAS is one of the seeded task_types (see migrations/004) -- matched
-// by name since there's no dedicated "is this a BAS task" flag.
-const BAS_TYPE_NAME = "BAS/IAS";
+// by name since there's no dedicated "is this a BAS task" flag. Exported
+// so lib/workflow.ts's getClientSummaries can flag overdue BAS work per
+// client without duplicating the string.
+export const BAS_TYPE_NAME = "BAS/IAS";
 
 // Returns the actual overdue tasks (not just a count) so the dashboard's
 // Overdue tile can show a mini table, not just a number.

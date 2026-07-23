@@ -21,6 +21,10 @@ interface Props {
   onClick?: () => void;
 }
 
+function fmtDate(d: string): string {
+  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
+
 export default function ClientTile({ tile, onClick }: Props) {
   const status = statusOf(tile);
 
@@ -58,7 +62,16 @@ export default function ClientTile({ tile, onClick }: Props) {
         <TaskBadge count={tile.overdueCount} label="overdue" color="#e24b4a" />
         <TaskBadge count={tile.inProgressCount} label="in progress" color="#eda100" />
         <TaskBadge count={tile.completedCount} label="done" color="#1baf7a" />
+        {tile.overdueBasCount > 0 ? (
+          <TaskBadge count={tile.overdueBasCount} label="overdue BAS" color="#9b1c1c" />
+        ) : null}
       </div>
+
+      {tile.nextDueDate ? (
+        <div style={{ fontSize: "11px", color: "#888780" }}>
+          Next due <span style={{ color: "#444441", fontWeight: 500 }}>{fmtDate(tile.nextDueDate)}</span>
+        </div>
+      ) : null}
     </button>
   );
 }
