@@ -570,6 +570,7 @@ export async function getClientSummaries(): Promise<ClientSummary[]> {
 
     return {
       id: c.id,
+      xpmClientId: c.xpm_client_id,
       name: c.name,
       managerName,
       managerIds: Array.from(managerIds),

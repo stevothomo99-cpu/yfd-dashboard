@@ -4,8 +4,15 @@ import WorkItemMiniTable from "@/components/dashboard/WorkItemMiniTable";
 import UtilisationTile from "@/components/dashboard/UtilisationTile";
 import { getSettings } from "@/lib/settings";
 import { getStaffByEmail, getWorkBoardForStaff } from "@/lib/workflow";
-import { computeUtilisation, getBasTasks, getOverdueTasks, type UtilisationSummary } from "@/lib/workOverview";
-import { fetchXpmClientsForPartner, getXpmTimesheets, isXpmConfigured } from "@/lib/xpm";
+import {
+  computeWagesUtilisation,
+  getBasTasks,
+  getOverdueTasks,
+  UTILISATION_PERIODS,
+  type UtilisationPeriodKey,
+  type WagesUtilisationResult,
+} from "@/lib/workOverview";
+import { getXpmTimesheets, isXpmConfigured } from "@/lib/xpm";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -74,7 +81,10 @@ export default async function DashboardPage() {
 async function loadUtilisation(
   xpmStaffId: string | null,
   today: string
-): Promise<{ utilisation: UtilisationSummary | null; utilisationMessage: string | null }> {
+): Promise<{
+  utilisation: Record<UtilisationPeriodKey, WagesUtilisationResult> | null;
+  utilisationMessage: string | null;
+}> {
   if (!xpmStaffId) {
     return { utilisation: null, utilisationMessage: "Not linked to an XPM staff record yet." };
   }
@@ -88,15 +98,14 @@ async function loadUtilisation(
   }
 
   try {
-    const [timesheets, clients] = await Promise.all([
-      getXpmTimesheets(settings.partnerName),
-      fetchXpmClientsForPartner(settings.partnerName),
-    ]);
-    const clientNamesById = new Map(clients.map((c) => [c.id, c.name]));
-    return {
-      utilisation: computeUtilisation(timesheets, clientNamesById, xpmStaffId, today),
-      utilisationMessage: null,
-    };
+    const timesheets = await getXpmTimesheets(settings.partnerName);
+    const utilisation = Object.fromEntries(
+      UTILISATION_PERIODS.map((p) => [
+        p.value,
+        computeWagesUtilisation(timesheets, [xpmStaffId], p.value, today),
+      ]),
+    ) as Record<UtilisationPeriodKey, WagesUtilisationResult>;
+    return { utilisation, utilisationMessage: null };
   } catch (err) {
     return {
       utilisation: null,

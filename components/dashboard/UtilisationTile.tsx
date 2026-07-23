@@ -1,26 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import type { UtilisationSummary } from "@/lib/workOverview";
+import { UTILISATION_PERIODS, type UtilisationPeriodKey, type WagesUtilisationResult } from "@/lib/workOverview";
 
 interface Props {
-  summary: UtilisationSummary | null;
+  summary: Record<UtilisationPeriodKey, WagesUtilisationResult> | null;
   message: string | null;
 }
 
-type Period = "week" | "month" | "ytd";
-
-const PERIODS: { value: Period; label: string }[] = [
-  { value: "week", label: "Week" },
-  { value: "month", label: "Month" },
-  { value: "ytd", label: "YTD" },
-];
-
 // Small tile with a time slicer -- shows one period's billable % at a time
-// (not all three at once), same period-toggle idea as WebMetricsTile's
-// 24h/week/month selector on /personal.
+// (not all four at once), same period-toggle idea as WebMetricsTile's
+// 24h/week/month selector on /personal. billable% = (client + leave
+// hours) / the full 38hr/week standard for the period -- never prorated
+// to elapsed days, so it reads low early in a period and rises as time
+// gets logged.
 export default function UtilisationTile({ summary, message }: Props) {
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<UtilisationPeriodKey>("week");
 
   return (
     <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", padding: "1.1rem 1.2rem" }}>
@@ -37,8 +32,8 @@ export default function UtilisationTile({ summary, message }: Props) {
           Utilisation
         </div>
         {summary ? (
-          <div style={{ display: "flex", gap: "4px" }}>
-            {PERIODS.map((p) => {
+          <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {UTILISATION_PERIODS.map((p) => {
               const active = p.value === period;
               return (
                 <button
@@ -72,7 +67,8 @@ export default function UtilisationTile({ summary, message }: Props) {
             {summary[period].pct}%
           </div>
           <div style={{ fontSize: "12px", color: "#888780", marginTop: "6px" }}>
-            {summary[period].billableHours.toFixed(1)} billable / {summary[period].totalHours.toFixed(1)} hrs
+            {(summary[period].clientHours + summary[period].leaveHours).toFixed(1)} of{" "}
+            {summary[period].standardHours.toFixed(1)} std hrs
           </div>
         </>
       )}

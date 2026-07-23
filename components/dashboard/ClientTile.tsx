@@ -18,6 +18,7 @@ const TOP_BORDER: Record<TileStatus, string> = {
 
 interface Props {
   tile: ClientSummary;
+  hoursLogged?: number;
   onClick?: () => void;
 }
 
@@ -25,7 +26,7 @@ function fmtDate(d: string): string {
   return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
 
-export default function ClientTile({ tile, onClick }: Props) {
+export default function ClientTile({ tile, hoursLogged, onClick }: Props) {
   const status = statusOf(tile);
 
   return (
@@ -67,11 +68,20 @@ export default function ClientTile({ tile, onClick }: Props) {
         ) : null}
       </div>
 
-      {tile.nextDueDate ? (
-        <div style={{ fontSize: "11px", color: "#888780" }}>
-          Next due <span style={{ color: "#444441", fontWeight: 500 }}>{fmtDate(tile.nextDueDate)}</span>
-        </div>
-      ) : null}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        {tile.nextDueDate ? (
+          <div style={{ fontSize: "11px", color: "#888780" }}>
+            Next due <span style={{ color: "#444441", fontWeight: 500 }}>{fmtDate(tile.nextDueDate)}</span>
+          </div>
+        ) : (
+          <span />
+        )}
+        {hoursLogged !== undefined ? (
+          <div style={{ fontSize: "11px", color: "#888780" }}>
+            <span style={{ color: "#444441", fontWeight: 500 }}>{hoursLogged.toFixed(1)}</span> hrs (FY)
+          </div>
+        ) : null}
+      </div>
     </button>
   );
 }

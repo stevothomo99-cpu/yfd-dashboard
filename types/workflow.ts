@@ -114,6 +114,7 @@ export interface CreateTaskInput {
 // data being linked via customers.xpm_client_id, which isn't wired up yet.
 export interface ClientSummary {
   id: string;
+  xpmClientId: string | null;
   name: string;
   managerName: string | null;
   // Every distinct staff id managing one of this client's jobs -- lets the
