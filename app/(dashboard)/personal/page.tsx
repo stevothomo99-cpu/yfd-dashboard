@@ -10,7 +10,14 @@ import PageHeader from "@/components/dashboard/PageHeader";
 interface XeroSalesMetrics {
   monthTotal: number;
   ytdTotal: number;
+  monthHours: number;
+  ytdHours: number;
   error?: string;
+}
+
+function fmtPerHour(total: number, hours: number): string {
+  if (!hours) return "—";
+  return `$${Math.round(total / hours).toLocaleString("en-AU")}/hr`;
 }
 
 interface DealKPIs {
@@ -171,17 +178,43 @@ export default function PersonalDashboard() {
           <div className="rounded-lg border bg-card p-6">
             <h3 className="text-lg font-semibold mb-4">YFD — Sales</h3>
             <div className="space-y-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Month Total</p>
-                <p className="text-2xl font-bold">
-                  {loading ? "..." : xeroSales?.monthTotal ? `$${(xeroSales.monthTotal / 1000).toFixed(1)}k` : "$0"}
-                </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Month Total</p>
+                  <p className="text-2xl font-bold">
+                    {loading ? "..." : xeroSales?.monthTotal ? `$${(xeroSales.monthTotal / 1000).toFixed(1)}k` : "$0"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">YTD Total</p>
+                  <p className="text-2xl font-bold">
+                    {loading ? "..." : xeroSales?.ytdTotal ? `$${(xeroSales.ytdTotal / 1000).toFixed(1)}k` : "$0"}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">YTD Total</p>
-                <p className="text-2xl font-bold">
-                  {loading ? "..." : xeroSales?.ytdTotal ? `$${(xeroSales.ytdTotal / 1000).toFixed(1)}k` : "$0"}
-                </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Hours Logged (Month)</p>
+                  <p className="text-2xl font-bold">{loading ? "..." : (xeroSales?.monthHours ?? 0).toFixed(1)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Hours Logged (YTD)</p>
+                  <p className="text-2xl font-bold">{loading ? "..." : (xeroSales?.ytdHours ?? 0).toFixed(1)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">$/hr (Month)</p>
+                  <p className="text-2xl font-bold">
+                    {loading ? "..." : fmtPerHour(xeroSales?.monthTotal ?? 0, xeroSales?.monthHours ?? 0)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">$/hr (YTD)</p>
+                  <p className="text-2xl font-bold">
+                    {loading ? "..." : fmtPerHour(xeroSales?.ytdTotal ?? 0, xeroSales?.ytdHours ?? 0)}
+                  </p>
+                </div>
               </div>
               {xeroSales?.error && (
                 <p className="text-xs text-red-600">{xeroSales.error}</p>

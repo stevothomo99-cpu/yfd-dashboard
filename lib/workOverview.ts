@@ -189,3 +189,24 @@ export function computeHoursByClient(
     }))
     .sort((a, b) => b.hours - a.hours);
 }
+
+// Practice-wide billable hours (all clients summed, internal time
+// excluded) over an arbitrary explicit date range rather than one of the
+// fixed week/month/quarter/fy buttons -- feeds the Business KPIs page's
+// hours/$-per-hour figures, which need to line up with the Sales tile's
+// calendar Month/YTD windows (not the FY-based periods used elsewhere).
+export function computeTotalClientHoursInRange(
+  timesheets: XpmTimesheet[],
+  staffIds: string[],
+  fromIso: string,
+  toIso: string,
+): number {
+  const staffIdSet = new Set(staffIds);
+  let total = 0;
+  for (const t of timesheets) {
+    if (!staffIdSet.has(t.staffId) || t.date < fromIso || t.date > toIso) continue;
+    if (t.clientId === INTERNAL_CLIENT_XPM_ID) continue;
+    total += t.hours;
+  }
+  return total;
+}
