@@ -306,6 +306,34 @@ function isActiveXpmClient(c: XpmClientRecord): boolean {
   return c.isArchived !== "Yes" && c.isDeleted !== "Yes";
 }
 
+export interface XpmClientAllocation {
+  id: string;
+  name: string;
+  accountManagerName: string | null;
+  jobManagerName: string | null;
+}
+
+// One-off audit report, not scoped to any single Partner -- every active
+// client in the tenant with its Account Manager (our "Partner") and Job
+// Manager (our "Staff") as currently set in XPM, so gaps/mistakes can be
+// found and fixed at the source rather than discovered one at a time when a
+// client silently fails to sync (Account Manager isn't a required field at
+// the client level in XPM, only at the job level, so it's easy for a client
+// to end up with none set at all). See app/api/xpm/client-allocations.
+export async function fetchXpmClientAllocationReport(): Promise<XpmClientAllocation[]> {
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  const clients = await fetchAllXpmClientRecords();
+  return clients
+    .filter(isActiveXpmClient)
+    .map((c) => ({
+      id: c.uuid,
+      name: c.name,
+      accountManagerName: c.accountManager?.name ?? null,
+      jobManagerName: c.jobManager?.name ?? null,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // Active clients whose accountManager (Partner) matches the given name --
 // shared by client/staff/job derivation so they all agree on exactly which
 // clients are "ours" out of the whole tenant.
