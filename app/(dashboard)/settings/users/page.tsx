@@ -10,6 +10,7 @@ interface User {
   username: string;
   role: "admin" | "user";
   created_at: string;
+  suspended: boolean;
 }
 
 export default function UsersPage() {
@@ -21,6 +22,7 @@ export default function UsersPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "user">("user");
   const [submitting, setSubmitting] = useState(false);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchUsers = useCallback(async () => {
@@ -71,6 +73,62 @@ export default function UsersPage() {
       setMessage({ type: "error", text: "Failed to create user" });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleToggleSuspend = async (user: User) => {
+    const nextSuspended = !user.suspended;
+    const verb = nextSuspended ? "pause" : "resume";
+    if (!window.confirm(`${nextSuspended ? "Pause" : "Resume"} access for ${user.username} (${user.email})?`)) {
+      return;
+    }
+
+    setBusyUserId(user.id);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suspended: nextSuspended }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error || `Failed to ${verb} user` });
+        return;
+      }
+      setMessage({ type: "success", text: `${user.username}'s access has been ${nextSuspended ? "paused" : "resumed"}.` });
+      fetchUsers();
+    } catch {
+      setMessage({ type: "error", text: `Failed to ${verb} user` });
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  const handleRemove = async (user: User) => {
+    if (
+      !window.confirm(
+        `Permanently remove ${user.username} (${user.email})? This deletes their account entirely and can't be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusyUserId(user.id);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error || "Failed to remove user" });
+        return;
+      }
+      setMessage({ type: "success", text: `${user.username} has been removed.` });
+      fetchUsers();
+    } catch {
+      setMessage({ type: "error", text: "Failed to remove user" });
+    } finally {
+      setBusyUserId(null);
     }
   };
 
@@ -191,19 +249,21 @@ export default function UsersPage() {
                 <th className="px-6 py-3 text-left text-sm font-semibold">Email</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold">Username</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold">Role</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Status</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold">Created</th>
+                <th className="px-6 py-3 text-right text-sm font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-3 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-3 text-center text-gray-500">
                     Loading users...
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-3 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-3 text-center text-gray-500">
                     No users found
                   </td>
                 </tr>
@@ -224,7 +284,32 @@ export default function UsersPage() {
                       </span>
                     </td>
                     <td className="px-6 py-3 text-sm">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          user.suspended ? "bg-gray-200 text-gray-700" : "bg-green-100 text-green-800"
+                        }`}
+                      >
+                        {user.suspended ? "Paused" : "Active"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-sm">
                       {new Date(user.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-3 text-sm text-right whitespace-nowrap">
+                      <button
+                        onClick={() => handleToggleSuspend(user)}
+                        disabled={busyUserId === user.id}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 mr-4"
+                      >
+                        {user.suspended ? "Resume" : "Pause"}
+                      </button>
+                      <button
+                        onClick={() => handleRemove(user)}
+                        disabled={busyUserId === user.id}
+                        className="text-sm font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 ))

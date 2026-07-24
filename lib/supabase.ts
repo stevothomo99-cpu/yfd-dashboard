@@ -50,9 +50,11 @@ export interface DashboardUser {
   created_at: string;
   mfa_enabled: boolean;
   must_change_password: boolean;
+  suspended: boolean;
 }
 
-const DASHBOARD_USER_COLUMNS = "id, email, username, role, created_at, mfa_enabled, must_change_password";
+const DASHBOARD_USER_COLUMNS =
+  "id, email, username, role, created_at, mfa_enabled, must_change_password, suspended";
 
 /**
  * Looks up a dashboard_users row by username or email, then verifies the
@@ -85,6 +87,11 @@ export async function verifyDashboardUserPassword(
     }
 
     if (!dashboardUser) return null;
+
+    // Fail closed the same way a wrong password would -- don't disclose
+    // that the account exists but is paused, just refuse the login like any
+    // other invalid attempt (login page's error copy is generic either way).
+    if (dashboardUser.suspended) return null;
 
     const authClient = getSupabaseClient();
     const { data, error } = await authClient.auth.signInWithPassword({
@@ -140,6 +147,44 @@ export async function setMustChangePassword(userId: string, value: boolean): Pro
   if (error) {
     console.error("[setMustChangePassword]", error.message);
   }
+}
+
+// Pauses/resumes a user's access without deleting anything -- reversible.
+// verifyDashboardUserPassword refuses login for a suspended account before
+// it ever touches Supabase Auth, so this alone is enough to lock someone
+// out immediately regardless of session state (NextAuth JWTs aren't
+// re-checked against this on every request, but the next login attempt --
+// or the next time their token needs a fresh sign-in -- is blocked).
+export async function setUserSuspended(userId: string, suspended: boolean): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("dashboard_users").update({ suspended }).eq("id", userId);
+  if (error) {
+    console.error("[setUserSuspended]", error.message);
+    return false;
+  }
+  return true;
+}
+
+// Fully removes a user -- both the dashboard_users profile and the
+// underlying Supabase Auth account (so the email is completely free to
+// re-register later, unlike suspending). Destructive and irreversible; the
+// caller (API route) is responsible for confirming this is really wanted.
+export async function deleteDashboardUser(userId: string): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+
+  const { error: profileError } = await admin.from("dashboard_users").delete().eq("id", userId);
+  if (profileError) {
+    console.error("[deleteDashboardUser] profile delete failed:", profileError.message);
+    return false;
+  }
+
+  const { error: authError } = await admin.auth.admin.deleteUser(userId);
+  if (authError) {
+    console.error("[deleteDashboardUser] auth delete failed:", authError.message);
+    return false;
+  }
+
+  return true;
 }
 
 // Fetches and decrypts the stored TOTP secret for a user, if any. Returns
