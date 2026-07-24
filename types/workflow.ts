@@ -195,3 +195,27 @@ export interface TaskTemplateSummary {
 export interface TaskTemplateWithItems extends TaskTemplateSummary {
   items: TaskTemplateItem[];
 }
+
+export type TodoItemStatus = "pending_triage" | "todo" | "done" | "converted";
+
+// Created by forwarding an email to the shared inbound address (see
+// app/api/email/inbound/route.ts) -- lighter-weight than a Task (no job,
+// status, or type), for one-off reminders. "pending_triage" means the
+// owner hasn't yet set a client/due date; "todo"/"done" are populated
+// one-off items; "converted" means it was turned into a real Task instead
+// (see lib/todos.ts's populateTodoItem) because it turned out to be
+// recurring work.
+export interface TodoItem {
+  id: string;
+  ownerStaffId: string;
+  createdByEmail: string | null;
+  createdByName: string | null;
+  subject: string;
+  body: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  dueDate: string | null;
+  status: TodoItemStatus;
+  convertedTaskId: string | null;
+  createdAt: string;
+}

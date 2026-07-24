@@ -2,8 +2,9 @@ import { auth } from "@/auth";
 import PageHeader from "@/components/dashboard/PageHeader";
 import WorkItemMiniTable from "@/components/dashboard/WorkItemMiniTable";
 import UtilisationTile from "@/components/dashboard/UtilisationTile";
+import TodoSection from "@/components/dashboard/TodoSection";
 import { getSettings } from "@/lib/settings";
-import { getStaffByEmail, getWorkBoardForStaff } from "@/lib/workflow";
+import { getStaffByEmail, getWorkBoardForStaff, getClientSummaries } from "@/lib/workflow";
 import {
   computeWagesUtilisation,
   getBasTasks,
@@ -44,6 +45,9 @@ export default async function DashboardPage() {
 
   const { utilisation, utilisationMessage } = await loadUtilisation(staff.xpmStaffId, today);
 
+  const tiles = await getClientSummaries();
+  const allClients = tiles.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div>
       <PageHeader
@@ -56,6 +60,8 @@ export default async function DashboardPage() {
               : "Your work at a glance"
         }
       />
+
+      <TodoSection allClients={allClients} />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "14px" }}>
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", padding: "1.1rem 1.2rem" }}>
