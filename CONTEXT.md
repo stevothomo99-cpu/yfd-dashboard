@@ -1,20 +1,18 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 2.0
-**Last updated:** 18 July 2026
-**Owner:** CEO (Steve), Your Financial Direction (YFD)
-**Purpose:** Full context for any developer or AI coding assistant picking up this project. This replaces the original v1.0 pre-build plan — the sections below describe what is **actually built and deployed**, not the original spec.
+**Version:** 3.0
+**Last updated:** 26 July 2026
+**Owner:** CEO (Steve Thomas), Your Financial Direction (YFD)
+**Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan. v2.0 described a single-CEO Karbon-derived dashboard; that has since been replaced by an XPM-native practice-management system (staff/customers/jobs/tasks) alongside the original Business KPIs page, which is why this version is a substantial rewrite.
 
 ---
 
 ## 1. Project Overview
 
-A private, CEO-facing business intelligence dashboard built in Next.js 16 (App Router, Turbopack) and deployed to Vercel.
+Two things live in one Next.js app:
 
-It gives the YFD CEO a single view across:
-- **Overseas bookkeeping team performance** (Karbon tasks + XPM timesheets/invoices)
-- **Business KPIs across three companies**: YFD (accounting practice), SiteMargin, FocablyED
-- **Web traffic/SEO** for SiteMargin and FocablyED (Google Search Console + GA4)
+1. **An internal practice-management tool** (`/my-work`, `/clients`, `/timesheets`, `/dashboard`) — replaces Karbon. Real staff/customers/jobs synced from Xero Practice Manager (XPM); tasks, notes, files, and task templates are native to this app. Role-based scoping (Partner/Manager/Staff) governs who can see and edit what. Multiple real users log in (not just the CEO) via a proper account system with password reset and admin user management.
+2. **Business KPIs** (`/personal`, admin-only) — the original CEO-facing page: HubSpot pipeline, Xero Accounting revenue, Google Search Console/GA4 web metrics, FocablyED/SiteMargin churn. Still mostly Tailwind-styled (legacy), unlike the rest of the app.
 
 Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main`.
 
@@ -24,205 +22,194 @@ Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js 16.2.9 (App Router, Turbopack), React 19 |
+| Framework | Next.js 16 (App Router, Turbopack), React 19 |
 | Language | TypeScript |
-| Styling | Tailwind CSS v4 + shadcn-style primitives (`components/ui/`) |
-| Charts | Recharts |
-| Auth (dashboard login) | NextAuth v5 beta, Credentials provider, single CEO account via `AUTH_USERNAME`/`AUTH_PASSWORD` env vars |
-| Auth (secondary, WIP) | Supabase Auth — `dashboard_users` table, see §7 "Known gap" |
-| Cache | Redis via `ioredis` (`REDIS_URL` env var — e.g. Upstash attached in Vercel). Falls back to an in-memory `Map` if unset (dev only) |
+| Styling | **Inline `style={{...}}` is the convention everywhere except `/personal`**, which stays Tailwind (legacy, never migrated). Don't introduce Tailwind classes into workflow pages or vice versa. |
+| Middleware | This Next.js version renamed `middleware.ts` → **`proxy.ts`** (see `node_modules/next/dist/docs/`) — that's where the NextAuth `authorized` callback is actually wired up, not a top-level `middleware.ts`. |
+| Auth | NextAuth v5 beta, Credentials provider (`auth.ts`) backed entirely by `dashboard_users` (Supabase Auth for password storage) — see §7. |
+| Database | Supabase Postgres, project **`yfd-workflow`** (id `xbjxrvqydcbwldnrexqu`) — dashboard_users, staff, customers, jobs, tasks, and everything else in §6. RLS enabled with no policies on every table; all access goes through the service-role client (`lib/supabase.ts`'s `getSupabaseAdmin()`). Separate Supabase projects exist per-product for FocablyED/SiteMargin metrics (§4.5/4.6) — don't conflate them. |
+| Cache | Redis via `ioredis` (`REDIS_URL`, e.g. Upstash attached in Vercel's Storage tab). In-memory `Map` fallback in dev if unset. |
+| Outbound email | Resend — two separate integrations: Supabase Auth's own SMTP relay (password reset emails) and `lib/resend.ts` (our own backend's transactional emails, e.g. to-do notifications). Same API key, genuinely separate wiring — see §7 and §4.8. |
+| Inbound email | Resend's Inbound feature (webhook-based) — see §4.8. |
 | Hosting | Vercel — repo push = deploy |
 
 ---
 
 ## 3. Current Routes
 
-| Route | Purpose |
-|---|---|
-| `/login` | NextAuth credentials login form |
-| `/` | Redirects: CEO (`AUTH_USERNAME` match) → `/personal`, everyone else → `/team` |
-| `/personal` | **Main CEO dashboard.** Business KPIs (3-column: FocablyED, SiteMargin, YFD), Web Metrics (SiteMargin + FocablyED side by side, with 24h/7d/30d period selector), User & Churn metrics (FocablyED subscriptions, SiteMargin trials) |
-| `/team` | Team-facing dashboard (non-CEO landing page) |
-| `/leaderboard` | Staff performance ranking (Karbon/XPM derived) |
-| `/timesheets` | Billable/non-billable hours, staff slicer |
-| `/tasks` | Karbon tasks — overdue/due today/due this week |
-| `/bas` | BAS obligation status |
-| `/clients` | Client tile grid (YTD invoiced, task/BAS status) |
-| `/staff/[id]` | Individual staff drill-down |
-| `/settings` | Two tabs: **Staff & Sync** (XPM partner name, Karbon/XPM staff roster toggle) and **Dashboard Users** (multi-user admin — see §7 known gap) |
-| `/settings/users` | User management: list/create users with role admin/user (Supabase-backed) |
+| Route | Who sees it | Purpose |
+|---|---|---|
+| `/login` | public | Credentials login (username or email + password, optional TOTP step) |
+| `/forgot-password` → `/reset-password` | public | Self-service password reset via Supabase Auth's recovery email |
+| `/change-password` | any logged-in user | Voluntary password change; also where a forced first-login change lands (see §7) |
+| `/dashboard` | everyone | Personal "Work overview" — BAS status, overdue work items, billable utilisation tile, and the **To-Do** section (email-forwarded reminders, see §4.8) |
+| `/my-work` | everyone | Karbon-style flat task table, scoped by Partner/Manager/Staff hierarchy (own tasks for Staff, team's for Manager, practice-wide for Partner); admin gets a "viewing as" staff-switcher others don't |
+| `/clients` | everyone | Tile grid — one tile per client, hours logged + revenue for a This Week/Month/Quarter/FY slicer, summary bar (Clients/Hours/Revenue/$-per-hr). Click a tile to open the Client drawer (jobs, tasks, notes, files, copy-task, save/apply template) |
+| `/timesheets` | everyone | Billable vs non-billable by period, collapsible practice-wide "Time by client" list, and a **By employee** table — each row expandable to that person's own client breakdown |
+| `/personal` | admin only | Business KPIs — see §5, mostly unchanged from v2.0 |
+| `/team`, `/leaderboard` | admin only | Legacy, largely unchanged from v2.0 |
+| `/tasks`, `/bas` | nobody (unlinked) | Old Karbon-only pages, deliberately not removed but not in nav either ("quarantined") |
+| `/settings` | admin only (nav-gated; **not** all sub-routes are server-enforced — see gotcha in §9) | Staff & Sync (XPM partner name/exclusions, manual resync trigger), Dashboard Users (create/list/**pause**/**remove**), My Security (MFA) |
+
+Nav itself (`components/layout/TopNav.tsx`) computes `isAdmin` once in `app/(dashboard)/layout.tsx` and conditionally includes Business KPIs/Team/Leaderboard/Settings — Dashboard/My Work/Clients/Timesheets are always shown.
 
 ---
 
 ## 4. API Routes & Data Sources
 
 ### 4.1 XPM (Xero Practice Manager) — `lib/xpm.ts`
-OAuth 2.0 (Xero Developer portal), auto-refreshed from `XPM_REFRESH_TOKEN`. `XpmNotConfiguredError` is thrown/caught throughout when env vars are missing, so pages degrade to a "not configured" message instead of crashing.
+OAuth 2.0, auto-refreshed. `XpmNotConfiguredError` thrown/caught throughout so pages degrade gracefully rather than crash. **Must be v3.1** (`XPM_BASE_URL=https://api.xero.com/practicemanager/3.1`) — v3.0 only returns XML.
+
+Two undocumented-until-tested API quirks, both handled by paging across rolling ~360-day windows (`rollingWindowBounds`, shared helper):
+- `job.api/list` requires `from`/`to` (yyyyMMdd), span < 1 year.
+- `invoice.api/list` has the exact same constraint — this was missing entirely at one point and 400'd in production before being fixed.
+
+**Client roster has no date dependency at all** (`client.api/list`, no date params) — only jobs/invoices are windowed. A client is "ours" if `isArchived !== "Yes" && isDeleted !== "Yes" && accountManager?.name === <Partner name in Settings>`. **Account Manager is a validated dropdown in XPM but is only *required* at the job level, not the client level** — a client can exist with no Account Manager set at all, and it will be silently invisible to this app's sync (indistinguishable from a real exclusion). `GET /api/xpm/client-allocations` (admin-only, unlinked) is a standing audit tool for exactly this: lists every active XPM client with its Account Manager/Job Manager, sorted so unallocated ones surface first.
+
+Real XPM Tax Returns / Activity Statement lodgment status (Draft/To Sign/Filed/etc., shown in XPM's own Tax > Returns screen) is **not exposed by any public XPM API** — confirmed via Xero's own Developer Ideas forum, where getting this is still an open feature request. Don't attempt to build against it; there's nothing to call.
 
 | Endpoint | Fetches |
 |---|---|
-| `GET/POST /api/xpm/staff` | Staff filtered to Partner = CEO name (Manager role on Partner's jobs) |
-| `GET /api/xpm/timesheets` | Billable/non-billable hours, week/month/YTD |
-| `GET /api/xpm/invoices` | YTD invoiced per client |
+| `POST /api/xpm/sync-workflow` | Full-replace sync of staff/customers/jobs from XPM into Supabase (`lib/xpmSync.ts`) — admin-gated, triggered manually from Settings → Staff & Sync |
+| `GET /api/xpm/timesheets` | Raw time entries for the configured Partner's staff |
+| `GET /api/xpm/client-allocations` | Admin audit report (see above) |
+| `GET /api/xpm/diagnose` | Debug endpoint, raw API response samples |
 
-Note: the `/personal` "YFD — Sales" tile no longer reads from here -- it reads real invoicing from Xero Accounting instead (§4.1a), since XPM's `invoice.api` isn't YFD's actual invoicing system.
+### 4.2 Xero Accounting (revenue) — `lib/xeroAccounting.ts`
+A completely separate Xero product/connection from Practice Manager — connects to YFD's own Xero Accounting organisation (real invoicing), not the Practice Manager tenant. One-time OAuth bootstrap: `/api/xero-accounting/authorize` (admin-gated) → `/api/xero-accounting/callback`.
 
-### 4.1a Xero Accounting (revenue) — `lib/xeroAccounting.ts`
-A separate Xero product/connection from Practice Manager above -- connects to YFD's own Xero Accounting organisation (where invoices to clients are actually issued), not the Practice Manager tenant. One-time OAuth bootstrap at `/api/xero-accounting/authorize` (admin-gated) → `/api/xero-accounting/callback`; see `.env.example` for the `XERO_ACCOUNTING_*` env vars (reuses `XPM_TOKEN_ENCRYPTION_KEY`).
+- Scopes: `offline_access accounting.contacts.read accounting.invoices.read`. **`accounting.transactions.read` (the old bundle scope) does not exist in this app's granted scope catalog** — Xero replaced it with granular per-resource scopes; using the old one produces `invalid_scope`.
+- **`where` + `summaryOnly=true` together on `/Invoices` returns a 400** ("filter unavailable with summaryOnly flag") once the `where` clause includes a Date range/Status condition — confirmed live. Full invoice bodies are fetched instead, paged at Xero's default 100/page (`fetchAllInvoicesInRange`).
+- Revenue = `SubTotal` (ex-GST) on ACCREC invoices in AUTHORISED/PAID status, matched to XPM clients by **exact contact name** (no stored link between the two systems).
+- **FY means the Australian financial year (1 Jul–30 Jun)** everywhere in this app except one place that was wrong: the `/personal` Sales tile's "YTD" used to mean calendar-year-to-date, which didn't match anything else and has been fixed/relabelled to "FY".
 
 | Endpoint | Fetches |
 |---|---|
-| `GET/POST /api/xero-accounting/sales` | **YFD business tile data.** Sums ACCREC/AUTHORISED\|PAID invoice `SubTotal` (ex-GST) into `monthTotal` (1st of month → today) and `ytdTotal` (Jan 1 → today, calendar year). |
-| `GET /api/xero-accounting/diagnose` | Admin debug endpoint -- dumps a raw `/Invoices` sample to confirm shape against the live tenant. |
+| `GET/POST /api/xero-accounting/sales` | `/personal` "YFD — Sales" tile: Month + FY revenue, Month + FY billable hours (from XPM timesheets, practice-wide), and the derived $/hr for each |
+| `GET /api/xero-accounting/diagnose` | Admin debug — supports `?tenantIds=a,b` to compare multiple candidate Xero orgs directly (org name + invoice count) when it's unclear which one is the real invoicing file |
 
-`fetchRevenueByClientName(fromIso, toIso)` also groups revenue by Xero contact name, matched to XPM clients by exact name (no stored link exists between the two systems).
+`fetchRevenueByClientName`/`getRevenueByClientName` (15-min cached) feed `/clients`' per-tile and summary-bar revenue figures, prefetched server-side for all four period buttons at once.
 
-Note: `XPM_BASE_URL` must point at API **v3.1** (`https://api.xero.com/practicemanager/3.1`) — v3.0 only returns XML, and `lib/xpm.ts` expects JSON.
+### 4.3 Karbon — `lib/karbon.ts`
+Bearer token. Legacy — `/tasks` and `/bas` (unlinked pages) are the only remaining consumers.
 
-### 4.2 Karbon — `lib/karbon.ts`
-Bearer token (`KARBON_API_KEY`). `/api/karbon/tasks`, `/api/karbon/work`, `/api/karbon/users`. `KARBON_BAS_WORK_TYPE` filters `/WorkItems` by the exact label configured in Karbon → Settings → Work Types.
+### 4.4 HubSpot — `lib/hubspot.ts`
+Unchanged from v2.0 — `GET/POST /api/hubspot/deals`, feeds `/personal` Sales Pipeline.
 
-### 4.3 HubSpot — `lib/hubspot.ts`
-`GET/POST /api/hubspot/deals` — deal pipeline KPIs (new leads, active deal count/value, won this month, avg days to close) split three ways: `focablyED`, `siteMargin`, `yfd`. Cursor-paginated. Uses `HUBSPOT_ACCESS_TOKEN` / `HUBSPOT_PORTAL_ID`.
+### 4.5 Google Search Console + GA4 — `lib/google.ts`
+Unchanged from v2.0 — hand-rolled JWT service-account auth, feeds `/personal` Web Metrics.
 
-### 4.4 Google Search Console + GA4 — `lib/google.ts`
-JWT (RS256) service-account auth, custom-built (no `googleapis` package — hand-rolled `jsonwebtoken` signing against `oauth2.googleapis.com/token`). Scopes: `webmasters.readonly`, `analytics.readonly`.
+### 4.6 FocablyED / 4.7 SiteMargin
+Unchanged from v2.0 — own Supabase projects, `lib/focably.ts`/`lib/sitemargin.ts`.
 
-- `getSearchConsoleMetrics(siteUrl, { days })` — clicks, impressions, CTR, avg position, top 10 queries. `siteUrl` uses the `sc-domain:` prefix for domain properties (e.g. `sc-domain:sitemargin.com.au`).
-- `getAnalyticsMetrics(propertyId, { days })` — sessions, users, pageviews, bounce rate via GA4 Data API `runReport`.
-- Both accept an optional `days` param (defaults to 30) — powers the 24h/7d/30d selector on `/personal`.
+### 4.8 Resend — `lib/resend.ts`, `app/api/email/inbound/route.ts`
+Two independent integration points on the same Resend account:
 
-Routes: `GET /api/google/search-console?days=N`, `GET /api/google/analytics?days=N`. Both currently only return **SiteMargin** data — FocablyED is wired in the response shape (`focablyED: null`) but not yet live; needs `FOCABLYED_GA4_PROPERTY_ID` and a verified FocablyED Search Console property.
-
-`GET /api/google/diagnose` — debug endpoint, dumps base64 key validity/PEM format checks. Keep for troubleshooting auth issues (this took a while to get right — see §8).
-
-Env vars: `GOOGLE_PROJECT_ID`, `GOOGLE_CLIENT_EMAIL`, `GOOGLE_PRIVATE_KEY_BASE64` (base64-encode the full PEM: `cat private-key.txt | base64 -w 0`), `SITEMARGIN_GA4_PROPERTY_ID`, `FOCABLYED_GA4_PROPERTY_ID`.
-
-### 4.5 FocablyED — `lib/focably.ts`
-Own Supabase project (separate from the `yfd-workflow` project — see §7). Env vars: `SUPABASE_FOCABLY_URL`, `SUPABASE_FOCABLY_SERVICE_KEY`. `GET /api/focably/metrics` returns total/paid/freemium/non-active users, churn (paid/unpaid/total this month), churn rate, win-back candidates.
-
-### 4.6 SiteMargin — `lib/sitemargin.ts`
-Also its own Supabase project. Env vars: `SUPABASE_SITEMARGIN_URL`, `SUPABASE_SITEMARGIN_SERVICE_KEY`. `GET /api/sitemargin/metrics` returns organizations/trials/subscriptions/churn.
+1. **Outbound, our own backend** (`lib/resend.ts`) — used for To-Do notification emails. Needs `RESEND_API_KEY` + `RESEND_FROM_EMAIL`. **This is separate from Supabase's SMTP settings** (§7) — configuring one does nothing for the other.
+2. **Inbound webhook** (`/api/email/inbound`) — powers the "email-to-todo" feature. Forward an email to `TODO_INBOUND_EMAIL` (a shared address, e.g. `todo@yourfinancedept.com.au`) and it creates a lightweight **To-Do item** (`todo_items` table — see §6) shown on `/dashboard`.
+   - **Owner resolution**: if the shared address is in the email's **To** field, the owner is whoever sent it (self to-do). If it's only in **Cc** (someone Cc's the shared address while emailing a colleague directly), the owner is whoever's in **To** instead (delegated to-do) — lets Steve forward work to someone else without it landing on his own dashboard. Multiple To recipients that match staff each get their own item.
+   - The webhook payload (`email.received` event) carries metadata (from/to/cc/subject) but **not the body** — the full text is fetched separately via `resend.emails.receiving.get(email_id)`.
+   - **Signature verification uses `resend.webhooks.verify()`**, which needs the raw (unparsed) request body and the three `svix-id`/`svix-timestamp`/`svix-signature` headers passed as a plain `{id, timestamp, signature}` object — the SDK's `Headers` type here is its own interface, **not** the Fetch API `Headers` object; passing `request.headers` directly is a type error.
+   - A to-do stays lightweight (client + due date, "mark done" checkbox) if the owner sets it as one-off; if they set a recurrence, it's promoted into a real Task instead (auto-picks the job like New Task's client-first flow does) since recurring work needs the full Task machinery.
+   - Needs manual setup once deployed: Resend Inbound enabled (MX records) on the receiving domain, a webhook registered pointing at `/api/email/inbound` for the `email.received` event, and `RESEND_WEBHOOK_SECRET` set from that.
 
 ---
 
 ## 5. `/personal` Dashboard — Current Layout
 
-1. **Sales Pipeline** (3-col grid): `BusinessKpiTile` for FocablyED and SiteMargin (HubSpot deal data), plus a YFD tile showing Xero month/YTD sales totals (`xeroSales` state, from `/api/xero-accounting/sales`).
-2. **Web Metrics** (2-col grid, heading shows current period e.g. "Web Metrics (24h)"): `WebMetricsTile` × 2 (SiteMargin, FocablyED). Each tile has its own 24h/week/month button row (raised/shadowed button style) that re-fetches both Search Console and Analytics data for that product at the selected period via `handleWebMetricsPeriodChange(days)`, which hits both Google endpoints with a `?days=` query param.
-3. **User & Churn Metrics**: `SubscriptionMetricsTile` (FocablyED) and `SiteMarginMetricsTile` (SiteMargin).
-4. Manual **Refresh** button — re-fetches all 6 data sources (HubSpot POST, Xero Accounting sales POST, Focably, SiteMargin, Search Console, Analytics).
-
-Key components: `components/dashboard/WebMetricsTile.tsx` (unified Search Console + Analytics side-by-side, replaced the earlier separate `SearchConsoleMetricsTile`/`AnalyticsMetricsTile`, which are still in the tree but unused), `components/dashboard/BusinessKpiTile.tsx`, `components/ui/skeleton.tsx` (loading placeholder — required by `WebMetricsTile`, was missing and broke the Turbopack build once).
+Unchanged from v2.0 except the YFD Sales tile (§4.2): Sales Pipeline (3-col: FocablyED/SiteMargin HubSpot KPIs + YFD Xero Accounting tile with Month/FY revenue, hours, $/hr), Web Metrics (SiteMargin + FocablyED, 24h/week/month selector), User & Churn Metrics, manual Refresh button.
 
 ---
 
-## 6. Design Notes
+## 6. Workflow System — staff/customers/jobs/tasks
 
-- Card style: `rounded-lg border bg-card p-6`, Tailwind utility classes (the dashboard has drifted from the original inline-`style` prototype pattern seen in `TopNav.tsx`/`login/page.tsx` toward Tailwind classes in newer pages like `/personal`).
-- Period-selector buttons (Web Metrics): active = `bg-blue-600 text-white shadow-lg shadow-blue-600/30`; inactive = `bg-white ... border ... shadow-md hover:shadow-lg`.
-- No dark mode.
+The Karbon-replacement data model, all in the `yfd-workflow` Supabase project, all accessed via `lib/workflow.ts` (the single data-access layer for this section) unless noted.
+
+**Two separate role systems — do not conflate them:**
+1. `dashboard_users.role`: `"admin" | "user"` — a login-level flag, gates nav and gives full bypass everywhere (task permissions, To-Do visibility, etc.).
+2. `staff.role`: `"Partner" | "Manager" | "Staff"` — XPM-derived work hierarchy. **`jobs.manager_id` is actually populated by "Staff"-role people's ids**, not "Manager" — confirmed directly against the practice; the schema's "Manager" tier is effectively vestigial. A Staff-role person's own board = `getInProgressJobsForManager(staff.id)`.
+
+**Tables**: `staff`, `customers`, `jobs`, `tasks`, `statuses`, `task_types`, `customer_notes`, `customer_files`, `task_templates` + `task_template_items`, `todo_items` (§4.8). Only staff/customers/jobs are XPM-synced (full-replace, `lib/xpmSync.ts`); everything else is native to this app.
+
+**Task permissions** (`getJobsInScopeForStaff`, `canModifyTask` in `lib/workflow.ts`):
+- Non-admin create: only on jobs in scope (their own managed jobs for Staff/Manager, whole roll-up for Partner).
+- Non-admin edit/delete/reassign: only tasks already on their own board (`getWorkBoardForStaff`); reassigning to a different job re-checks scope.
+- Admin: unrestricted everywhere.
+
+**New Task creation is client-first**, not job-first — the modal groups the caller's already-scoped job list by client, auto-selecting the job if there's only one, only showing a job sub-picker when a client has several (avoids exposing a flat "Client — Job Name" list where multi-year recurring jobs made the same client show up many times).
+
+**Notes** (`customer_notes`) support an optional `title` and a `pinned` boolean (pinned sort first, then newest-first).
+
+**Copy task / templates**: a task can be copied onto another client/job (fresh due date, unassigned, default open status). A client's current tasks can be saved as a named, reusable template (title/type/recurrence only — not dates/assignee/status) and bulk-applied to any job.
+
+**To-Do items** (`todo_items`, §4.8): distinct from Tasks — no job/status/type, just owner/client/due-date, created from forwarded emails. `status`: `pending_triage` (needs client+due date) → `todo`/`done` (populated one-off) or `converted` (became a real Task).
 
 ---
 
-## 7. Multi-user auth — now wired end to end
+## 7. Auth
 
-The dashboard supports two authentication paths through a single NextAuth `Credentials` provider (`auth.ts`), both landing on the same session shape:
+Single NextAuth `Credentials` provider (`auth.ts`), entirely backed by the `dashboard_users` table — **there is no separate CEO env-var login anymore** (that was v2.0; removed in favour of dashboard_users covering everyone, including the CEO).
 
-1. **CEO env-based login** (original setup) — `process.env.AUTH_USERNAME` / `AUTH_PASSWORD`, constant-time compared. Returns `{ id: "ceo", name, role: "admin" }`.
-2. **Supabase-backed users** — any row in the `dashboard_users` table (in the **`yfd-workflow`** Supabase project, id `xbjxrvqydcbwldnrexqu` — reused deliberately to avoid paying for a second project). `authorize()` looks the submitted value up by `username` then by `email` (via `getSupabaseAdmin()`, which uses the service role key and bypasses RLS for this internal lookup), then verifies the password with `supabaseClient.auth.signInWithPassword`. Returns `{ id, name: username, email, role }` from the `dashboard_users` row.
+- **Password storage**: real passwords live in **Supabase Auth** (`auth.users`), not a column on `dashboard_users`. `verifyDashboardUserPassword` looks up the profile row (by username, falling back to email) then calls `supabase.auth.signInWithPassword`. Creating/updating a user's password goes through `supabaseAdmin.auth.admin.createUser`/`updateUserById`.
+- **MFA**: optional TOTP, `lib/mfa.ts` + `getMfaSecret`/`enableMfa`/`disableMfa` in `lib/supabase.ts`. Login is a two-step flow (`/api/auth/mfa-check` pre-validates credentials and reports whether a code is needed, before ever calling NextAuth's `signIn`).
+- **Forced first-login password change**: `dashboard_users.must_change_password` is set `true` whenever an admin creates a user (they picked the initial password). `auth.config.ts`'s `authorized` callback redirects to `/change-password` whenever this flag is true, except for `/change-password` itself and its API route (else redirect-loop). Cleared once the user sets their own password.
+- **Self-service forgot/reset password**: `/forgot-password` triggers Supabase Auth's own recovery email (`resetPasswordForEmail`) — **this depends on Supabase's SMTP being configured** (Authentication → Emails → SMTP Settings; the built-in default email service is rate-limited and not meant for production). `/reset-password` uses a **separate, fresh browser Supabase client** (not `lib/supabase.ts`'s shared one, which sets `persistSession: false` and would break session detection) to pick up the recovery session — handles both PKCE (`?code=`) and implicit (`#access_token=`) flows since it wasn't obvious which one Supabase would use until tested. Also clears `must_change_password` if it was set.
+- **Pause/remove users**: Settings → Dashboard Users has per-row **Pause** (sets `dashboard_users.suspended`, checked in `verifyDashboardUserPassword` before even touching Supabase Auth — fully reversible via Resume) and **Remove** (deletes both the `dashboard_users` row and the underlying Supabase Auth account — irreversible). Both block an admin from acting on their own account, both confirm before executing.
+- **Type augmentation** (`types/next-auth.d.ts`): `role` and `mustChangePassword` on `User`/`Session`/`JWT`. Must augment `@auth/core/jwt`, not `next-auth/jwt` (the latter is just a re-export; TS module augmentation doesn't follow re-exports — augmenting the wrong one compiles fine but silently no-ops).
 
-Both paths flow through the same `jwt`/`session` callbacks in `auth.config.ts`, which carry `role` (`"admin" | "user"`) onto the session (see `types/next-auth.d.ts` for the module augmentation — note the `JWT` interface has to be augmented against `@auth/core/jwt`, not `next-auth/jwt`, since that's where next-auth's re-export actually originates; augmenting the wrong module silently no-ops and `token.role` falls back to `unknown` via the `Record<string, unknown>` base the real interface extends).
-
-`app/(dashboard)/page.tsx`'s root redirect now checks `session.user.role === "admin"` (not an exact username match), so **any** admin `dashboard_users` row lands on `/personal` exactly like the CEO account does.
-
-Key implementation detail: `lib/supabase.ts` lazily constructs its Supabase clients (`getSupabaseClient()`, `getSupabaseAdmin()`) instead of throwing at module import time. `auth.ts` imports this module on every request via the Credentials provider, so if it threw eagerly on a missing env var, it would take down the *entire* login flow — including the CEO's env-var path — not just the Supabase path. `isSupabaseConfigured()` + try/catch in `verifyDashboardUserPassword` mean a misconfigured/absent Supabase env simply makes path 2 a no-op; path 1 (CEO) is unaffected.
-
-The old `POST /api/auth/login` endpoint (a separate, disconnected Supabase-only login that nothing in the UI called) has been deleted — it predated this fix and would have been confusing to leave alongside the real flow.
-
-**To add a new admin user (e.g. Kim):** go to `/settings` → **Dashboard Users** tab (or `/settings/users` directly) → **Add New User** → email `kim@focablyed.com`, username `kim`, set a password, role **Admin**. She can then sign in at `/login` with that username (or her email) and password, and will land on `/personal` with full access, same as the CEO.
-
-**Not yet done:** no UI for deleting/editing existing `dashboard_users` rows or resetting a forgotten password — only create + list exist today (`app/api/admin/users/route.ts`).
+**To add a new user**: Settings → Dashboard Users → Add New User → email, username, a temporary password (they'll be forced to change it), role. To remove a user's access: Pause (reversible) or Remove (permanent) from the same table.
 
 ---
 
 ## 8. Environment Variables (current, full list)
 
-See `.env.example` in repo root for the authoritative list with comments. Summary:
+See `.env.example` for the authoritative list with comments. Summary of what's new/changed since v2.0 — full XPM/HubSpot/Google/product-Supabase blocks are unchanged:
 
 ```bash
-# Auth (NextAuth — currently the only login that actually works)
-AUTH_SECRET=
-AUTH_USERNAME=
-AUTH_PASSWORD=
+# XPM token encryption (shared by XPM and Xero Accounting token caches)
+XPM_TOKEN_ENCRYPTION_KEY=          # openssl rand -base64 32
 
-# Supabase (dashboard user management — see §7, wired into the real login)
-NEXT_PUBLIC_SUPABASE_URL=          # yfd-workflow project: https://xbjxrvqydcbwldnrexqu.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+# Xero Accounting (separate connection from XPM — see §4.2)
+XERO_ACCOUNTING_CLIENT_ID=
+XERO_ACCOUNTING_CLIENT_SECRET=
+XERO_ACCOUNTING_REFRESH_TOKEN=
+XERO_ACCOUNTING_TENANT_ID=
 
-# XPM / Xero (practicemanager API v3.1 — v3.0 is XML-only, breaks lib/xpm.ts)
-XPM_CLIENT_ID=
-XPM_CLIENT_SECRET=
-XPM_REFRESH_TOKEN=
-XPM_TENANT_ID=
-XPM_BASE_URL=https://api.xero.com/practicemanager/3.1
-
-# Karbon
-KARBON_API_KEY=
-KARBON_ACCESS_KEY=                 # only needed for Karbon v3
-KARBON_BASE_URL=https://api.karbonhq.com/v3
-KARBON_BAS_WORK_TYPE=              # exact label from Karbon → Settings → Work Types
-
-# Redis (attach an Upstash integration in Vercel's Storage tab — auto-populates this)
-REDIS_URL=
-
-# HubSpot
-HUBSPOT_ACCESS_TOKEN=
-HUBSPOT_PORTAL_ID=
-
-# Google Cloud (Search Console + GA4) — service account JWT, hand-rolled (not the googleapis SDK)
-GOOGLE_PROJECT_ID=
-GOOGLE_CLIENT_EMAIL=
-GOOGLE_PRIVATE_KEY_BASE64=         # cat private-key.txt | base64 -w 0
-SITEMARGIN_GA4_PROPERTY_ID=
-FOCABLYED_GA4_PROPERTY_ID=         # not yet set — FocablyED web metrics show "Not yet configured"
-
-# Product Supabase projects (separate from yfd-workflow, one per product)
-SUPABASE_FOCABLY_URL=
-SUPABASE_FOCABLY_SERVICE_KEY=
-SUPABASE_SITEMARGIN_URL=
-SUPABASE_SITEMARGIN_SERVICE_KEY=
+# Resend (transactional email + email-to-todo — see §4.8)
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=                 # e.g. "YFD Dashboard <noreply@focablyed.com>"
+RESEND_WEBHOOK_SECRET=             # from the inbound webhook's Resend dashboard config
+TODO_INBOUND_EMAIL=                # e.g. todo@yourfinancedept.com.au
 ```
 
-All of these live in Vercel → Project Settings → Environment Variables. Redeploy required after changing any.
+All live in Vercel → Project Settings → Environment Variables. Redeploy required after changing any.
 
 ---
 
 ## 9. Gotchas / Lessons Learned
 
-- **Google JWT auth**: `secretOrPrivateKey must be an asymmetric key when using RS256` almost always means the base64-encoded key is wrong/corrupted, not a code bug. Verify with `/api/google/diagnose` first. A 403 `PERMISSION_DENIED` from the Analytics/Search Console API (as opposed to a 400 on the token exchange) means auth succeeded but the service account (`yfd-dashboard@yfd-dashbaord.iam.gserviceaccount.com` — note the org's own typo, "dashbaord", is baked into the real account, don't "fix" it) needs to be granted access inside Google Analytics/Search Console property permissions, not a code fix.
-- **Turbopack build errors** surface immediately on `next build` for any missing local import (e.g. missing `components/ui/skeleton.tsx`) — check `components/ui/` has every primitive a component imports before assuming an env/config issue.
-- **XPM API version**: must be v3.1 for JSON responses.
-- Two *separate* Supabase concerns exist in this codebase — don't conflate them: (1) product data stores for FocablyED/SiteMargin metrics (`lib/focably.ts`, `lib/sitemargin.ts`), and (2) the `yfd-workflow` project used for dashboard user management (`lib/supabase.ts`). They use different env var names and different projects.
-- **NextAuth `JWT` module augmentation** must target `@auth/core/jwt`, not `next-auth/jwt` — the latter is just a re-export (`export * from "@auth/core/jwt"`), and TypeScript module augmentation doesn't follow re-exports. Augmenting the wrong specifier compiles with no error but silently does nothing; the symptom is a custom token field typing as `unknown` (falling back to the `Record<string, unknown>` index signature the real `JWT` interface extends) instead of your declared type.
-- `lib/supabase.ts` must never throw at import time — it's imported by `auth.ts`, which runs on every request. A module-level `if (!url) throw` here would take down the CEO's env-var login path too, not just the Supabase path. Always lazy-init (function-based getters) for anything imported by the auth module.
+- **`middleware.ts` is `proxy.ts` in this Next.js version.** If route-protection behaviour seems wrong, check `proxy.ts` first — there is no top-level `middleware.ts` file at all.
+- **XPM date-windowed endpoints** (`job.api/list`, `invoice.api/list`) both need `from`/`to` under a year apart, discovered one 400 at a time. **The client roster (`client.api/list`) has no date dependency** — don't assume a client-sync gap is a date-window issue; check its Account Manager/archived flags instead.
+- **A client can have no Account Manager set in XPM at all** (only required at the job level) — this silently excludes the client from the whole sync, indistinguishable in our data from a deliberate exclusion. Use `/api/xpm/client-allocations` to audit.
+- **XPM Tax Returns/Activity Statement status has no public API** — don't build against it, there's nothing to call (confirmed via Xero's own Developer Ideas forum).
+- **Xero Accounting**: `where` + `summaryOnly=true` together 400s once the filter includes Date/Status conditions. `accounting.transactions.read` doesn't exist in the granted scope catalog — use the granular `accounting.invoices.read`/`accounting.contacts.read` instead.
+- **FY = 1 Jul–30 Jun everywhere** in this app. A tile/route that says "YTD" and means calendar-year is a bug, not a valid alternate convention — this exact mistake shipped once and had to be fixed.
+- **Google JWT auth / Turbopack build errors / NextAuth JWT module augmentation** — see v2.0 notes, still accurate, unchanged.
+- **Resend webhook verification** needs the RAW request body (parsing as JSON first breaks the signature) and its own `{id, timestamp, signature}` header shape — not the Fetch API `Headers` object despite the SDK naming a type `Headers`.
+- **Supabase's SMTP settings only affect Supabase Auth's own emails** (password reset, etc.) — sending email from our own backend code (e.g. To-Do notifications) requires a second, separate integration via the Resend SDK directly (`lib/resend.ts`), same API key or not.
+- A reset-password page needs its **own** browser Supabase client instance (not the shared server-oriented one with `persistSession: false`), or session/recovery-token detection silently doesn't work.
+- **`lib/supabase.ts` must never throw at import time** — `auth.ts` imports it on every request. Always lazy-init.
 
 ---
 
 ## 10. Future / Not Yet Built
 
-- FocablyED Search Console + GA4 (needs domain verification + GA4 property ID).
-- Role-based read-only access (currently "full access" is the only tier discussed; `dashboard_users.role` already supports a `"user"` value but nothing in the app treats it differently from `"admin"` yet).
-- UI for deleting/editing `dashboard_users` rows or resetting a password (only create + list exist).
+- FocablyED Search Console + GA4 (needs domain verification + GA4 property ID) — unchanged from v2.0.
+- Full role-based read-only access — `dashboard_users.role` still only gates nav + a handful of specific checks (task permissions, To-Do visibility, user pause/remove), not a general read-only mode.
 - Mobile responsive layout — not yet tested/optimized.
-- **Email notifications/reminders — planned, provider decided (Resend), not yet built.** Waiting on live XPM API access before starting the XPM-dependent ones. Shortlist, roughly by value:
-  1. Overdue task / BAS deadline digest (daily or weekly, to the CEO) — needs live Karbon/XPM data to be worth sending, so blocked on XPM.
-  2. New dashboard user invite email — ties into a known gap (creating a user via `/settings/users` currently sends nothing; admin has to manually share credentials). No XPM dependency, ready to build whenever.
-  3. Security notifications (MFA enabled/disabled confirmation, maybe new-login alerts). No XPM dependency, ready to build whenever.
-  4. Weekly performance summary digest (leaderboard/billable hours). Needs live data to be meaningful — blocked on XPM.
-  5. Sync failure alerts (email an admin if a scheduled XPM/Karbon/Google sync errors out instead of failing silently). No XPM dependency — about the sync process itself, not the data.
-  Next session: pick up in a new chat once XPM API access comes through (or sooner, to build #2/#3/#5 which don't depend on it).
+- Sync failure alerts (email an admin if a scheduled XPM/Karbon/Google sync errors silently) — no XPM dependency, not yet built.
+- Weekly performance summary / overdue-task digest emails — would reuse the `lib/resend.ts` outbound integration built for To-Do notifications, not yet built.
+- Some `/settings` sub-routes (`/api/settings` PATCH, `/api/xpm/staff`) have no server-side admin check of their own — nav hides them from Staff, but it isn't a hard wall underneath. Worth closing if this app is ever exposed beyond a small trusted team.
 
 ---
 
