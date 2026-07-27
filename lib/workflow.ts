@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { getSupabaseAdmin } from "./supabase";
 import { BAS_TYPE_NAME } from "./workOverview";
 import type {
@@ -120,7 +121,9 @@ function mapJob(row: JobRow): WorkflowJob {
 // must match are entered by different people at different times (login
 // creation vs. XPM staff sync) -- same convention as lib/staffLink.ts's
 // Karbon<->XPM email join.
-export async function getStaffByEmail(email: string): Promise<WorkflowStaff | null> {
+export const getStaffByEmail = cache(async function getStaffByEmail(
+  email: string,
+): Promise<WorkflowStaff | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("staff")
@@ -133,9 +136,9 @@ export async function getStaffByEmail(email: string): Promise<WorkflowStaff | nu
     return null;
   }
   return data ? mapStaff(data) : null;
-}
+});
 
-export async function listStaff(role?: StaffRole): Promise<WorkflowStaff[]> {
+export const listStaff = cache(async function listStaff(role?: StaffRole): Promise<WorkflowStaff[]> {
   const admin = getSupabaseAdmin();
   let query = admin
     .from("staff")
@@ -150,7 +153,7 @@ export async function listStaff(role?: StaffRole): Promise<WorkflowStaff[]> {
     return [];
   }
   return (data ?? []).map(mapStaff);
-}
+});
 
 export async function getPartners(): Promise<WorkflowStaff[]> {
   return listStaff("Partner");
@@ -262,7 +265,14 @@ export async function getJobsInScopeForStaff(staff: WorkflowStaff): Promise<JobW
   }
 }
 
-async function fetchLookupMaps() {
+// Wrapped in React's cache() so the five reference-table reads happen once
+// per request, not once per caller. A single page render can reach this via
+// three or four different paths (work board, client summaries, job pickers)
+// -- each of which used to re-fetch all five tables.
+//
+// cache() is per-request and does not persist across requests, so this
+// stays as fresh as the un-memoized version was.
+const fetchLookupMaps = cache(async function fetchLookupMaps() {
   const admin = getSupabaseAdmin();
   const [{ data: statuses }, { data: taskTypes }, { data: staff }, { data: jobs }, { data: customers }] =
     await Promise.all([
@@ -280,7 +290,7 @@ async function fetchLookupMaps() {
     jobsById: new Map((jobs ?? []).map((j) => [j.id, j])),
     customersById: new Map((customers ?? []).map((c) => [c.id, c])),
   };
-}
+});
 
 function hydrateTask(
   row: TaskRow,
@@ -422,7 +432,7 @@ export async function canModifyTask(staff: WorkflowStaff, taskId: string): Promi
   return board.some((t) => t.id === taskId);
 }
 
-export async function listStatuses(): Promise<WorkflowStatus[]> {
+export const listStatuses = cache(async function listStatuses(): Promise<WorkflowStatus[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("statuses")
@@ -440,9 +450,9 @@ export async function listStatuses(): Promise<WorkflowStatus[]> {
     sortOrder: s.sort_order,
     isComplete: s.is_complete,
   }));
-}
+});
 
-export async function listTaskTypes(): Promise<WorkflowTaskType[]> {
+export const listTaskTypes = cache(async function listTaskTypes(): Promise<WorkflowTaskType[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("task_types")
@@ -459,7 +469,7 @@ export async function listTaskTypes(): Promise<WorkflowTaskType[]> {
     color: t.color,
     sortOrder: t.sort_order,
   }));
-}
+});
 
 export async function createTask(input: CreateTaskInput): Promise<{ id: string } | null> {
   const admin = getSupabaseAdmin();
@@ -596,7 +606,7 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskWithD
 // Builds the /clients tile-grid summary for every customer: manager (from
 // their job(s)) and task counts by tone. "Multiple" is shown for a client
 // whose jobs have more than one distinct manager.
-export async function getClientSummaries(): Promise<ClientSummary[]> {
+export const getClientSummaries = cache(async function getClientSummaries(): Promise<ClientSummary[]> {
   const admin = getSupabaseAdmin();
   const [{ data: customers, error: customersError }, { data: allTasks, error: tasksError }, lookups] =
     await Promise.all([
@@ -658,7 +668,7 @@ export async function getClientSummaries(): Promise<ClientSummary[]> {
       nextDueDate,
     };
   });
-}
+});
 
 interface CustomerNoteRow {
   id: string;

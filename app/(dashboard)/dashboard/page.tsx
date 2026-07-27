@@ -38,14 +38,20 @@ export default async function DashboardPage() {
   }
 
   const today = todayIso();
-  const board = await getWorkBoardForStaff(staff);
+
+  // These three are independent -- the work board and client summaries come
+  // from Supabase, utilisation from XPM. Awaited together because run in
+  // series the page waits on the sum of all three, and the XPM leg alone
+  // can be seconds on a cold cache.
+  const [board, { utilisation, utilisationMessage }, tiles] = await Promise.all([
+    getWorkBoardForStaff(staff),
+    loadUtilisation(staff.xpmStaffId, today),
+    getClientSummaries(),
+  ]);
+
   const overdueTasks = getOverdueTasks(board, today);
   const basTasks = getBasTasks(board, today);
   const basOverdueCount = basTasks.filter((t) => t.dueDate && t.dueDate < today).length;
-
-  const { utilisation, utilisationMessage } = await loadUtilisation(staff.xpmStaffId, today);
-
-  const tiles = await getClientSummaries();
   const allClients = tiles.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => a.name.localeCompare(b.name));
 
   return (

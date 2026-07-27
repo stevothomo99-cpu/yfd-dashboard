@@ -36,46 +36,15 @@ export default async function ClientsPage() {
   }
   const tileIdByName = new Map(tiles.map((t) => [t.name, t.id]));
 
-  let timesheets: XpmTimesheet[] = [];
   const staffIds = staff.filter((s) => s.xpmStaffId).map((s) => s.xpmStaffId as string);
-  if (isXpmConfigured()) {
-    const settings = await getSettings();
-    if (settings.partnerName) {
-      try {
-        timesheets = await getXpmTimesheets(settings.partnerName);
-      } catch {
-        // leave timesheets empty -- tile grid still works without hours
-      }
-    }
-  }
 
-  const revenueByPeriodByClientId: Record<UtilisationPeriodKey, Record<string, number>> = {
-    week: {},
-    month: {},
-    quarter: {},
-    fy: {},
-  };
-  if (isXeroAccountingConfigured()) {
-    const today = new Date();
-    try {
-      const revenueByPeriod = await Promise.all(
-        UTILISATION_PERIODS.map(({ value }) => {
-          const { start, end } = periodBounds(value, today);
-          return getRevenueByClientName(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
-        }),
-      );
-      UTILISATION_PERIODS.forEach(({ value }, i) => {
-        const byClientId: Record<string, number> = {};
-        for (const { clientName, revenue } of revenueByPeriod[i]) {
-          const clientId = tileIdByName.get(clientName);
-          if (clientId) byClientId[clientId] = revenue;
-        }
-        revenueByPeriodByClientId[value] = byClientId;
-      });
-    } catch {
-      // leave revenueByPeriodByClientId empty -- tile grid still works without revenue
-    }
-  }
+  // Hours (XPM) and revenue (Xero Accounting) are two unrelated providers --
+  // started together rather than one-then-the-other, since awaiting the XPM
+  // leg first meant the page cost timesheets + revenue end to end.
+  const [timesheets, revenueByPeriodByClientId] = await Promise.all([
+    loadTimesheets(),
+    loadRevenueByPeriod(tileIdByName),
+  ]);
 
   return (
     <ClientsPageClient
@@ -87,4 +56,52 @@ export default async function ClientsPage() {
       revenueByPeriodByClientId={revenueByPeriodByClientId}
     />
   );
+}
+
+// Best-effort: if XPM isn't configured or the fetch fails, tiles just show
+// no hours rather than blocking the whole page.
+async function loadTimesheets(): Promise<XpmTimesheet[]> {
+  if (!isXpmConfigured()) return [];
+  const settings = await getSettings();
+  if (!settings.partnerName) return [];
+  try {
+    return await getXpmTimesheets(settings.partnerName);
+  } catch {
+    return [];
+  }
+}
+
+async function loadRevenueByPeriod(
+  tileIdByName: Map<string, string>,
+): Promise<Record<UtilisationPeriodKey, Record<string, number>>> {
+  const empty: Record<UtilisationPeriodKey, Record<string, number>> = {
+    week: {},
+    month: {},
+    quarter: {},
+    fy: {},
+  };
+  if (!isXeroAccountingConfigured()) return empty;
+
+  const today = new Date();
+  try {
+    const revenueByPeriod = await Promise.all(
+      UTILISATION_PERIODS.map(({ value }) => {
+        const { start, end } = periodBounds(value, today);
+        return getRevenueByClientName(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+      }),
+    );
+    const result = { ...empty };
+    UTILISATION_PERIODS.forEach(({ value }, i) => {
+      const byClientId: Record<string, number> = {};
+      for (const { clientName, revenue } of revenueByPeriod[i]) {
+        const clientId = tileIdByName.get(clientName);
+        if (clientId) byClientId[clientId] = revenue;
+      }
+      result[value] = byClientId;
+    });
+    return result;
+  } catch {
+    // tile grid still works without revenue
+    return empty;
+  }
 }
