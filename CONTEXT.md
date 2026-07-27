@@ -2,7 +2,7 @@
 
 **Version:** 3.0
 **Last updated:** 26 July 2026
-**Owner:** CEO (Steve Thomas), Your Financial Direction (YFD)
+**Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
 **Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan. v2.0 described a single-CEO Karbon-derived dashboard; that has since been replaced by an XPM-native practice-management system (staff/customers/jobs/tasks) alongside the original Business KPIs page, which is why this version is a substantial rewrite.
 
 ---

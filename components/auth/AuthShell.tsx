@@ -46,7 +46,7 @@ export default function AuthShell({
             marginTop: "20px",
           }}
         >
-          Internal use only · Your Financial Direction
+          Internal use only · Your Finance Department
         </div>
       </div>
     </div>
