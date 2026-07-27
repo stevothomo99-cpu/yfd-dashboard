@@ -103,15 +103,15 @@ Unchanged from v2.0 — hand-rolled JWT service-account auth, feeds `/personal` 
 Unchanged from v2.0 — own Supabase projects, `lib/focably.ts`/`lib/sitemargin.ts`.
 
 ### 4.8 Resend — `lib/resend.ts`, `app/api/email/inbound/route.ts`
-Two independent integration points on the same Resend account:
+Two independent integration points on **two separate Resend accounts** (free-plan Resend only supports one verified domain per account, so outbound and inbound can't share one):
 
-1. **Outbound, our own backend** (`lib/resend.ts`) — used for To-Do notification emails. Needs `RESEND_API_KEY` + `RESEND_FROM_EMAIL`. **This is separate from Supabase's SMTP settings** (§7) — configuring one does nothing for the other.
-2. **Inbound webhook** (`/api/email/inbound`) — powers the "email-to-todo" feature. Forward an email to `TODO_INBOUND_EMAIL` (a shared address, e.g. `todo@yourfinancedept.com.au`) and it creates a lightweight **To-Do item** (`todo_items` table — see §6) shown on `/dashboard`.
+1. **Outbound, our own backend** (`lib/resend.ts`) — used for To-Do notification emails. Needs `RESEND_API_KEY` + `RESEND_FROM_EMAIL`. **This is separate from Supabase's SMTP settings** (§7) — configuring one does nothing for the other. Currently the **SiteMargin** Resend account/domain (`noreply@sitemargin.com.au`) — YFD's own domain has no verified sending domain on the free plan. This same API key is also what's entered as Supabase Auth's SMTP password (§7).
+2. **Inbound webhook** (`/api/email/inbound`) — powers the "email-to-todo" feature, on its **own, third Resend account** dedicated to `yourfinancedept.com.au`. Needs `RESEND_INBOUND_API_KEY` (distinct from `RESEND_API_KEY` above — using the wrong key here means the webhook can authenticate to the wrong account and fail to fetch the received email). Forward an email to `TODO_INBOUND_EMAIL` — `todo@dashboard.yourfinancedept.com.au`, a dedicated **subdomain**, not the bare domain, so Resend's inbound MX records don't override `yourfinancedept.com.au`'s real Microsoft 365 mail — and it creates a lightweight **To-Do item** (`todo_items` table — see §6) shown on `/dashboard`.
    - **Owner resolution**: if the shared address is in the email's **To** field, the owner is whoever sent it (self to-do). If it's only in **Cc** (someone Cc's the shared address while emailing a colleague directly), the owner is whoever's in **To** instead (delegated to-do) — lets Steve forward work to someone else without it landing on his own dashboard. Multiple To recipients that match staff each get their own item.
    - The webhook payload (`email.received` event) carries metadata (from/to/cc/subject) but **not the body** — the full text is fetched separately via `resend.emails.receiving.get(email_id)`.
    - **Signature verification uses `resend.webhooks.verify()`**, which needs the raw (unparsed) request body and the three `svix-id`/`svix-timestamp`/`svix-signature` headers passed as a plain `{id, timestamp, signature}` object — the SDK's `Headers` type here is its own interface, **not** the Fetch API `Headers` object; passing `request.headers` directly is a type error.
    - A to-do stays lightweight (client + due date, "mark done" checkbox) if the owner sets it as one-off; if they set a recurrence, it's promoted into a real Task instead (auto-picks the job like New Task's client-first flow does) since recurring work needs the full Task machinery.
-   - Needs manual setup once deployed: Resend Inbound enabled (MX records) on the receiving domain, a webhook registered pointing at `/api/email/inbound` for the `email.received` event, and `RESEND_WEBHOOK_SECRET` set from that.
+   - Needs manual setup once deployed: Resend Inbound enabled (MX records) on the `dashboard.yourfinancedept.com.au` subdomain (in the third, dedicated Resend account), a webhook registered pointing at `/api/email/inbound` for the `email.received` event, and `RESEND_WEBHOOK_SECRET` set from that.
 
 ---
 
@@ -175,11 +175,14 @@ XERO_ACCOUNTING_CLIENT_SECRET=
 XERO_ACCOUNTING_REFRESH_TOKEN=
 XERO_ACCOUNTING_TENANT_ID=
 
-# Resend (transactional email + email-to-todo — see §4.8)
+# Resend — outbound, SiteMargin account (transactional email — see §4.8)
 RESEND_API_KEY=
-RESEND_FROM_EMAIL=                 # e.g. "YFD Dashboard <noreply@focablyed.com>"
+RESEND_FROM_EMAIL=                 # e.g. "YFD Dashboard <noreply@sitemargin.com.au>"
+
+# Resend — inbound, separate dedicated account (email-to-todo — see §4.8)
+RESEND_INBOUND_API_KEY=            # NOT the same account/key as RESEND_API_KEY above
 RESEND_WEBHOOK_SECRET=             # from the inbound webhook's Resend dashboard config
-TODO_INBOUND_EMAIL=                # e.g. todo@yourfinancedept.com.au
+TODO_INBOUND_EMAIL=                # todo@dashboard.yourfinancedept.com.au (subdomain, not the bare domain)
 ```
 
 All live in Vercel → Project Settings → Environment Variables. Redeploy required after changing any.
