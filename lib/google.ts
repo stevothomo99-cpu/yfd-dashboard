@@ -20,13 +20,31 @@ function getPrivateKey(): string {
   }
 }
 
-const GOOGLE_CREDS = {
-  project_id: process.env.GOOGLE_PROJECT_ID || "yfd-dashbaord",
-  private_key: getPrivateKey(),
-  client_email:
-    process.env.GOOGLE_CLIENT_EMAIL ||
-    "yfd-dashboard@yfd-dashbaord.iam.gserviceaccount.com",
-};
+interface GoogleCreds {
+  project_id: string;
+  private_key: string;
+  client_email: string;
+}
+
+export function isGoogleConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_PRIVATE_KEY_BASE64);
+}
+
+// Lazy, and deliberately so: this used to be a module-level const calling
+// getPrivateKey() directly, which meant merely *importing* this file threw
+// when GOOGLE_PRIVATE_KEY_BASE64 was unset -- taking down `next build` at
+// the page-data collection step rather than failing the one route that
+// actually needs Google. Same rule CONTEXT.md §9 records for
+// lib/supabase.ts: never throw at import time.
+function googleCreds(): GoogleCreds {
+  return {
+    project_id: process.env.GOOGLE_PROJECT_ID || "yfd-dashbaord",
+    private_key: getPrivateKey(),
+    client_email:
+      process.env.GOOGLE_CLIENT_EMAIL ||
+      "yfd-dashboard@yfd-dashbaord.iam.gserviceaccount.com",
+  };
+}
 
 const SCOPES = [
   "https://www.googleapis.com/auth/webmasters.readonly",
@@ -34,26 +52,25 @@ const SCOPES = [
 ];
 
 async function getAccessToken(): Promise<string> {
-  if (!GOOGLE_CREDS.private_key) {
-    throw new Error("GOOGLE_PRIVATE_KEY is not set");
-  }
+  // Throws here (per-call) rather than at module scope if the key is unset.
+  const creds = googleCreds();
 
   const now = Math.floor(Date.now() / 1000);
   let token: string;
   try {
     token = jwt.sign(
       {
-        iss: GOOGLE_CREDS.client_email,
+        iss: creds.client_email,
         scope: SCOPES.join(" "),
         aud: "https://oauth2.googleapis.com/token",
         exp: now + 3600,
         iat: now,
       },
-      GOOGLE_CREDS.private_key,
+      creds.private_key,
       { algorithm: "RS256" }
     );
   } catch (err) {
-    const keyPreview = GOOGLE_CREDS.private_key.substring(0, 100);
+    const keyPreview = creds.private_key.substring(0, 100);
     throw new Error(
       `Failed to sign JWT: ${err instanceof Error ? err.message : String(err)}. Key preview: ${keyPreview}...`
     );

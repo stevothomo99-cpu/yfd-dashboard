@@ -86,6 +86,10 @@ interface TaskRow {
   updated_at: string;
 }
 
+// Just the columns getClientSummaries' tallies read -- it counts tasks
+// rather than rendering them, so it has no use for the full TaskRow.
+type ClientSummaryTaskRow = Pick<TaskRow, "job_id" | "status_id" | "type_id" | "due_date">;
+
 function mapStaff(row: StaffRow): WorkflowStaff {
   return {
     id: row.id,
@@ -611,7 +615,10 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
   const [{ data: customers, error: customersError }, { data: allTasks, error: tasksError }, lookups] =
     await Promise.all([
       admin.from("customers").select("id, xpm_client_id, name, partner_id").order("name").returns<CustomerRow[]>(),
-      admin.from("tasks").select("*").returns<TaskRow[]>(),
+      // Only the five columns the tallies below actually read. This used to
+      // be select("*"), which pulled every task body over the wire purely to
+      // count them.
+      admin.from("tasks").select("job_id, status_id, type_id, due_date").returns<ClientSummaryTaskRow[]>(),
       fetchLookupMaps(),
     ]);
 
@@ -619,11 +626,62 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
   if (tasksError) console.error("[workflow] getClientSummaries (tasks) failed:", tasksError.message);
 
   const today = new Date().toISOString().slice(0, 10);
-  const jobs = Array.from(lookups.jobsById.values());
+
+  // Index jobs by customer once, rather than re-scanning the whole job list
+  // per customer.
+  const jobsByCustomerId = new Map<string, JobRow[]>();
+  for (const job of lookups.jobsById.values()) {
+    const list = jobsByCustomerId.get(job.customer_id);
+    if (list) list.push(job);
+    else jobsByCustomerId.set(job.customer_id, [job]);
+  }
+
+  const customerIdByJobId = new Map<string, string>();
+  for (const job of lookups.jobsById.values()) customerIdByJobId.set(job.id, job.customer_id);
+
+  // Tally every task in a single pass, attributing each to its customer via
+  // the job index above. The previous shape walked the entire tasks table
+  // once per customer -- O(customers x tasks), which was invisible only
+  // because the tasks table was empty.
+  interface Tally {
+    overdueCount: number;
+    inProgressCount: number;
+    completedCount: number;
+    overdueBasCount: number;
+    nextDueDate: string | null;
+  }
+  const tallies = new Map<string, Tally>();
+  const tallyFor = (customerId: string): Tally => {
+    let t = tallies.get(customerId);
+    if (!t) {
+      t = { overdueCount: 0, inProgressCount: 0, completedCount: 0, overdueBasCount: 0, nextDueDate: null };
+      tallies.set(customerId, t);
+    }
+    return t;
+  };
+
+  for (const task of allTasks ?? []) {
+    const customerId = customerIdByJobId.get(task.job_id);
+    if (!customerId) continue;
+    const tally = tallyFor(customerId);
+
+    const isComplete = lookups.statusesById.get(task.status_id)?.is_complete ?? false;
+    const isOverdue = Boolean(task.due_date && task.due_date < today);
+
+    if (isComplete) tally.completedCount += 1;
+    else if (isOverdue) tally.overdueCount += 1;
+    else tally.inProgressCount += 1;
+
+    if (isOverdue && !isComplete && lookups.taskTypesById.get(task.type_id ?? "")?.name === BAS_TYPE_NAME) {
+      tally.overdueBasCount += 1;
+    }
+    if (!isComplete && task.due_date && (!tally.nextDueDate || task.due_date < tally.nextDueDate)) {
+      tally.nextDueDate = task.due_date;
+    }
+  }
 
   return (customers ?? []).map((c) => {
-    const customerJobs = jobs.filter((j) => j.customer_id === c.id);
-    const jobIds = new Set(customerJobs.map((j) => j.id));
+    const customerJobs = jobsByCustomerId.get(c.id) ?? [];
     const managerIds = new Set(customerJobs.map((j) => j.manager_id).filter((id): id is string => Boolean(id)));
 
     let managerName: string | null = null;
@@ -633,27 +691,7 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
       managerName = "Multiple";
     }
 
-    let overdueCount = 0;
-    let inProgressCount = 0;
-    let completedCount = 0;
-    let overdueBasCount = 0;
-    let nextDueDate: string | null = null;
-    for (const t of allTasks ?? []) {
-      if (!jobIds.has(t.job_id)) continue;
-      const isComplete = lookups.statusesById.get(t.status_id)?.is_complete ?? false;
-      const isOverdue = Boolean(t.due_date && t.due_date < today);
-
-      if (isComplete) completedCount += 1;
-      else if (isOverdue) overdueCount += 1;
-      else inProgressCount += 1;
-
-      if (isOverdue && !isComplete && lookups.taskTypesById.get(t.type_id ?? "")?.name === BAS_TYPE_NAME) {
-        overdueBasCount += 1;
-      }
-      if (!isComplete && t.due_date && (!nextDueDate || t.due_date < nextDueDate)) {
-        nextDueDate = t.due_date;
-      }
-    }
+    const tally = tallies.get(c.id);
 
     return {
       id: c.id,
@@ -661,11 +699,11 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
       name: c.name,
       managerName,
       managerIds: Array.from(managerIds),
-      overdueCount,
-      inProgressCount,
-      completedCount,
-      overdueBasCount,
-      nextDueDate,
+      overdueCount: tally?.overdueCount ?? 0,
+      inProgressCount: tally?.inProgressCount ?? 0,
+      completedCount: tally?.completedCount ?? 0,
+      overdueBasCount: tally?.overdueBasCount ?? 0,
+      nextDueDate: tally?.nextDueDate ?? null,
     };
   });
 });
