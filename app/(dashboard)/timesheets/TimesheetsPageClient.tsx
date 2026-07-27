@@ -158,7 +158,7 @@ export default function TimesheetsPageClient({
     <div>
       <PageHeader
         title="Timesheets"
-        subtitle="Billable vs Leave vs non-billable · live from XPM · full 38hr/week standard, not prorated"
+        subtitle="Billable vs Leave vs non-billable · live from XPM · 38hr/week standard, counted to date, not prorated for part-timers"
       />
 
       {message ? (
@@ -210,10 +210,19 @@ export default function TimesheetsPageClient({
           marginBottom: "14px",
         }}
       >
+        {/* Distinct from the per-employee "billable share" column below:
+            this is time accounted for against available capacity so far,
+            that one is billable as a share of time actually logged. Two
+            different questions, so they carry different labels. */}
         <KpiCard
-          label="Billable %"
+          label="Capacity used"
           value={utilisation.pct + "%"}
-          sub={(utilisation.clientHours + utilisation.leaveHours).toFixed(1) + " of " + utilisation.standardHours.toFixed(1) + " std hrs"}
+          sub={
+            (utilisation.clientHours + utilisation.leaveHours).toFixed(1) +
+            " of " +
+            utilisation.standardHours.toFixed(1) +
+            " std hrs to date"
+          }
           valueColor={utilisation.pct < 70 ? "#e24b4a" : undefined}
         />
         <KpiCard label="Client hours" value={utilisation.clientHours.toFixed(1) + " hrs"} />
@@ -264,7 +273,9 @@ export default function TimesheetsPageClient({
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
           <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>By employee</div>
-          <div style={{ fontSize: "11px", color: "#888780" }}>Click a name for their client breakdown</div>
+          <div style={{ fontSize: "11px", color: "#888780" }}>
+            % = billable share of logged time · click a name for their client breakdown
+          </div>
         </div>
 
         {staffOptions.length === 0 ? (

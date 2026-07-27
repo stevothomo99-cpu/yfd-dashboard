@@ -68,7 +68,7 @@ export default function UtilisationTile({ summary, message }: Props) {
           </div>
           <div style={{ fontSize: "12px", color: "#888780", marginTop: "6px" }}>
             {(summary[period].clientHours + summary[period].leaveHours).toFixed(1)} of{" "}
-            {summary[period].standardHours.toFixed(1)} std hrs
+            {summary[period].standardHours.toFixed(1)} std hrs to date
           </div>
         </>
       )}
