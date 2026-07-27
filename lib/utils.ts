@@ -103,3 +103,12 @@ export function staffFromAssignees<T extends { assigneeId: string; assigneeName:
   }
   return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
+
+// A to-do's display name: the owner's rename if they've set one, otherwise
+// the forwarded email's Subject header. Every surface that shows a to-do --
+// including the Task created when one is converted -- goes through here, so
+// a renamed item reads consistently instead of reverting to the raw subject
+// in places that forgot about the override.
+export function todoDisplayName(todo: { title: string | null; subject: string }): string {
+  return todo.title?.trim() || todo.subject;
+}

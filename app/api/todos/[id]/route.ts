@@ -44,6 +44,7 @@ async function requireOwnerOrAdmin(todoId: string) {
 interface PatchBody {
   done?: boolean;
   intent?: "edit";
+  title?: string | null;
   customerId?: string;
   dueDate?: string | null;
   recurrence?: RecurrenceInterval;
@@ -52,9 +53,9 @@ interface PatchBody {
 
 // Three things this can do, distinguished by which fields are present:
 // - { done } -- toggle a populated one-off to-do's completion.
-// - { intent: "edit", customerId, dueDate } -- change the client/due date of
-//   an already-populated to-do, leaving its status alone (so editing a
-//   completed item doesn't silently reopen it).
+// - { intent: "edit", customerId, dueDate, title? } -- change the display
+//   name / client / due date of an already-populated to-do, leaving its
+//   status alone (so editing a completed item doesn't silently reopen it).
 // - { customerId, dueDate, recurrence, jobId? } -- populate a
 //   pending_triage item, which either finalizes it as a one-off to-do or
 //   converts it into a real Task if recurrence isn't "none" (see
@@ -81,9 +82,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (access.todo.status === "pending_triage") {
       return NextResponse.json({ error: "Fill in this to-do before editing it" }, { status: 400 });
     }
+    // An empty/whitespace name clears the rename rather than storing a
+    // blank one, so the item falls back to its email subject.
+    const trimmed = typeof body.title === "string" ? body.title.trim() : body.title;
     const todo = await updateTodoItemDetails(id, {
       customerId: body.customerId,
       dueDate: body.dueDate ?? null,
+      title: trimmed === undefined ? undefined : trimmed || null,
     });
     if (!todo) return NextResponse.json({ error: "Failed to update to-do" }, { status: 500 });
     return NextResponse.json({ todo });
