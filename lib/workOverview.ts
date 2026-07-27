@@ -140,7 +140,15 @@ export function computeWagesUtilisation(
     else idleHours += t.hours;
   }
 
-  const standardHours = countWeekdays(start, end) * STANDARD_HOURS_PER_DAY * staffIds.length;
+  // Capacity is counted only up to today, never to the end of the period.
+  // The hours above are whatever has actually been logged so far, so
+  // measuring them against the *whole* period's capacity compares
+  // to-date effort with a not-yet-elapsed denominator: on 27 Jul the FY
+  // tile divided ~4 weeks of work by a full year (261 weekdays x 7.6 x 4
+  // staff = 7934.4 std hrs) and reported 2% instead of 34%. Same
+  // understatement mid-month, mid-quarter and mid-week.
+  const capacityEnd = end.getTime() > today.getTime() ? today : end;
+  const standardHours = countWeekdays(start, capacityEnd) * STANDARD_HOURS_PER_DAY * staffIds.length;
   const accounted = clientHours + leaveHours;
 
   return {
