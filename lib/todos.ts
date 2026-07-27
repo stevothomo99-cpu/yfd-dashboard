@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "./supabase";
 import { createTask, getStaffByEmail, listStatuses } from "./workflow";
+import { todoDisplayName } from "./utils";
 import type { RecurrenceInterval, TodoItem, TodoItemStatus } from "@/types/workflow";
 
 // Data-access layer for lightweight email-forwarded to-do items -- see
@@ -13,6 +14,7 @@ interface TodoItemRow {
   created_by_email: string | null;
   created_by_name: string | null;
   subject: string;
+  title: string | null;
   body: string | null;
   customer_id: string | null;
   due_date: string | null;
@@ -29,6 +31,7 @@ function mapTodoItem(row: TodoItemRow): TodoItem {
     createdByEmail: row.created_by_email,
     createdByName: row.created_by_name,
     subject: row.subject,
+    title: row.title,
     body: row.body,
     customerId: row.customer_id,
     customerName: row.customers?.name ?? null,
@@ -39,7 +42,8 @@ function mapTodoItem(row: TodoItemRow): TodoItem {
   };
 }
 
-const TODO_SELECT = "id, owner_staff_id, created_by_email, created_by_name, subject, body, customer_id, due_date, status, converted_task_id, created_at, customers(name)";
+const TODO_SELECT =
+  "id, owner_staff_id, created_by_email, created_by_name, subject, title, body, customer_id, due_date, status, converted_task_id, created_at, customers(name)";
 
 export async function listTodoItemsForStaff(staffId: string): Promise<TodoItem[]> {
   const admin = getSupabaseAdmin();
@@ -148,12 +152,18 @@ export async function markTodoItemDone(id: string, done: boolean): Promise<TodoI
 // status back to "todo", correct when triaging a new item, wrong here).
 export async function updateTodoItemDetails(
   id: string,
-  input: { customerId: string; dueDate: string | null },
+  input: { customerId: string; dueDate: string | null; title?: string | null },
 ): Promise<TodoItem | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("todo_items")
-    .update({ customer_id: input.customerId, due_date: input.dueDate })
+    .update({
+      customer_id: input.customerId,
+      due_date: input.dueDate,
+      // Undefined means "leave the name alone"; null clears a rename back
+      // to the original email subject.
+      ...(input.title === undefined ? {} : { title: input.title }),
+    })
     .eq("id", id)
     .select(TODO_SELECT)
     .single<TodoItemRow>();
@@ -208,9 +218,7 @@ export async function populateTodoItem(
       .from("todo_items")
       .update({ customer_id: input.customerId, due_date: input.dueDate, status: "todo" })
       .eq("id", id)
-      .select(
-        "id, owner_staff_id, created_by_email, created_by_name, subject, body, customer_id, due_date, status, converted_task_id, created_at, customers(name)",
-      )
+      .select(TODO_SELECT)
       .single<TodoItemRow>();
 
     if (error) {
@@ -229,7 +237,7 @@ export async function populateTodoItem(
 
   const task = await createTask({
     jobId: input.jobId,
-    title: todo.subject,
+    title: todoDisplayName(todo),
     statusId,
     assigneeId: todo.ownerStaffId,
     dueDate: input.dueDate,

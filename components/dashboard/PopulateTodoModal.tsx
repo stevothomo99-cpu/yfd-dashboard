@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ClientJobPicker from "./ClientJobPicker";
+import { todoDisplayName } from "@/lib/utils";
 import type { RecurrenceInterval, TodoItem } from "@/types/workflow";
 
 interface ClientOption {
@@ -44,6 +45,7 @@ export default function PopulateTodoModal({
   onSaved,
 }: PopulateTodoModalProps) {
   const isEdit = mode === "edit";
+  const [name, setName] = useState(todoDisplayName(todo));
   const [clientId, setClientId] = useState(isEdit ? todo.customerId ?? "" : "");
   const [jobId, setJobId] = useState("");
   const [dueDate, setDueDate] = useState(isEdit ? todo.dueDate ?? "" : "");
@@ -66,7 +68,7 @@ export default function PopulateTodoModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isEdit
-            ? { intent: "edit", customerId: clientId, dueDate: dueDate || null }
+            ? { intent: "edit", customerId: clientId, dueDate: dueDate || null, title: name }
             : {
                 customerId: clientId,
                 dueDate: dueDate || null,
@@ -136,7 +138,9 @@ export default function PopulateTodoModal({
             ×
           </button>
         </div>
-        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "18px" }}>{todo.subject}</div>
+        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "18px" }}>
+          {isEdit ? `Forwarded email: ${todo.subject}` : todo.subject}
+        </div>
 
         {convertedMessage ? (
           <div style={{ fontSize: "13px", color: "#0d4a2f", background: "#e3f6ec", border: "0.5px solid #b8e6cd", borderRadius: "10px", padding: "10px 12px" }}>
@@ -151,6 +155,22 @@ export default function PopulateTodoModal({
             ) : null}
 
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {isEdit ? (
+                <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <span style={labelStyle}>Name</span>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={todo.subject}
+                    style={inputStyle}
+                  />
+                  <span style={{ fontSize: "11px", color: "#888780" }}>
+                    Leave blank to fall back to the email subject.
+                  </span>
+                </label>
+              ) : null}
+
               <ClientJobPicker
                 clients={allClients}
                 selectedClientId={clientId}

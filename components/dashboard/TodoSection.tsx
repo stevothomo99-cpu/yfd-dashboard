@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import PopulateTodoModal from "./PopulateTodoModal";
+import { todoDisplayName } from "@/lib/utils";
 import type { TodoItem } from "@/types/workflow";
 
 interface ClientOption {
@@ -20,9 +21,14 @@ interface TodoSectionProps {
 
 type DueFilter = "all" | "overdue" | "week" | "month" | "none";
 type SourceFilter = "all" | "self" | "others";
-type SortKey = "due" | "client" | "subject" | "newest";
+type SortKey = "name" | "client" | "due" | "from";
 
 const NO_CLIENT = "__none";
+
+// Shared by the header row and every data row so the columns actually line
+// up: Name | Client | Due | From | actions.
+const GRID_COLUMNS = "minmax(0, 2.4fr) minmax(0, 1.4fr) 108px minmax(0, 1.1fr) 232px";
+const MIN_TABLE_WIDTH = 760;
 
 const DUE_FILTERS: { value: DueFilter; label: string }[] = [
   { value: "all", label: "Any due date" },
@@ -36,13 +42,6 @@ const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
   { value: "all", label: "Anyone" },
   { value: "self", label: "From me" },
   { value: "others", label: "From others" },
-];
-
-const SORTS: { value: SortKey; label: string }[] = [
-  { value: "due", label: "Due date" },
-  { value: "client", label: "Client" },
-  { value: "subject", label: "Subject" },
-  { value: "newest", label: "Newest first" },
 ];
 
 function todayIso(): string {
@@ -72,9 +71,8 @@ function sourceOf(todo: TodoItem, currentUserEmail: string | null): "self" | "ot
 }
 
 function sourceLabel(todo: TodoItem, currentUserEmail: string | null): string {
-  if (sourceOf(todo, currentUserEmail) === "self") return "From me";
-  const who = todo.createdByName?.trim() || todo.createdByEmail;
-  return who ? `From ${who}` : "From someone else";
+  if (sourceOf(todo, currentUserEmail) === "self") return "Me";
+  return todo.createdByName?.trim() || todo.createdByEmail || "Someone else";
 }
 
 // Lightweight email-forwarded to-dos -- see app/api/email/inbound/route.ts
@@ -89,10 +87,12 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
   const [editing, setEditing] = useState<{ todo: TodoItem; mode: "populate" | "edit" } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const [search, setSearch] = useState("");
   const [clientFilter, setClientFilter] = useState("");
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sortBy, setSortBy] = useState<SortKey>("due");
+  const [sortAsc, setSortAsc] = useState(true);
   const [showDone, setShowDone] = useState(false);
 
   async function refresh() {
@@ -149,7 +149,7 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
   }
 
   async function handleDiscard(todo: TodoItem) {
-    if (!window.confirm(`Discard "${todo.subject}"?`)) return;
+    if (!window.confirm(`Discard "${todoDisplayName(todo)}"?`)) return;
     setBusyId(todo.id);
     try {
       const res = await fetch(`/api/todos/${todo.id}`, { method: "DELETE" });
@@ -162,6 +162,14 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
     }
   }
 
+  function toggleSort(key: SortKey) {
+    if (sortBy === key) setSortAsc((v) => !v);
+    else {
+      setSortBy(key);
+      setSortAsc(true);
+    }
+  }
+
   const today = todayIso();
 
   // Filters apply to both groups. A client/due-date filter necessarily
@@ -171,8 +179,25 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
   const matches = useMemo(() => {
     const weekEnd = addDays(today, 7);
     const monthEnd = addDays(today, 30);
+    const q = search.trim().toLowerCase();
 
     return (t: TodoItem): boolean => {
+      // Global search spans everything visible in a row plus the original
+      // email subject, so searching still finds a renamed item by what the
+      // email was actually called.
+      if (q) {
+        const haystack = [
+          todoDisplayName(t),
+          t.subject,
+          t.customerName ?? "",
+          t.createdByName ?? "",
+          t.createdByEmail ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+
       if (clientFilter) {
         if (clientFilter === NO_CLIENT ? Boolean(t.customerId) : t.customerId !== clientFilter) return false;
       }
@@ -191,28 +216,32 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
           return true;
       }
     };
-  }, [clientFilter, dueFilter, sourceFilter, currentUserEmail, today]);
+  }, [search, clientFilter, dueFilter, sourceFilter, currentUserEmail, today]);
 
   const sorter = useMemo(() => {
+    const dir = sortAsc ? 1 : -1;
     return (a: TodoItem, b: TodoItem): number => {
       switch (sortBy) {
+        case "name":
+          return dir * todoDisplayName(a).localeCompare(todoDisplayName(b));
         case "client":
-          return (a.customerName ?? "￿").localeCompare(b.customerName ?? "￿");
-        case "subject":
-          return a.subject.localeCompare(b.subject);
-        case "newest":
-          return b.createdAt.localeCompare(a.createdAt);
+          return dir * (a.customerName ?? "￿").localeCompare(b.customerName ?? "￿");
+        case "from":
+          return (
+            dir * sourceLabel(a, currentUserEmail).localeCompare(sourceLabel(b, currentUserEmail))
+          );
         case "due":
         default:
-          // Undated items sort last rather than first, so the soonest real
-          // deadline is always at the top.
+          // Undated items sort last in both directions rather than flipping
+          // to the top -- "no due date" isn't a date, so it shouldn't
+          // outrank one.
           if (!a.dueDate && !b.dueDate) return b.createdAt.localeCompare(a.createdAt);
           if (!a.dueDate) return 1;
           if (!b.dueDate) return -1;
-          return a.dueDate.localeCompare(b.dueDate);
+          return dir * a.dueDate.localeCompare(b.dueDate);
       }
     };
-  }, [sortBy]);
+  }, [sortBy, sortAsc, currentUserEmail]);
 
   const allPending = todos.filter((t) => t.status === "pending_triage");
   const allScheduled = todos.filter((t) => t.status === "todo" || t.status === "done");
@@ -224,7 +253,8 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
     .sort(sorter);
 
   const doneCount = allScheduled.filter((t) => t.status === "done").length;
-  const filtersActive = Boolean(clientFilter) || dueFilter !== "all" || sourceFilter !== "all";
+  const filtersActive =
+    Boolean(search.trim()) || Boolean(clientFilter) || dueFilter !== "all" || sourceFilter !== "all";
 
   if (loading) return null;
   if (todos.length === 0 && !error) return null;
@@ -254,6 +284,15 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, client, sender…"
+            aria-label="Search to-dos"
+            style={{ ...selectStyle, width: "210px", maxWidth: "210px" }}
+          />
+
           <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} style={selectStyle} aria-label="Filter by client">
             <option value="">All clients</option>
             <option value={NO_CLIENT}>No client yet</option>
@@ -280,18 +319,11 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
             ))}
           </select>
 
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} style={selectStyle} aria-label="Sort by">
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>
-                Sort: {s.label}
-              </option>
-            ))}
-          </select>
-
           {filtersActive ? (
             <button
               type="button"
               onClick={() => {
+                setSearch("");
                 setClientFilter("");
                 setDueFilter("all");
                 setSourceFilter("all");
@@ -310,103 +342,121 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
         </div>
       ) : null}
 
-      {allPending.length > 0 ? (
-        <>
-          <GroupHeader
-            label="Needs client + due date"
-            shown={pending.length}
-            total={allPending.length}
-            filtered={filtersActive}
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {pending.map((t) => (
-              <div key={t.id} style={pendingRowStyle}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={titleStyle(false)}>{t.subject}</div>
-                  <div style={metaStyle}>
-                    {sourceLabel(t, currentUserEmail)} · Received {fmtReceived(t.createdAt)}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                  <button type="button" onClick={() => setEditing({ todo: t, mode: "populate" })} style={ghostButtonStyle}>
-                    Fill in
-                  </button>
-                  <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
-                    Discard
-                  </button>
-                </div>
-              </div>
-            ))}
+      {/* The grid needs a floor width to stay readable as columns; below
+          that the table scrolls sideways rather than crushing every cell. */}
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ minWidth: `${MIN_TABLE_WIDTH}px` }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: GRID_COLUMNS,
+              gap: "12px",
+              padding: "0 12px 8px",
+              borderBottom: "0.5px solid #e1e0d9",
+            }}
+          >
+            <SortHeader label="Name" sortKey="name" active={sortBy} asc={sortAsc} onClick={toggleSort} />
+            <SortHeader label="Client" sortKey="client" active={sortBy} asc={sortAsc} onClick={toggleSort} />
+            <SortHeader label="Due" sortKey="due" active={sortBy} asc={sortAsc} onClick={toggleSort} />
+            <SortHeader label="From" sortKey="from" active={sortBy} asc={sortAsc} onClick={toggleSort} />
+            <div />
           </div>
-        </>
-      ) : null}
 
-      {allScheduled.length > 0 ? (
-        <>
-          <GroupHeader
-            label="Scheduled"
-            shown={scheduled.length}
-            total={showDone ? allScheduled.length : allScheduled.length - doneCount}
-            filtered={filtersActive}
-            action={
-              doneCount > 0 ? (
-                <button type="button" onClick={() => setShowDone((v) => !v)} style={linkButtonStyle}>
-                  {showDone ? "Hide" : "Show"} {doneCount} completed
-                </button>
-              ) : null
-            }
-          />
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {scheduled.map((t) => {
-              const isDone = t.status === "done";
-              const isOverdue = Boolean(!isDone && t.dueDate && t.dueDate < today);
-              return (
-                <div key={t.id} style={scheduledRowStyle(isOverdue)}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={titleStyle(isDone)}>{t.subject}</div>
-                    <div style={metaStyle}>
-                      {t.customerName ?? "No client"}
-                      {" · "}
-                      {t.dueDate ? (
-                        <span style={isOverdue ? { color: "#A32D2D", fontWeight: 500 } : undefined}>
-                          {isOverdue ? "Overdue " : "Due "}
-                          {fmtDate(t.dueDate)}
-                        </span>
-                      ) : (
-                        "No due date"
-                      )}
-                      {" · "}
-                      {sourceLabel(t, currentUserEmail)}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                    <button
-                      type="button"
-                      onClick={() => handleSetDone(t, !isDone)}
-                      disabled={busyId === t.id}
-                      style={isDone ? ghostButtonStyle : primaryGhostButtonStyle}
-                    >
-                      {isDone ? "Reopen" : "Complete"}
-                    </button>
-                    <button type="button" onClick={() => setEditing({ todo: t, mode: "edit" })} style={ghostButtonStyle}>
-                      Edit
+          {allPending.length > 0 ? (
+            <>
+              <GroupRow
+                label="Needs client + due date"
+                shown={pending.length}
+                total={allPending.length}
+                filtered={filtersActive}
+              />
+              {pending.map((t) => (
+                <div key={t.id} style={rowStyle({ tone: "pending" })}>
+                  <Cell>
+                    <span style={nameStyle(false)}>{todoDisplayName(t)}</span>
+                  </Cell>
+                  <Cell muted>Not set</Cell>
+                  <Cell muted>Not set</Cell>
+                  <Cell muted>
+                    {sourceLabel(t, currentUserEmail)}
+                    <span style={{ color: "#b4b2a9" }}> · {fmtReceived(t.createdAt)}</span>
+                  </Cell>
+                  <Actions>
+                    <button type="button" onClick={() => setEditing({ todo: t, mode: "populate" })} style={primaryGhostButtonStyle}>
+                      Fill in
                     </button>
                     <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
                       Discard
                     </button>
-                  </div>
+                  </Actions>
                 </div>
-              );
-            })}
-          </div>
-        </>
-      ) : null}
+              ))}
+            </>
+          ) : null}
 
-      {pending.length === 0 && scheduled.length === 0 ? (
-        <div style={{ fontSize: "12px", color: "#888780", padding: "12px 0" }}>
-          {filtersActive ? "No to-dos match these filters." : "Nothing outstanding."}
+          {allScheduled.length > 0 ? (
+            <>
+              <GroupRow
+                label="Scheduled"
+                shown={scheduled.length}
+                total={showDone ? allScheduled.length : allScheduled.length - doneCount}
+                filtered={filtersActive}
+                action={
+                  doneCount > 0 ? (
+                    <button type="button" onClick={() => setShowDone((v) => !v)} style={linkButtonStyle}>
+                      {showDone ? "Hide" : "Show"} {doneCount} completed
+                    </button>
+                  ) : null
+                }
+              />
+              {scheduled.map((t) => {
+                const isDone = t.status === "done";
+                const isOverdue = Boolean(!isDone && t.dueDate && t.dueDate < today);
+                return (
+                  <div key={t.id} style={rowStyle({ tone: isOverdue ? "overdue" : "normal" })}>
+                    <Cell>
+                      <span style={nameStyle(isDone)}>{todoDisplayName(t)}</span>
+                    </Cell>
+                    <Cell muted={!t.customerName}>{t.customerName ?? "No client"}</Cell>
+                    <Cell muted={!t.dueDate}>
+                      {t.dueDate ? (
+                        <span style={isOverdue ? { color: "#A32D2D", fontWeight: 500 } : undefined}>
+                          {fmtDate(t.dueDate)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </Cell>
+                    <Cell muted>{sourceLabel(t, currentUserEmail)}</Cell>
+                    <Actions>
+                      <button
+                        type="button"
+                        onClick={() => handleSetDone(t, !isDone)}
+                        disabled={busyId === t.id}
+                        style={isDone ? ghostButtonStyle : primaryGhostButtonStyle}
+                      >
+                        {isDone ? "Reopen" : "Complete"}
+                      </button>
+                      <button type="button" onClick={() => setEditing({ todo: t, mode: "edit" })} style={ghostButtonStyle}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
+                        Discard
+                      </button>
+                    </Actions>
+                  </div>
+                );
+              })}
+            </>
+          ) : null}
+
+          {pending.length === 0 && scheduled.length === 0 ? (
+            <div style={{ fontSize: "12px", color: "#888780", padding: "16px 12px" }}>
+              {filtersActive ? "No to-dos match these filters." : "Nothing outstanding."}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
       {editing ? (
         <PopulateTodoModal
@@ -421,9 +471,51 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
   );
 }
 
-// The separator between the two halves of the list: items still needing
-// triage vs. ones already given a client and due date.
-function GroupHeader({
+function SortHeader({
+  label,
+  sortKey,
+  active,
+  asc,
+  onClick,
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  asc: boolean;
+  onClick: (key: SortKey) => void;
+}) {
+  const isActive = active === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(sortKey)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+        fontSize: "10px",
+        fontWeight: 500,
+        color: isActive ? "#111111" : "#888780",
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        fontFamily: "inherit",
+        textAlign: "left",
+      }}
+      aria-label={`Sort by ${label}`}
+    >
+      {label}
+      <span style={{ opacity: isActive ? 1 : 0 }}>{asc ? "▲" : "▼"}</span>
+    </button>
+  );
+}
+
+// A full-width band separating the two halves of the list: items still
+// needing triage vs. ones already given a client and due date.
+function GroupRow({
   label,
   shown,
   total,
@@ -443,10 +535,7 @@ function GroupHeader({
         alignItems: "center",
         justifyContent: "space-between",
         gap: "12px",
-        marginTop: "16px",
-        marginBottom: "8px",
-        paddingTop: "12px",
-        borderTop: "0.5px solid #e1e0d9",
+        padding: "14px 12px 6px",
       }}
     >
       <div style={{ fontSize: "10px", fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -457,31 +546,46 @@ function GroupHeader({
   );
 }
 
-const pendingRowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "12px",
-  padding: "10px 12px",
-  background: "#FAEEDA",
-  border: "0.5px solid #f0d9a8",
-  borderRadius: "8px",
-};
+function Cell({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
+  return (
+    <div
+      style={{
+        fontSize: "12px",
+        color: muted ? "#888780" : "#444441",
+        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        alignSelf: "center",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
-function scheduledRowStyle(isOverdue: boolean): React.CSSProperties {
+function Actions({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>{children}</div>;
+}
+
+function rowStyle({ tone }: { tone: "pending" | "overdue" | "normal" }): React.CSSProperties {
+  const background = tone === "pending" ? "#FAEEDA" : "#fafaf8";
+  const border =
+    tone === "pending" ? "0.5px solid #f0d9a8" : tone === "overdue" ? "0.5px solid #f0b8b8" : "0.5px solid transparent";
   return {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: "grid",
+    gridTemplateColumns: GRID_COLUMNS,
     gap: "12px",
-    padding: "10px 12px",
-    background: "#fafaf8",
-    border: isOverdue ? "0.5px solid #f0b8b8" : "0.5px solid transparent",
+    alignItems: "center",
+    padding: "9px 12px",
+    marginBottom: "6px",
+    background,
+    border,
     borderRadius: "8px",
   };
 }
 
-function titleStyle(isDone: boolean): React.CSSProperties {
+function nameStyle(isDone: boolean): React.CSSProperties {
   return {
     fontSize: "13px",
     fontWeight: 500,
@@ -490,17 +594,9 @@ function titleStyle(isDone: boolean): React.CSSProperties {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    display: "block",
   };
 }
-
-const metaStyle: React.CSSProperties = {
-  fontSize: "11px",
-  color: "#888780",
-  marginTop: "2px",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
 
 const selectStyle: React.CSSProperties = {
   fontSize: "11px",
@@ -517,7 +613,7 @@ const selectStyle: React.CSSProperties = {
 const ghostButtonStyle: React.CSSProperties = {
   fontSize: "11px",
   fontWeight: 500,
-  padding: "5px 12px",
+  padding: "5px 11px",
   borderRadius: "999px",
   background: "white",
   color: "#444441",

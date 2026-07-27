@@ -210,7 +210,13 @@ export interface TodoItem {
   ownerStaffId: string;
   createdByEmail: string | null;
   createdByName: string | null;
+  // The forwarded email's original Subject header -- immutable, and the
+  // record of where this item came from.
   subject: string;
+  // Owner-supplied display name, null until they rename it. Read through
+  // todoDisplayName() rather than directly, so the subject fallback is
+  // applied consistently.
+  title: string | null;
   body: string | null;
   customerId: string | null;
   customerName: string | null;
