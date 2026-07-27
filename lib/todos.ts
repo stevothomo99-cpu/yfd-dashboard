@@ -142,6 +142,29 @@ export async function markTodoItemDone(id: string, done: boolean): Promise<TodoI
   return mapTodoItem(data);
 }
 
+// Changes the client/due date of an already-populated to-do without
+// touching its status -- editing a completed item must leave it completed,
+// which is why this doesn't go through populateTodoItem (that one forces
+// status back to "todo", correct when triaging a new item, wrong here).
+export async function updateTodoItemDetails(
+  id: string,
+  input: { customerId: string; dueDate: string | null },
+): Promise<TodoItem | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("todo_items")
+    .update({ customer_id: input.customerId, due_date: input.dueDate })
+    .eq("id", id)
+    .select(TODO_SELECT)
+    .single<TodoItemRow>();
+
+  if (error) {
+    console.error("[todos] updateTodoItemDetails failed:", error.message);
+    return null;
+  }
+  return mapTodoItem(data);
+}
+
 export async function discardTodoItem(id: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
   const { error } = await admin.from("todo_items").delete().eq("id", id);
