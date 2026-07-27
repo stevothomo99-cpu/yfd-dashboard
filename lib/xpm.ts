@@ -343,6 +343,37 @@ export async function fetchXpmClientAllocationReport(): Promise<XpmClientAllocat
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export interface XpmClientDirectoryEntry {
+  name: string;
+  // Null means no Account Manager is set on the client in XPM, which is
+  // exactly the condition that keeps it out of our own customers sync (see
+  // fetchActiveXpmClientsForPartner) -- surfaced so the UI can say "we know
+  // who this is, it just isn't allocated to you" rather than "unknown".
+  accountManagerName: string | null;
+}
+
+const CLIENT_DIRECTORY_KEY = "xpm:client-directory";
+const CLIENT_DIRECTORY_TTL = 60 * 60;
+
+// Every active client in the tenant, keyed by XPM client id -- a name
+// lookup of last resort for ids that appear in timesheets but never made it
+// into our synced customers table. Deliberately not Partner-filtered: the
+// whole point is to name clients the Partner filter excluded.
+//
+// The client roster has no date-window dependency (unlike jobs/invoices),
+// so this is a single call, cached and served stale-while-revalidate since
+// client names change rarely and this sits on a page render path.
+export async function getXpmClientDirectory(): Promise<Record<string, XpmClientDirectoryEntry>> {
+  return cachedEncryptedSWR(CLIENT_DIRECTORY_KEY, CLIENT_DIRECTORY_TTL, async () => {
+    const clients = await fetchXpmClientAllocationReport();
+    const byId: Record<string, XpmClientDirectoryEntry> = {};
+    for (const c of clients) {
+      byId[c.id] = { name: c.name, accountManagerName: c.accountManagerName };
+    }
+    return byId;
+  });
+}
+
 // Active clients whose accountManager (Partner) matches the given name --
 // shared by client/staff/job derivation so they all agree on exactly which
 // clients are "ours" out of the whole tenant.
