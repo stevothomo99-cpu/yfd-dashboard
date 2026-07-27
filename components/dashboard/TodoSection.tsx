@@ -21,14 +21,17 @@ interface TodoSectionProps {
 
 type DueFilter = "all" | "overdue" | "week" | "month" | "none";
 type SourceFilter = "all" | "self" | "others";
-type SortKey = "name" | "client" | "due" | "from";
+// Confirmed items sort on any of their four columns; the to-confirm queue
+// has no client or due date to sort by, so it carries its own narrower set.
+type ConfirmedSortKey = "name" | "client" | "due" | "from";
+type PendingSortKey = "name" | "from" | "received";
 
 const NO_CLIENT = "__none";
 
-// Shared by the header row and every data row so the columns actually line
-// up: Name | Client | Due | From | actions.
-const GRID_COLUMNS = "minmax(0, 2.4fr) minmax(0, 1.4fr) 108px minmax(0, 1.1fr) 232px";
-const MIN_TABLE_WIDTH = 760;
+const CONFIRMED_COLUMNS = "minmax(0, 2.2fr) minmax(0, 1.4fr) 96px minmax(0, 1fr) 214px";
+const PENDING_COLUMNS = "minmax(0, 1fr) 150px";
+const CONFIRMED_MIN_WIDTH = 620;
+const PENDING_MIN_WIDTH = 280;
 
 const DUE_FILTERS: { value: DueFilter; label: string }[] = [
   { value: "all", label: "Any due date" },
@@ -75,11 +78,13 @@ function sourceLabel(todo: TodoItem, currentUserEmail: string | null): string {
   return todo.createdByName?.trim() || todo.createdByEmail || "Someone else";
 }
 
-// Lightweight email-forwarded to-dos -- see app/api/email/inbound/route.ts
-// for how they're created and lib/todos.ts for the pending_triage ->
-// todo/done/converted lifecycle. Fetches its own data (rather than being
-// server-rendered) since it needs to refresh after populate/done/discard
-// actions without a full page reload.
+// Two tiles side by side rather than one list with an internal divider:
+// confirmed to-dos (the working list) at 2/3 width, and the triage queue of
+// items still needing a client and due date at 1/3.
+//
+// The filter bar sits above both and drives both, so search stays global
+// across the pair rather than each tile carrying its own duplicate set of
+// controls.
 export default function TodoSection({ allClients, currentUserEmail }: TodoSectionProps) {
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,9 +96,12 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
   const [clientFilter, setClientFilter] = useState("");
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
-  const [sortBy, setSortBy] = useState<SortKey>("due");
-  const [sortAsc, setSortAsc] = useState(true);
   const [showDone, setShowDone] = useState(false);
+
+  const [confirmedSort, setConfirmedSort] = useState<ConfirmedSortKey>("due");
+  const [confirmedAsc, setConfirmedAsc] = useState(true);
+  const [pendingSort, setPendingSort] = useState<PendingSortKey>("received");
+  const [pendingAsc, setPendingAsc] = useState(false);
 
   async function refresh() {
     try {
@@ -162,20 +170,8 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
     }
   }
 
-  function toggleSort(key: SortKey) {
-    if (sortBy === key) setSortAsc((v) => !v);
-    else {
-      setSortBy(key);
-      setSortAsc(true);
-    }
-  }
-
   const today = todayIso();
 
-  // Filters apply to both groups. A client/due-date filter necessarily
-  // excludes every pending item (they have neither yet) -- the group
-  // headers report "x of y" so that's visible rather than looking like the
-  // items vanished.
   const matches = useMemo(() => {
     const weekEnd = addDays(today, 7);
     const monthEnd = addDays(today, 30);
@@ -218,18 +214,21 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
     };
   }, [search, clientFilter, dueFilter, sourceFilter, currentUserEmail, today]);
 
-  const sorter = useMemo(() => {
-    const dir = sortAsc ? 1 : -1;
-    return (a: TodoItem, b: TodoItem): number => {
-      switch (sortBy) {
+  const allPending = todos.filter((t) => t.status === "pending_triage");
+  const allConfirmed = todos.filter((t) => t.status === "todo" || t.status === "done");
+
+  const confirmed = allConfirmed
+    .filter(matches)
+    .filter((t) => showDone || t.status !== "done")
+    .sort((a, b) => {
+      const dir = confirmedAsc ? 1 : -1;
+      switch (confirmedSort) {
         case "name":
           return dir * todoDisplayName(a).localeCompare(todoDisplayName(b));
         case "client":
           return dir * (a.customerName ?? "￿").localeCompare(b.customerName ?? "￿");
         case "from":
-          return (
-            dir * sourceLabel(a, currentUserEmail).localeCompare(sourceLabel(b, currentUserEmail))
-          );
+          return dir * sourceLabel(a, currentUserEmail).localeCompare(sourceLabel(b, currentUserEmail));
         case "due":
         default:
           // Undated items sort last in both directions rather than flipping
@@ -240,35 +239,47 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
           if (!b.dueDate) return -1;
           return dir * a.dueDate.localeCompare(b.dueDate);
       }
-    };
-  }, [sortBy, sortAsc, currentUserEmail]);
+    });
 
-  const allPending = todos.filter((t) => t.status === "pending_triage");
-  const allScheduled = todos.filter((t) => t.status === "todo" || t.status === "done");
+  const pending = allPending.filter(matches).sort((a, b) => {
+    const dir = pendingAsc ? 1 : -1;
+    switch (pendingSort) {
+      case "name":
+        return dir * todoDisplayName(a).localeCompare(todoDisplayName(b));
+      case "from":
+        return dir * sourceLabel(a, currentUserEmail).localeCompare(sourceLabel(b, currentUserEmail));
+      case "received":
+      default:
+        return dir * a.createdAt.localeCompare(b.createdAt);
+    }
+  });
 
-  const pending = allPending.filter(matches).sort(sorter);
-  const scheduled = allScheduled
-    .filter(matches)
-    .filter((t) => showDone || t.status !== "done")
-    .sort(sorter);
-
-  const doneCount = allScheduled.filter((t) => t.status === "done").length;
+  const doneCount = allConfirmed.filter((t) => t.status === "done").length;
+  const confirmedTotal = showDone ? allConfirmed.length : allConfirmed.length - doneCount;
   const filtersActive =
     Boolean(search.trim()) || Boolean(clientFilter) || dueFilter !== "all" || sourceFilter !== "all";
+
+  function toggleConfirmedSort(key: ConfirmedSortKey) {
+    if (confirmedSort === key) setConfirmedAsc((v) => !v);
+    else {
+      setConfirmedSort(key);
+      setConfirmedAsc(true);
+    }
+  }
+
+  function togglePendingSort(key: PendingSortKey) {
+    if (pendingSort === key) setPendingAsc((v) => !v);
+    else {
+      setPendingSort(key);
+      setPendingAsc(true);
+    }
+  }
 
   if (loading) return null;
   if (todos.length === 0 && !error) return null;
 
   return (
-    <div
-      style={{
-        background: "white",
-        border: "0.5px solid #e1e0d9",
-        borderRadius: "14px",
-        padding: "1.1rem 1.2rem",
-        marginBottom: "14px",
-      }}
-    >
+    <div style={{ marginBottom: "14px" }}>
       <div
         style={{
           display: "flex",
@@ -276,7 +287,7 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
           justifyContent: "space-between",
           gap: "12px",
           flexWrap: "wrap",
-          marginBottom: "12px",
+          marginBottom: "10px",
         }}
       >
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>
@@ -290,10 +301,9 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, client, sender…"
             aria-label="Search to-dos"
-            style={{ ...selectStyle, width: "210px", maxWidth: "210px" }}
+            style={{ ...controlStyle, width: "210px", maxWidth: "210px" }}
           />
-
-          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} style={selectStyle} aria-label="Filter by client">
+          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} style={controlStyle} aria-label="Filter by client">
             <option value="">All clients</option>
             <option value={NO_CLIENT}>No client yet</option>
             {allClients.map((c) => (
@@ -302,23 +312,20 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
               </option>
             ))}
           </select>
-
-          <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as DueFilter)} style={selectStyle} aria-label="Filter by due date">
+          <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value as DueFilter)} style={controlStyle} aria-label="Filter by due date">
             {DUE_FILTERS.map((d) => (
               <option key={d.value} value={d.value}>
                 {d.label}
               </option>
             ))}
           </select>
-
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as SourceFilter)} style={selectStyle} aria-label="Filter by who sent it">
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as SourceFilter)} style={controlStyle} aria-label="Filter by who sent it">
             {SOURCE_FILTERS.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}
               </option>
             ))}
           </select>
-
           {filtersActive ? (
             <button
               type="button"
@@ -342,78 +349,40 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
         </div>
       ) : null}
 
-      {/* The grid needs a floor width to stay readable as columns; below
-          that the table scrolls sideways rather than crushing every cell. */}
-      <div style={{ overflowX: "auto" }}>
-        <div style={{ minWidth: `${MIN_TABLE_WIDTH}px` }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: GRID_COLUMNS,
-              gap: "12px",
-              padding: "0 12px 8px",
-              borderBottom: "0.5px solid #e1e0d9",
-            }}
-          >
-            <SortHeader label="Name" sortKey="name" active={sortBy} asc={sortAsc} onClick={toggleSort} />
-            <SortHeader label="Client" sortKey="client" active={sortBy} asc={sortAsc} onClick={toggleSort} />
-            <SortHeader label="Due" sortKey="due" active={sortBy} asc={sortAsc} onClick={toggleSort} />
-            <SortHeader label="From" sortKey="from" active={sortBy} asc={sortAsc} onClick={toggleSort} />
-            <div />
-          </div>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "14px", alignItems: "start" }}>
+        {/* Confirmed -- the actual working list. */}
+        <Tile
+          title="To-Do"
+          count={confirmed.length}
+          total={confirmedTotal}
+          filtered={filtersActive}
+          action={
+            doneCount > 0 ? (
+              <button type="button" onClick={() => setShowDone((v) => !v)} style={linkButtonStyle}>
+                {showDone ? "Hide" : "Show"} {doneCount} completed
+              </button>
+            ) : null
+          }
+        >
+          <div style={{ minWidth: `${CONFIRMED_MIN_WIDTH}px` }}>
+            <HeaderRow columns={CONFIRMED_COLUMNS}>
+              <SortHeader label="Name" sortKey="name" active={confirmedSort} asc={confirmedAsc} onClick={toggleConfirmedSort} />
+              <SortHeader label="Client" sortKey="client" active={confirmedSort} asc={confirmedAsc} onClick={toggleConfirmedSort} />
+              <SortHeader label="Due" sortKey="due" active={confirmedSort} asc={confirmedAsc} onClick={toggleConfirmedSort} />
+              <SortHeader label="From" sortKey="from" active={confirmedSort} asc={confirmedAsc} onClick={toggleConfirmedSort} />
+              <div />
+            </HeaderRow>
 
-          {allPending.length > 0 ? (
-            <>
-              <GroupRow
-                label="Needs client + due date"
-                shown={pending.length}
-                total={allPending.length}
-                filtered={filtersActive}
-              />
-              {pending.map((t) => (
-                <div key={t.id} style={rowStyle({ tone: "pending" })}>
-                  <Cell>
-                    <span style={nameStyle(false)}>{todoDisplayName(t)}</span>
-                  </Cell>
-                  <Cell muted>Not set</Cell>
-                  <Cell muted>Not set</Cell>
-                  <Cell muted>
-                    {sourceLabel(t, currentUserEmail)}
-                    <span style={{ color: "#b4b2a9" }}> · {fmtReceived(t.createdAt)}</span>
-                  </Cell>
-                  <Actions>
-                    <button type="button" onClick={() => setEditing({ todo: t, mode: "populate" })} style={primaryGhostButtonStyle}>
-                      Fill in
-                    </button>
-                    <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
-                      Discard
-                    </button>
-                  </Actions>
-                </div>
-              ))}
-            </>
-          ) : null}
-
-          {allScheduled.length > 0 ? (
-            <>
-              <GroupRow
-                label="Scheduled"
-                shown={scheduled.length}
-                total={showDone ? allScheduled.length : allScheduled.length - doneCount}
-                filtered={filtersActive}
-                action={
-                  doneCount > 0 ? (
-                    <button type="button" onClick={() => setShowDone((v) => !v)} style={linkButtonStyle}>
-                      {showDone ? "Hide" : "Show"} {doneCount} completed
-                    </button>
-                  ) : null
-                }
-              />
-              {scheduled.map((t) => {
+            {confirmed.length === 0 ? (
+              <EmptyRow>
+                {filtersActive ? "Nothing matches these filters." : "Nothing scheduled."}
+              </EmptyRow>
+            ) : (
+              confirmed.map((t) => {
                 const isDone = t.status === "done";
                 const isOverdue = Boolean(!isDone && t.dueDate && t.dueDate < today);
                 return (
-                  <div key={t.id} style={rowStyle({ tone: isOverdue ? "overdue" : "normal" })}>
+                  <div key={t.id} style={rowStyle(CONFIRMED_COLUMNS, isOverdue ? "overdue" : "normal")}>
                     <Cell>
                       <span style={nameStyle(isDone)}>{todoDisplayName(t)}</span>
                     </Cell>
@@ -433,7 +402,7 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
                         type="button"
                         onClick={() => handleSetDone(t, !isDone)}
                         disabled={busyId === t.id}
-                        style={isDone ? ghostButtonStyle : primaryGhostButtonStyle}
+                        style={isDone ? ghostButtonStyle : primaryButtonStyle}
                       >
                         {isDone ? "Reopen" : "Complete"}
                       </button>
@@ -446,16 +415,53 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
                     </Actions>
                   </div>
                 );
-              })}
-            </>
-          ) : null}
+              })
+            )}
+          </div>
+        </Tile>
 
-          {pending.length === 0 && scheduled.length === 0 ? (
-            <div style={{ fontSize: "12px", color: "#888780", padding: "16px 12px" }}>
-              {filtersActive ? "No to-dos match these filters." : "Nothing outstanding."}
-            </div>
-          ) : null}
-        </div>
+        {/* To confirm -- the triage queue. No Client/Due columns: by
+            definition these items have neither yet, so the columns would be
+            nothing but "Not set" repeated down the tile. */}
+        <Tile
+          title="To confirm"
+          count={pending.length}
+          total={allPending.length}
+          filtered={filtersActive}
+          tone="pending"
+        >
+          <div style={{ minWidth: `${PENDING_MIN_WIDTH}px` }}>
+            <HeaderRow columns={PENDING_COLUMNS}>
+              <SortHeader label="Name" sortKey="name" active={pendingSort} asc={pendingAsc} onClick={togglePendingSort} />
+              <div />
+            </HeaderRow>
+
+            {pending.length === 0 ? (
+              <EmptyRow>
+                {filtersActive ? "Nothing matches these filters." : "Nothing to confirm."}
+              </EmptyRow>
+            ) : (
+              pending.map((t) => (
+                <div key={t.id} style={rowStyle(PENDING_COLUMNS, "pending")}>
+                  <div style={{ minWidth: 0 }}>
+                    <span style={nameStyle(false)}>{todoDisplayName(t)}</span>
+                    <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {sourceLabel(t, currentUserEmail)} · {fmtReceived(t.createdAt)}
+                    </div>
+                  </div>
+                  <Actions>
+                    <button type="button" onClick={() => setEditing({ todo: t, mode: "populate" })} style={primaryButtonStyle}>
+                      Fill in
+                    </button>
+                    <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
+                      Discard
+                    </button>
+                  </Actions>
+                </div>
+              ))
+            )}
+          </div>
+        </Tile>
       </div>
 
       {editing ? (
@@ -471,7 +477,65 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
   );
 }
 
-function SortHeader({
+function Tile({
+  title,
+  count,
+  total,
+  filtered,
+  action,
+  tone,
+  children,
+}: {
+  title: string;
+  count: number;
+  total: number;
+  filtered: boolean;
+  action?: React.ReactNode;
+  tone?: "pending";
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "white",
+        border: "0.5px solid #e1e0d9",
+        borderRadius: "14px",
+        padding: "1.1rem 1.2rem",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "10px" }}>
+        <div style={{ fontSize: "12px", fontWeight: 500, color: tone === "pending" ? "#633806" : "#111111" }}>
+          {title} · {filtered && count !== total ? `${count} of ${total}` : total}
+        </div>
+        {action}
+      </div>
+      {/* Each tile scrolls its own columns rather than squashing them --
+          the dashboard isn't mobile-optimised, but a narrow laptop
+          shouldn't make the action buttons unreachable. */}
+      <div style={{ overflowX: "auto" }}>{children}</div>
+    </div>
+  );
+}
+
+function HeaderRow({ columns, children }: { columns: string; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: columns,
+        gap: "10px",
+        padding: "0 10px 8px",
+        borderBottom: "0.5px solid #e1e0d9",
+        marginBottom: "6px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SortHeader<K extends string>({
   label,
   sortKey,
   active,
@@ -479,10 +543,10 @@ function SortHeader({
   onClick,
 }: {
   label: string;
-  sortKey: SortKey;
-  active: SortKey;
+  sortKey: K;
+  active: K;
   asc: boolean;
-  onClick: (key: SortKey) => void;
+  onClick: (key: K) => void;
 }) {
   const isActive = active === sortKey;
   return (
@@ -513,37 +577,8 @@ function SortHeader({
   );
 }
 
-// A full-width band separating the two halves of the list: items still
-// needing triage vs. ones already given a client and due date.
-function GroupRow({
-  label,
-  shown,
-  total,
-  filtered,
-  action,
-}: {
-  label: string;
-  shown: number;
-  total: number;
-  filtered: boolean;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "12px",
-        padding: "14px 12px 6px",
-      }}
-    >
-      <div style={{ fontSize: "10px", fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-        {label} · {filtered && shown !== total ? `${shown} of ${total}` : total}
-      </div>
-      {action}
-    </div>
-  );
+function EmptyRow({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: "12px", color: "#888780", padding: "14px 10px" }}>{children}</div>;
 }
 
 function Cell({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
@@ -565,22 +600,24 @@ function Cell({ children, muted }: { children: React.ReactNode; muted?: boolean 
 }
 
 function Actions({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>{children}</div>;
+  return <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>{children}</div>;
 }
 
-function rowStyle({ tone }: { tone: "pending" | "overdue" | "normal" }): React.CSSProperties {
-  const background = tone === "pending" ? "#FAEEDA" : "#fafaf8";
-  const border =
-    tone === "pending" ? "0.5px solid #f0d9a8" : tone === "overdue" ? "0.5px solid #f0b8b8" : "0.5px solid transparent";
+function rowStyle(columns: string, tone: "pending" | "overdue" | "normal"): React.CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: GRID_COLUMNS,
-    gap: "12px",
+    gridTemplateColumns: columns,
+    gap: "10px",
     alignItems: "center",
-    padding: "9px 12px",
+    padding: "9px 10px",
     marginBottom: "6px",
-    background,
-    border,
+    background: tone === "pending" ? "#FAEEDA" : "#fafaf8",
+    border:
+      tone === "pending"
+        ? "0.5px solid #f0d9a8"
+        : tone === "overdue"
+          ? "0.5px solid #f0b8b8"
+          : "0.5px solid transparent",
     borderRadius: "8px",
   };
 }
@@ -598,7 +635,7 @@ function nameStyle(isDone: boolean): React.CSSProperties {
   };
 }
 
-const selectStyle: React.CSSProperties = {
+const controlStyle: React.CSSProperties = {
   fontSize: "11px",
   padding: "5px 8px",
   borderRadius: "8px",
@@ -622,7 +659,7 @@ const ghostButtonStyle: React.CSSProperties = {
   flexShrink: 0,
 };
 
-const primaryGhostButtonStyle: React.CSSProperties = {
+const primaryButtonStyle: React.CSSProperties = {
   ...ghostButtonStyle,
   background: "#111111",
   color: "white",
