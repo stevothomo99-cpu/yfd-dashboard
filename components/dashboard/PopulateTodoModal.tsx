@@ -12,6 +12,13 @@ interface ClientOption {
 interface PopulateTodoModalProps {
   todo: TodoItem;
   allClients: ClientOption[];
+  // "populate" triages a pending_triage item (client + due date +
+  // recurrence, where recurrence can convert it into a Task). "edit" only
+  // changes the client/due date of an already-triaged item -- recurrence is
+  // deliberately absent there, since silently turning an existing to-do
+  // into a Task from an Edit button would be a surprising thing for that
+  // button to do.
+  mode?: "populate" | "edit";
   onClose: () => void;
   onSaved: () => void;
 }
@@ -29,10 +36,17 @@ const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
 // have yet. One-off stays a lightweight to-do; anything recurring converts
 // it into a real Task instead (see lib/todos.ts's populateTodoItem) since
 // recurring work needs the full Task machinery a to-do doesn't have.
-export default function PopulateTodoModal({ todo, allClients, onClose, onSaved }: PopulateTodoModalProps) {
-  const [clientId, setClientId] = useState("");
+export default function PopulateTodoModal({
+  todo,
+  allClients,
+  mode = "populate",
+  onClose,
+  onSaved,
+}: PopulateTodoModalProps) {
+  const isEdit = mode === "edit";
+  const [clientId, setClientId] = useState(isEdit ? todo.customerId ?? "" : "");
   const [jobId, setJobId] = useState("");
-  const [dueDate, setDueDate] = useState("");
+  const [dueDate, setDueDate] = useState(isEdit ? todo.dueDate ?? "" : "");
   const [recurrence, setRecurrence] = useState<RecurrenceInterval>("none");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,12 +64,16 @@ export default function PopulateTodoModal({ todo, allClients, onClose, onSaved }
       const res = await fetch(`/api/todos/${todo.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerId: clientId,
-          dueDate: dueDate || null,
-          recurrence,
-          jobId: jobId || undefined,
-        }),
+        body: JSON.stringify(
+          isEdit
+            ? { intent: "edit", customerId: clientId, dueDate: dueDate || null }
+            : {
+                customerId: clientId,
+                dueDate: dueDate || null,
+                recurrence,
+                jobId: jobId || undefined,
+              },
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
@@ -106,7 +124,9 @@ export default function PopulateTodoModal({ todo, allClients, onClose, onSaved }
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
-          <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111" }}>To-do details</div>
+          <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111" }}>
+            {isEdit ? "Edit to-do" : "To-do details"}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -144,21 +164,23 @@ export default function PopulateTodoModal({ todo, allClients, onClose, onSaved }
                 <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
               </label>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <span style={labelStyle}>Recurrence</span>
-                <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as RecurrenceInterval)} style={inputStyle}>
-                  {RECURRENCE_OPTIONS.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-                {recurrence !== "none" ? (
-                  <span style={{ fontSize: "11px", color: "#888780" }}>
-                    Recurring items become a real Task on the client&rsquo;s board instead of staying a to-do.
-                  </span>
-                ) : null}
-              </label>
+              {isEdit ? null : (
+                <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <span style={labelStyle}>Recurrence</span>
+                  <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as RecurrenceInterval)} style={inputStyle}>
+                    {RECURRENCE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                  {recurrence !== "none" ? (
+                    <span style={{ fontSize: "11px", color: "#888780" }}>
+                      Recurring items become a real Task on the client&rsquo;s board instead of staying a to-do.
+                    </span>
+                  ) : null}
+                </label>
+              )}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>
                 <button type="button" onClick={onClose} style={secondaryButtonStyle}>

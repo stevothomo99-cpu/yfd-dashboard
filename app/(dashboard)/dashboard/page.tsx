@@ -67,7 +67,7 @@ export default async function DashboardPage() {
         }
       />
 
-      <TodoSection allClients={allClients} />
+      <TodoSection allClients={allClients} currentUserEmail={staff.email} />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "14px" }}>
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", padding: "1.1rem 1.2rem" }}>

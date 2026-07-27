@@ -1,7 +1,13 @@
 import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { getStaffByEmail, getJobsForCustomer } from "@/lib/workflow";
-import { getTodoItem, populateTodoItem, markTodoItemDone, discardTodoItem } from "@/lib/todos";
+import {
+  getTodoItem,
+  populateTodoItem,
+  markTodoItemDone,
+  updateTodoItemDetails,
+  discardTodoItem,
+} from "@/lib/todos";
 import type { RecurrenceInterval } from "@/types/workflow";
 
 async function resolveActor(): Promise<
@@ -37,14 +43,18 @@ async function requireOwnerOrAdmin(todoId: string) {
 
 interface PatchBody {
   done?: boolean;
+  intent?: "edit";
   customerId?: string;
   dueDate?: string | null;
   recurrence?: RecurrenceInterval;
   jobId?: string;
 }
 
-// Two things this can do, distinguished by which fields are present:
+// Three things this can do, distinguished by which fields are present:
 // - { done } -- toggle a populated one-off to-do's completion.
+// - { intent: "edit", customerId, dueDate } -- change the client/due date of
+//   an already-populated to-do, leaving its status alone (so editing a
+//   completed item doesn't silently reopen it).
 // - { customerId, dueDate, recurrence, jobId? } -- populate a
 //   pending_triage item, which either finalizes it as a one-off to-do or
 //   converts it into a real Task if recurrence isn't "none" (see
@@ -58,6 +68,23 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   if (typeof body.done === "boolean") {
     const todo = await markTodoItemDone(id, body.done);
+    if (!todo) return NextResponse.json({ error: "Failed to update to-do" }, { status: 500 });
+    return NextResponse.json({ todo });
+  }
+
+  if (body.intent === "edit") {
+    if (!body.customerId) {
+      return NextResponse.json({ error: "customerId is required" }, { status: 400 });
+    }
+    // Only meaningful once an item has been triaged -- a pending_triage row
+    // has to go through the populate path so it picks up a status.
+    if (access.todo.status === "pending_triage") {
+      return NextResponse.json({ error: "Fill in this to-do before editing it" }, { status: 400 });
+    }
+    const todo = await updateTodoItemDetails(id, {
+      customerId: body.customerId,
+      dueDate: body.dueDate ?? null,
+    });
     if (!todo) return NextResponse.json({ error: "Failed to update to-do" }, { status: 500 });
     return NextResponse.json({ todo });
   }
