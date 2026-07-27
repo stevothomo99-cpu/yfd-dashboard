@@ -28,21 +28,24 @@ export default async function MyWorkPage() {
   const session = await auth();
   const isAdmin = session?.user?.role === "admin";
 
-  const sessionStaff = session?.user?.email ? await getStaffByEmail(session.user.email) : null;
-  const allStaff = isAdmin ? await listStaff() : [];
-
-  const activeStaff = sessionStaff ?? (isAdmin ? allStaff[0] ?? null : null);
-  const tasks = activeStaff ? await getWorkBoardForStaff(activeStaff) : [];
-
   // Reference data for the "+ New Task" modal -- small datasets (single-digit
   // partners/managers/jobs today), fetched up front server-side same as
-  // /jobs, so the modal never has to refetch on open.
-  const [partners, staffForForm, statuses, taskTypes] = await Promise.all([
+  // /jobs, so the modal never has to refetch on open. Started alongside the
+  // staff lookup rather than after it: none of it depends on which staff
+  // member the session resolves to.
+  const [sessionStaff, staffForForm, partners, statuses, taskTypes] = await Promise.all([
+    session?.user?.email ? getStaffByEmail(session.user.email) : Promise.resolve(null),
+    listStaff(),
     getPartners(),
-    isAdmin ? Promise.resolve(allStaff) : listStaff(),
     listStatuses(),
     listTaskTypes(),
   ]);
+
+  // Only admins get the staff-switcher, so only they receive the roster as
+  // `allStaff`; everyone else's switcher is absent and the list stays empty.
+  const allStaff = isAdmin ? staffForForm : [];
+  const activeStaff = sessionStaff ?? (isAdmin ? allStaff[0] ?? null : null);
+  const tasks = activeStaff ? await getWorkBoardForStaff(activeStaff) : [];
 
   // Admins keep the full practice-wide job list (they can create/reassign on
   // any client, no restriction). Everyone else's "+ New Task" job picker is

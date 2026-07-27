@@ -32,3 +32,15 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* Loading skeletons (components/dashboard/Skeleton.tsx). Defined here
+   rather than inline because keyframes can't be expressed in the
+   style={{...}} convention the workflow pages use. */
+@keyframes yfd-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yfd-skeleton { animation: none; }
+}

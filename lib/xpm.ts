@@ -1,4 +1,10 @@
-import { cacheGet, cacheSet, cacheGetEncrypted, cacheSetEncrypted } from "./cache";
+import {
+  cacheGet,
+  cacheSet,
+  cacheGetEncrypted,
+  cacheSetEncrypted,
+  cachedEncryptedSWR,
+} from "./cache";
 import { fyYearFor } from "./utils";
 import { encryptSecret, decryptSecret } from "./crypto";
 import type { XpmStaff, XpmTimesheet, XpmInvoice, XpmServiceType } from "@/types/xpm";
@@ -12,6 +18,9 @@ const INVOICES_KEY = (partner: string) => `xpm:invoices:${partner}`;
 
 const STAFF_TTL = 24 * 60 * 60;
 const TIMESHEETS_TTL = 15 * 60;
+// How long a stale timesheet payload may still be served while a refresh
+// runs in the background. Beyond this a read blocks on XPM again.
+const TIMESHEETS_STALE_TTL = 6 * 60 * 60;
 const INVOICES_TTL = 60 * 60;
 
 const IDENTITY_URL = "https://identity.xero.com/connect/token";
@@ -655,19 +664,30 @@ export async function fetchXpmTimesheetsForPartner(
   return perStaff.flat();
 }
 
+// The most expensive upstream call in the app -- a job-list page-through
+// plus one HTTP request per staff member (fetchXpmTimesheetsForPartner) --
+// and it sits on the critical path of /dashboard, /clients and /timesheets.
+// Served stale-while-revalidate so an expired cache costs a background
+// refresh rather than making whoever loaded the page wait for all of it.
 export async function getXpmTimesheets(
   partnerName: string,
   options: { forceRefresh?: boolean } = {},
 ): Promise<XpmTimesheet[]> {
   const key = TIMESHEETS_KEY(partnerName);
-  if (!options.forceRefresh) {
-    const hit = await cacheGetEncrypted<XpmTimesheet[]>(key);
-    if (hit) return hit;
+  const load = async () => {
+    const { from, to } = xpmJobListDateRange();
+    return fetchXpmTimesheetsForPartner(partnerName, from, to);
+  };
+
+  // The manual "Resync" in Settings must actually hit XPM, not accept a
+  // stale value -- so it bypasses the cache and reseeds it.
+  if (options.forceRefresh) {
+    const fresh = await load();
+    await cacheSetEncrypted(key, { v: fresh, freshUntil: Date.now() + TIMESHEETS_TTL * 1000 }, TIMESHEETS_STALE_TTL);
+    return fresh;
   }
-  const { from, to } = xpmJobListDateRange();
-  const fresh = await fetchXpmTimesheetsForPartner(partnerName, from, to);
-  await cacheSetEncrypted(key, fresh, TIMESHEETS_TTL);
-  return fresh;
+
+  return cachedEncryptedSWR(key, TIMESHEETS_TTL, load, TIMESHEETS_STALE_TTL);
 }
 
 // Service-type categorisation (Bookkeeping/Tax/Payroll/BAS/Advisory) isn't

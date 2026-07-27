@@ -1,4 +1,4 @@
-import { cacheGet, cacheSet, cached } from "./cache";
+import { cacheGet, cacheSet, cachedSWR } from "./cache";
 import { encryptSecret, decryptSecret } from "./crypto";
 
 // Core Xero Accounting API client -- a completely separate product/API
@@ -311,8 +311,10 @@ const REVENUE_BY_CLIENT_TTL = 15 * 60;
 // this for all four period buttons (week/month/quarter/FY) on every page
 // load to feed the slicer without a client-side round trip, so it's worth
 // caching per date-range the same way lib/xpm.ts caches timesheets/invoices.
+// Stale-while-revalidate: paging full invoice bodies at 100/page is slow
+// enough that an expired entry shouldn't be billed to whoever loads next.
 export async function getRevenueByClientName(fromIso: string, toIso: string): Promise<XeroRevenueByClient[]> {
-  return cached(`xeroacct:revenue:${fromIso}:${toIso}`, REVENUE_BY_CLIENT_TTL, () =>
+  return cachedSWR(`xeroacct:revenue:${fromIso}:${toIso}`, REVENUE_BY_CLIENT_TTL, () =>
     fetchRevenueByClientName(fromIso, toIso),
   );
 }
