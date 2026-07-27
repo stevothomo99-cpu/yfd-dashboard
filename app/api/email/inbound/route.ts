@@ -10,11 +10,17 @@ import { sendEmail } from "@/lib/resend";
 // as JSON first breaks the signature check.
 export async function POST(request: NextRequest) {
   const webhookSecret = process.env.RESEND_WEBHOOK_SECRET;
-  const apiKey = process.env.RESEND_API_KEY;
+  // Deliberately a separate key from RESEND_API_KEY (lib/resend.ts) -- the
+  // shared to-do inbox lives on its own Resend account/domain, distinct
+  // from the account used for outbound notification sending, so this
+  // webhook must authenticate as that account to fetch the received email.
+  const apiKey = process.env.RESEND_INBOUND_API_KEY;
   const sharedInboxAddress = process.env.TODO_INBOUND_EMAIL;
 
   if (!webhookSecret || !apiKey || !sharedInboxAddress) {
-    console.error("[email/inbound] RESEND_WEBHOOK_SECRET/RESEND_API_KEY/TODO_INBOUND_EMAIL not fully set");
+    console.error(
+      "[email/inbound] RESEND_WEBHOOK_SECRET/RESEND_INBOUND_API_KEY/TODO_INBOUND_EMAIL not fully set",
+    );
     return NextResponse.json({ error: "Not configured" }, { status: 500 });
   }
 
