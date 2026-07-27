@@ -26,7 +26,7 @@ export default function PrivacyPolicyPage() {
         </h2>
         <p>
           The YFD Dashboard is a private, internal operations tool built for
-          Your Finance Dept (YFD), an Australian bookkeeping/accounting
+          Your Finance Department (YFD), an Australian bookkeeping/accounting
           practice. It is used only by YFD&apos;s own staff to view
           productivity and revenue data about YFD&apos;s own team and
           clients. It is not a public product and does not have external
