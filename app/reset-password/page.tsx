@@ -7,11 +7,7 @@ import AuthShell from "@/components/auth/AuthShell";
 
 // A dedicated browser client, NOT lib/supabase.ts's shared one -- that one
 // sets persistSession: false since it's used server-side, which would also
-// disable the session-detection this page depends on. Supabase's recovery
-// link lands here carrying either a #access_token=... hash (implicit flow)
-// or a ?code=... query param (PKCE flow) depending on project config; this
-// client is created fresh so its default detectSessionInUrl behavior can
-// pick up whichever one Supabase actually sends.
+// disable the session-detection this page depends on.
 function getResetClient(): SupabaseClient {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL as string,
@@ -26,6 +22,11 @@ export default function ResetPasswordPage() {
   const [client] = useState(getResetClient);
   const [status, setStatus] = useState<Status>("checking");
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  // Present only for the token_hash flow (see below) -- deliberately NOT
+  // redeemed until the user actually submits the form.
+  const [pendingTokenHash, setPendingTokenHash] = useState<{ tokenHash: string; type: string } | null>(
+    null,
+  );
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +36,33 @@ export default function ResetPasswordPage() {
     let cancelled = false;
 
     async function establishSession() {
-      // PKCE flow: a ?code= param needs exchanging for a session explicitly.
-      const code = new URLSearchParams(window.location.search).get("code");
+      const params = new URLSearchParams(window.location.search);
+
+      // Preferred flow: the recovery email links here with
+      // ?token_hash=...&type=recovery (see the Supabase "Reset Password"
+      // email template) instead of Supabase's own auto-verifying
+      // ConfirmationURL. Deliberately don't call verifyOtp here -- doing so
+      // on page load meant any automated link-scanner (e.g. Microsoft 365
+      // Safe Links prefetching the URL from the email before the user ever
+      // clicks it) silently burned the one-time token, so the real user's
+      // click landed on an already-used link. Redemption is deferred to
+      // onSubmit, which a scanner fetching the page never triggers.
+      const tokenHash = params.get("token_hash");
+      const type = params.get("type");
+      if (tokenHash && type) {
+        if (!cancelled) {
+          setPendingTokenHash({ tokenHash, type });
+          setStatus("ready");
+        }
+        return;
+      }
+
+      // Legacy flows, kept for any reset emails already sent/in-flight
+      // before the token_hash template change: PKCE (?code=) needs
+      // exchanging explicitly; implicit (#access_token=...&type=recovery)
+      // is auto-detected by the client itself. Both redeem on page load,
+      // same vulnerability as above, but there's no way to defer them.
+      const code = params.get("code");
       if (code) {
         const { error: exchangeError } = await client.auth.exchangeCodeForSession(code);
         if (exchangeError) {
@@ -45,8 +71,6 @@ export default function ResetPasswordPage() {
         }
       }
 
-      // Implicit flow (#access_token=...&type=recovery) is auto-detected by
-      // the client itself -- either way, a session should exist by now.
       const { data } = await client.auth.getSession();
       if (cancelled) return;
       if (data.session) {
@@ -87,17 +111,35 @@ export default function ResetPasswordPage() {
 
     setBusy(true);
     try {
+      let token = accessToken;
+
+      // token_hash flow: this is the first point the one-time token is
+      // actually redeemed.
+      if (pendingTokenHash) {
+        const { data, error: verifyError } = await client.auth.verifyOtp({
+          token_hash: pendingTokenHash.tokenHash,
+          type: pendingTokenHash.type as "recovery",
+        });
+        if (verifyError || !data.session) {
+          setError(null);
+          setStatus("invalid");
+          return;
+        }
+        token = data.session.access_token;
+        setAccessToken(token);
+      }
+
       const { error: updateError } = await client.auth.updateUser({ password: newPassword });
       if (updateError) {
         setError(updateError.message);
         return;
       }
 
-      if (accessToken) {
+      if (token) {
         await fetch("/api/auth/reset-password-complete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken }),
+          body: JSON.stringify({ accessToken: token }),
         });
       }
 
