@@ -205,12 +205,46 @@ async function getAccessToken(): Promise<string> {
   return refreshAccessToken();
 }
 
-const RATE_LIMIT_RETRIES = 4;
-const RATE_LIMIT_BASE_DELAY_MS = 1000;
+const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BASE_DELAY_MS = 400;
+// A rate-limited call must not be allowed to sit and sleep: these run inside
+// a request, and several slow calls in sequence overrun the function's
+// timeout, which presents as the page or sync simply hanging. Xero's
+// Retry-After for a daily-limit breach can be thousands of seconds, so it's
+// honoured only up to this ceiling; past that, failing fast and serving
+// stale/partial data beats blocking until the platform kills us.
+const RATE_LIMIT_MAX_DELAY_MS = 2000;
 
-// Xero permits 5 concurrent requests per tenant. Anything fanning out
-// per-staff or per-window must stay under that or the excess comes back 429.
+// Xero permits 5 concurrent requests per tenant. Enforced globally inside
+// xpmFetch rather than at each call site: the fan-outs are at different
+// levels (8 job-list windows, one time.api call per staff member, invoice
+// windows) and throttling them independently still lets their totals
+// collide. One gate in front of every request is the only way to actually
+// hold the line -- and it covers call sites added later for free.
 const XPM_MAX_CONCURRENCY = 4;
+
+let activeXpmRequests = 0;
+const xpmQueue: (() => void)[] = [];
+
+async function acquireXpmSlot(): Promise<void> {
+  if (activeXpmRequests < XPM_MAX_CONCURRENCY) {
+    activeXpmRequests += 1;
+    return;
+  }
+  // A queued caller does NOT increment on wake -- releaseXpmSlot hands its
+  // slot straight over without decrementing, so the count already accounts
+  // for it. Decrementing there and incrementing here would leave the count
+  // briefly below the true figure, and a fresh caller arriving in that gap
+  // would take a slot the woken waiter is also about to claim, putting us
+  // over Xero's limit -- the exact thing this gate exists to prevent.
+  await new Promise<void>((resolve) => xpmQueue.push(resolve));
+}
+
+function releaseXpmSlot(): void {
+  const next = xpmQueue.shift();
+  if (next) next();
+  else activeXpmRequests -= 1;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -243,6 +277,15 @@ async function mapWithConcurrency<T, R>(
 
 export async function xpmFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  await acquireXpmSlot();
+  try {
+    return await xpmFetchUnthrottled<T>(path, init);
+  } finally {
+    releaseXpmSlot();
+  }
+}
+
+async function xpmFetchUnthrottled<T>(path: string, init?: RequestInit): Promise<T> {
   const url = baseUrl() + path;
 
   const buildHeaders = (token: string) => {
@@ -274,9 +317,10 @@ export async function xpmFetch<T>(path: string, init?: RequestInit): Promise<T> 
   // error anyone would see. Retry-After is honoured when Xero sends it.
   for (let attempt = 0; attempt < RATE_LIMIT_RETRIES && isRetryable(res.status); attempt += 1) {
     const retryAfter = Number(res.headers.get("Retry-After"));
-    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+    const suggested = Number.isFinite(retryAfter) && retryAfter > 0
       ? retryAfter * 1000
       : RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt;
+    const waitMs = Math.min(suggested, RATE_LIMIT_MAX_DELAY_MS);
     console.warn(
       `[xpm] ${path} got ${res.status}; retrying in ${waitMs}ms (attempt ${attempt + 1}/${RATE_LIMIT_RETRIES})`,
     );
@@ -751,15 +795,14 @@ export async function fetchXpmTimesheetsForPartner(
     if (job.client?.uuid) clientByJobId.set(job.id, job.client.uuid);
   }
 
-  // Throttled rather than Promise.all over the whole tenant roster: that
-  // fired one time.api call per staff member at once, well past Xero's
-  // 5-concurrent limit, so the surplus 429'd and -- being caught per staff
-  // member below -- silently reported those people as having logged zero
-  // hours. Joshua Manzano's 153h vanishing this way is what found it.
-  const perStaff = await mapWithConcurrency(
-    allStaff,
-    XPM_MAX_CONCURRENCY,
-    async (s) => {
+  // Fan-out is safe here because xpmFetch gates concurrency globally: this
+  // used to be a Promise.all firing one time.api call per staff member at
+  // once, well past Xero's 5-concurrent limit, so the surplus 429'd and --
+  // being caught per staff member below -- silently reported those people as
+  // having logged zero hours. Joshua Manzano's 153h vanishing this way is
+  // what found it.
+  const perStaff = await Promise.all(
+    allStaff.map(async (s) => {
       // A failed call for one person must not fail the whole practice's
       // timesheet load -- but it used to be swallowed entirely, which made
       // "this person's time API errored" indistinguishable from "this
@@ -786,7 +829,7 @@ export async function fetchXpmTimesheetsForPartner(
         });
       }
       return rows;
-    },
+    }),
   );
 
   return perStaff.flat();
