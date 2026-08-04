@@ -47,6 +47,12 @@ export function getBasTasks(board: TaskWithDetails[], today: string): TaskWithDe
 // to elapsed days, even mid-week/mid-month/mid-FY (confirmed decision).
 export const INTERNAL_CLIENT_XPM_ID = "c4a69e58-19b6-4f69-be97-43fa007f6f06"; // Your Finance Department Pty Ltd
 const LEAVE_TASK_NAME = "YFD - Leave";
+// Only genuinely idle time is excluded from utilisation. Matched on the task
+// name containing "idle" rather than an exact string, so an "Idle" variant or
+// a renamed FY job doesn't silently start counting as productive.
+function isIdleTask(taskName: string | null): boolean {
+  return Boolean(taskName && /idle/i.test(taskName));
+}
 const STANDARD_HOURS_PER_DAY = 7.6; // 38hr/week over a 5-day week
 
 export type UtilisationPeriodKey = "week" | "month" | "quarter" | "fy";
@@ -126,6 +132,9 @@ function countWeekdays(start: Date, end: Date): number {
 }
 
 export interface WagesUtilisationResult {
+  // Paid internal time that is neither client work, leave, nor idle --
+  // general admin, paid team meetings. Counts toward utilisation.
+  internalOtherHours: number;
   // The range actually measured, inclusive. Replaces the old period key: a
   // custom range has no key, and callers want to display the dates anyway.
   range: DateRange;
@@ -151,14 +160,24 @@ export function computeWagesUtilisation(
   const endIso = end.toISOString().slice(0, 10);
   const staffIdSet = new Set(staffIds);
 
+  // Utilisation is everything except idle time, against a 7.6hr day.
+  //
+  // The internal client's time is not one undifferentiated lump: alongside
+  // "YFD - Idle" it carries "YFD - General Admin", "YFD - Team Meeting -
+  // Paid" and leave, all of which are paid time a person cannot be marked
+  // down for. Bucketing everything internal-and-not-leave as idle wrote off
+  // 54 of 71 internal hours in Jul-Aug 2026 and understated the practice by
+  // 12 points (65% where 77% was right).
   let clientHours = 0;
   let leaveHours = 0;
+  let internalOtherHours = 0;
   let idleHours = 0;
   for (const t of timesheets) {
     if (!staffIdSet.has(t.staffId) || t.date < startIso || t.date > endIso) continue;
     if (t.clientId !== INTERNAL_CLIENT_XPM_ID) clientHours += t.hours;
+    else if (isIdleTask(t.taskName)) idleHours += t.hours;
     else if (t.taskName === LEAVE_TASK_NAME) leaveHours += t.hours;
-    else idleHours += t.hours;
+    else internalOtherHours += t.hours;
   }
 
   // Capacity is counted only up to today, never to the end of the period.
@@ -170,12 +189,13 @@ export function computeWagesUtilisation(
   // understatement mid-month, mid-quarter and mid-week.
   const capacityEnd = end.getTime() > today.getTime() ? today : end;
   const standardHours = countWeekdays(start, capacityEnd) * STANDARD_HOURS_PER_DAY * staffIds.length;
-  const accounted = clientHours + leaveHours;
+  const accounted = clientHours + leaveHours + internalOtherHours;
 
   return {
     range: { start: startIso, end: endIso },
     clientHours,
     leaveHours,
+    internalOtherHours,
     idleHours,
     standardHours,
     pct: standardHours > 0 ? Math.round((accounted / standardHours) * 100) : 0,

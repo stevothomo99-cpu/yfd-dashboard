@@ -92,7 +92,8 @@ function EmployeeRow({
     [expanded, timesheets, staffIds, selection, today, clientNamesMap],
   );
 
-  const nonBillable = utilisation.leaveHours + utilisation.idleHours;
+  const nonBillable =
+    utilisation.leaveHours + utilisation.internalOtherHours + utilisation.idleHours;
   const loggedTotal = utilisation.clientHours + nonBillable;
   const billablePct = loggedTotal > 0 ? Math.round((utilisation.clientHours / loggedTotal) * 100) : null;
 
@@ -265,7 +266,7 @@ export default function TimesheetsPageClient({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
           gap: "14px",
           marginBottom: "14px",
         }}
@@ -287,7 +288,11 @@ export default function TimesheetsPageClient({
           label="Capacity used"
           value={utilisation.pct + "%"}
           sub={
-            (utilisation.clientHours + utilisation.leaveHours).toFixed(1) +
+            (
+              utilisation.clientHours +
+              utilisation.leaveHours +
+              utilisation.internalOtherHours
+            ).toFixed(1) +
             " of " +
             utilisation.standardHours.toFixed(1) +
             " std hrs to date"
@@ -304,8 +309,18 @@ export default function TimesheetsPageClient({
           }
         />
         <KpiCard label="Client hours" value={utilisation.clientHours.toFixed(1) + " hrs"} />
+        <KpiCard
+          label="Admin / meetings"
+          value={utilisation.internalOtherHours.toFixed(1) + " hrs"}
+          sub="Paid internal — counts as utilised"
+        />
         <KpiCard label="Leave" value={utilisation.leaveHours.toFixed(1) + " hrs"} />
-        <KpiCard label="Idle / non-billable" value={utilisation.idleHours.toFixed(1) + " hrs"} />
+        <KpiCard
+          label="Idle"
+          value={utilisation.idleHours.toFixed(1) + " hrs"}
+          sub="The only time excluded"
+          valueColor={utilisation.idleHours > 0 ? "#e24b4a" : undefined}
+        />
       </div>
 
       <div
