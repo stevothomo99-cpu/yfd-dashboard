@@ -4,6 +4,7 @@ import {
   fetchXpmJobsForPartner,
   fetchXpmClientsWithManagerForPartner,
   fetchAllXpmStaffRecords,
+  invalidateXpmTimesheets,
   isXpmConfigured,
   XpmNotConfiguredError,
 } from "./xpm";
@@ -237,6 +238,11 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     const { error: staffDeleteError } = await admin.from("staff").delete().in("id", staleStaffIds);
     if (staffDeleteError) throw new Error(`Stale staff cleanup failed: ${staffDeleteError.message}`);
   }
+
+  // Timesheets are served from a cache this sync doesn't otherwise touch, so
+  // without this a sync leaves stale (possibly rate-limit-truncated) hours in
+  // place -- which reads as "I synced and the numbers are still wrong".
+  await invalidateXpmTimesheets(partnerName);
 
   return {
     partnerName,

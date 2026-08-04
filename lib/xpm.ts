@@ -1,4 +1,5 @@
 import {
+  cacheDelete,
   cacheGet,
   cacheSet,
   cacheGetEncrypted,
@@ -543,24 +544,41 @@ function rollingWindowBounds(windowsAgo: number): { from: string; to: string } {
   return { from: formatYyyyMmDd(from), to: formatYyyyMmDd(to) };
 }
 
-// 8 windows (~8 years) is generous headroom for a practice whose oldest
-// still-open jobs seen so far go back to mid-2024.
-const JOB_LIST_WINDOW_COUNT = 8;
+// Upper bound on how far back to look, not a target: 8 windows is ~8 years.
+const JOB_LIST_WINDOW_LIMIT = 8;
+// Stop once this many consecutive windows come back empty. Two rather than
+// one so a single quiet year mid-history doesn't truncate the walk.
+const JOB_LIST_EMPTY_WINDOW_STOP = 2;
 
+// Walks backwards a window at a time and stops early once history runs dry,
+// rather than always issuing all 8 calls in one Promise.all.
+//
+// The old shape was the main source of Xero 429s: 8 simultaneous calls on
+// every timesheet load, reaching back to 2018 for a practice whose oldest
+// still-open job is mid-2024 -- so most of them were guaranteed-empty
+// requests that cost rate-limit budget and made the useful ones fail.
+//
+// Sequential is not slower in practice: xpmFetch caps concurrency at 4, so
+// 8 calls were already two batches, and this typically makes three or four
+// calls in total.
 async function fetchAllInProgressXpmJobs(): Promise<XpmJob[]> {
-  const windows = Array.from({ length: JOB_LIST_WINDOW_COUNT }, (_, i) => rollingWindowBounds(i));
-  const responses = await Promise.all(
-    windows.map(({ from, to }) =>
-      xpmFetch<XpmJobListResponse>(`/job.api/list?status=InProgress&from=${from}&to=${to}`),
-    ),
-  );
-
   const byUuid = new Map<string, XpmJob>();
-  for (const res of responses) {
-    for (const job of res.jobs ?? []) {
+  let consecutiveEmpty = 0;
+
+  for (let i = 0; i < JOB_LIST_WINDOW_LIMIT; i += 1) {
+    const { from, to } = rollingWindowBounds(i);
+    const res = await xpmFetch<XpmJobListResponse>(
+      `/job.api/list?status=InProgress&from=${from}&to=${to}`,
+    );
+    const jobs = res.jobs ?? [];
+    for (const job of jobs) {
       if (!byUuid.has(job.uuid)) byUuid.set(job.uuid, job);
     }
+
+    consecutiveEmpty = jobs.length === 0 ? consecutiveEmpty + 1 : 0;
+    if (consecutiveEmpty >= JOB_LIST_EMPTY_WINDOW_STOP) break;
   }
+
   return Array.from(byUuid.values());
 }
 
@@ -833,6 +851,18 @@ export async function fetchXpmTimesheetsForPartner(
   );
 
   return perStaff.flat();
+}
+
+// Drops the cached timesheet payload for a Partner, forcing the next read to
+// go back to XPM.
+//
+// Needed because the workflow sync rebuilds staff/customers/jobs in Supabase
+// but timesheets are served from this cache, so a sync could not repair a
+// bad payload -- and a payload captured while Xero was rate-limiting is
+// exactly that: missing whole staff members, held for TIMESHEETS_STALE_TTL,
+// with the background refresh hitting the same 429s and never self-healing.
+export async function invalidateXpmTimesheets(partnerName: string): Promise<void> {
+  await cacheDelete(TIMESHEETS_KEY(partnerName));
 }
 
 // The most expensive upstream call in the app -- a job-list page-through
