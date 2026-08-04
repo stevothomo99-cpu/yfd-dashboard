@@ -65,9 +65,20 @@ export default async function TimesheetsPage() {
       : `${entry.name} — no Account Manager in XPM`;
   }
 
+  // Partners are excluded from the practice-wide utilisation figures: they
+  // don't carry a delivery workload, so counting their 38hr week in the
+  // capacity denominator understates everyone else's efficiency (one Partner
+  // in a team of four drags the practice percentage down by a quarter). They
+  // still appear in the By employee table, so any time they do log is
+  // visible -- it just doesn't set the bar for the team.
   const staffOptions = staff
     .filter((s): s is typeof s & { xpmStaffId: string } => Boolean(s.xpmStaffId))
-    .map((s) => ({ id: s.xpmStaffId, name: s.name }))
+    .map((s) => ({
+      id: s.xpmStaffId,
+      name: s.name,
+      role: s.role,
+      countsTowardPracticeTotal: s.role !== "Partner",
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
