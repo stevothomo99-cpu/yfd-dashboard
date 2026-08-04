@@ -7,6 +7,8 @@ import {
   computeHoursByClient,
   computeWagesUtilisation,
   UTILISATION_PERIODS,
+  type DateRange,
+  type PeriodSelection,
   type UtilisationPeriodKey,
   type ClientHoursBreakdown,
 } from "@/lib/workOverview";
@@ -62,7 +64,7 @@ function ClientBreakdownList({ byClient, totalHours }: { byClient: ClientHoursBr
 function EmployeeRow({
   staff,
   timesheets,
-  period,
+  selection,
   today,
   clientNamesMap,
   expanded,
@@ -70,7 +72,7 @@ function EmployeeRow({
 }: {
   staff: StaffOption;
   timesheets: XpmTimesheet[];
-  period: UtilisationPeriodKey;
+  selection: PeriodSelection;
   today: string;
   clientNamesMap: Map<string, string>;
   expanded: boolean;
@@ -78,12 +80,12 @@ function EmployeeRow({
 }) {
   const staffIds = useMemo(() => [staff.id], [staff.id]);
   const utilisation = useMemo(
-    () => computeWagesUtilisation(timesheets, staffIds, period, today),
-    [timesheets, staffIds, period, today],
+    () => computeWagesUtilisation(timesheets, staffIds, selection, today),
+    [timesheets, staffIds, selection, today],
   );
   const byClient = useMemo(
-    () => (expanded ? computeHoursByClient(timesheets, staffIds, period, today, clientNamesMap) : []),
-    [expanded, timesheets, staffIds, period, today, clientNamesMap],
+    () => (expanded ? computeHoursByClient(timesheets, staffIds, selection, today, clientNamesMap) : []),
+    [expanded, timesheets, staffIds, selection, today, clientNamesMap],
   );
 
   const nonBillable = utilisation.leaveHours + utilisation.idleHours;
@@ -134,7 +136,9 @@ export default function TimesheetsPageClient({
   clientNamesById,
   message,
 }: TimesheetsPageClientProps) {
-  const [period, setPeriod] = useState<UtilisationPeriodKey>("week");
+  const [period, setPeriod] = useState<UtilisationPeriodKey | "custom">("week");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [showTimeByClient, setShowTimeByClient] = useState(false);
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
 
@@ -142,14 +146,25 @@ export default function TimesheetsPageClient({
   const today = todayIso();
   const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
 
+  // A half-filled custom range would silently measure something nobody
+  // asked for, so it falls back to the last fixed period until both ends
+  // are set. Reversed dates are swapped rather than rejected.
+  const customComplete = period === "custom" && Boolean(customFrom) && Boolean(customTo);
+  const selection: PeriodSelection = useMemo(() => {
+    if (!customComplete) return period === "custom" ? "week" : period;
+    return customFrom <= customTo
+      ? { start: customFrom, end: customTo }
+      : { start: customTo, end: customFrom };
+  }, [customComplete, period, customFrom, customTo]);
+
   const utilisation = useMemo(
-    () => computeWagesUtilisation(timesheets, allStaffIds, period, today),
-    [timesheets, allStaffIds, period, today],
+    () => computeWagesUtilisation(timesheets, allStaffIds, selection, today),
+    [timesheets, allStaffIds, selection, today],
   );
 
   const byClient = useMemo(
-    () => computeHoursByClient(timesheets, allStaffIds, period, today, clientNamesMap),
-    [timesheets, allStaffIds, period, today, clientNamesMap],
+    () => computeHoursByClient(timesheets, allStaffIds, selection, today, clientNamesMap),
+    [timesheets, allStaffIds, selection, today, clientNamesMap],
   );
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
@@ -177,29 +192,48 @@ export default function TimesheetsPageClient({
         </div>
       ) : null}
 
-      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "0 0 14px" }}>
-        {UTILISATION_PERIODS.map((p) => {
-          const active = p.value === period;
-          return (
-            <button
-              key={p.value}
-              type="button"
-              onClick={() => setPeriod(p.value)}
-              style={{
-                fontSize: "12px",
-                fontWeight: 500,
-                padding: "6px 12px",
-                borderRadius: "999px",
-                background: active ? "#111111" : "white",
-                color: active ? "white" : "#444441",
-                border: "0.5px solid " + (active ? "#111111" : "#e1e0d9"),
-                cursor: "pointer",
-              }}
-            >
-              {p.label}
-            </button>
-          );
-        })}
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", padding: "0 0 14px" }}>
+        {UTILISATION_PERIODS.map((p) => (
+          <PeriodButton
+            key={p.value}
+            label={p.label}
+            active={p.value === period}
+            onClick={() => setPeriod(p.value)}
+          />
+        ))}
+        <PeriodButton label="Custom…" active={period === "custom"} onClick={() => setPeriod("custom")} />
+
+        {period === "custom" ? (
+          <div style={{ display: "flex", gap: "6px", alignItems: "center", marginLeft: "4px" }}>
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              aria-label="From date"
+              style={dateInputStyle}
+            />
+            <span style={{ fontSize: "12px", color: "#888780" }}>to</span>
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom || undefined}
+              onChange={(e) => setCustomTo(e.target.value)}
+              aria-label="To date"
+              style={dateInputStyle}
+            />
+            {!customComplete ? (
+              <span style={{ fontSize: "11px", color: "#888780" }}>
+                Pick both dates — showing this week meanwhile.
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ fontSize: "11px", color: "#888780", padding: "0 0 12px" }}>
+        Measuring {fmtRange(utilisation.range)}
+        {utilisation.range.end > today ? " (capacity counted to today)" : ""}
       </div>
 
       <div
@@ -287,7 +321,7 @@ export default function TimesheetsPageClient({
                 key={s.id}
                 staff={s}
                 timesheets={timesheets}
-                period={period}
+                selection={selection}
                 today={today}
                 clientNamesMap={clientNamesMap}
                 expanded={expandedStaffId === s.id}
@@ -300,3 +334,53 @@ export default function TimesheetsPageClient({
     </div>
   );
 }
+
+function PeriodButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        fontSize: "12px",
+        fontWeight: 500,
+        padding: "6px 12px",
+        borderRadius: "999px",
+        background: active ? "#111111" : "white",
+        color: active ? "white" : "#444441",
+        border: "0.5px solid " + (active ? "#111111" : "#e1e0d9"),
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function fmtRange(range: DateRange): string {
+  const fmt = (iso: string) =>
+    new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  return `${fmt(range.start)} – ${fmt(range.end)}`;
+}
+
+const dateInputStyle: React.CSSProperties = {
+  fontSize: "12px",
+  padding: "5px 8px",
+  borderRadius: "8px",
+  border: "0.5px solid #e1e0d9",
+  background: "white",
+  color: "#111111",
+  outline: "none",
+  fontFamily: "inherit",
+};
