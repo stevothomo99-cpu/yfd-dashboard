@@ -180,6 +180,14 @@ export default function TimesheetsPageClient({
     [timesheets, practiceStaffIds, selection, today, clientNamesMap],
   );
 
+  // Billable as a share of time actually logged -- XPM's own definition, and
+  // the same basis as the per-employee column further down. Leave and idle
+  // both count as logged-but-not-billable, matching XPM's Non-Bill column.
+  const loggedTotal =
+    utilisation.clientHours + utilisation.leaveHours + utilisation.idleHours;
+  const billableSharePct =
+    loggedTotal > 0 ? Math.round((utilisation.clientHours / loggedTotal) * 100) : null;
+
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
 
   return (
@@ -257,15 +265,24 @@ export default function TimesheetsPageClient({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
           gap: "14px",
           marginBottom: "14px",
         }}
       >
-        {/* Distinct from the per-employee "billable share" column below:
-            this is time accounted for against available capacity so far,
-            that one is billable as a share of time actually logged. Two
-            different questions, so they carry different labels. */}
+        {/* Two different denominators, side by side on purpose, because
+            comparing the wrong one against XPM's own Staff Time Summary
+            Report wastes an afternoon:
+
+            "Capacity used"   -- against available capacity to date. Answers
+                                 "is the team's time accounted for", and so
+                                 falls when people under-log or have spare
+                                 capacity.
+            "Billable share"  -- against time actually logged. This is the
+                                 figure XPM's report calls %, and the same
+                                 basis as the per-employee column below.
+
+            For 6 Jul - 2 Aug these read 65% and 81% off identical data. */}
         <KpiCard
           label="Capacity used"
           value={utilisation.pct + "%"}
@@ -276,6 +293,15 @@ export default function TimesheetsPageClient({
             " std hrs to date"
           }
           valueColor={utilisation.pct < 70 ? "#e24b4a" : undefined}
+        />
+        <KpiCard
+          label="Billable share"
+          value={billableSharePct !== null ? billableSharePct + "%" : "—"}
+          sub={
+            billableSharePct !== null
+              ? utilisation.clientHours.toFixed(1) + " of " + loggedTotal.toFixed(1) + " hrs logged"
+              : "No time logged"
+          }
         />
         <KpiCard label="Client hours" value={utilisation.clientHours.toFixed(1) + " hrs"} />
         <KpiCard label="Leave" value={utilisation.leaveHours.toFixed(1) + " hrs"} />
