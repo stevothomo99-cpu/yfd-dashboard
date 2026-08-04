@@ -130,6 +130,8 @@ The Karbon-replacement data model, all in the `yfd-workflow` Supabase project, a
 1. `dashboard_users.role`: `"admin" | "user"` — a login-level flag, gates nav and gives full bypass everywhere (task permissions, To-Do visibility, etc.).
 2. `staff.role`: `"Partner" | "Manager" | "Staff"` — XPM-derived work hierarchy. **`jobs.manager_id` is actually populated by "Staff"-role people's ids**, not "Manager" — confirmed directly against the practice; the schema's "Manager" tier is effectively vestigial. A Staff-role person's own board = `getInProgressJobsForManager(staff.id)`.
 
+**Client allocations**: a client carries **both** of its XPM allocations on its own row — `customers.partner_id` (XPM `accountManager`) and `customers.manager_id` (XPM `jobManager`). `/clients` reads the Manager from `customers.manager_id`, *not* by aggregating its jobs' managers: doing that showed "Multiple" for any client whose work is legitimately split across service lines (a bookkeeper on the BAS jobs, an advisor on the CFO job), and let stale legacy jobs keep listing managers who no longer look after the client. `jobs.manager_id` still exists and still drives each person's own work board — a job's own manager, falling back to its client's.
+
 **Tables**: `staff`, `customers`, `jobs`, `tasks`, `statuses`, `task_types`, `customer_notes`, `customer_files`, `task_templates` + `task_template_items`, `todo_items` (§4.8). Only staff/customers/jobs are XPM-synced (full-replace, `lib/xpmSync.ts`); everything else is native to this app.
 
 **Task permissions** (`getJobsInScopeForStaff`, `canModifyTask` in `lib/workflow.ts`):

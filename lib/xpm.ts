@@ -374,6 +374,33 @@ export async function getXpmClientDirectory(): Promise<Record<string, XpmClientD
   });
 }
 
+export interface XpmPartnerOption {
+  name: string;
+  clientCount: number;
+}
+
+// The valid values for the Partner filter in Settings: every distinct
+// accountManager across active XPM clients, with how many clients each one
+// holds.
+//
+// Sourced from accountManager rather than the XPM staff roster because that
+// is precisely the field the Partner filter is compared against (see
+// fetchActiveXpmClientsForPartner), so every option here is guaranteed to
+// select at least one client -- whereas an arbitrary staff name could match
+// nothing and silently sync an empty practice. Reuses the cached client
+// directory, so offering this list costs no extra XPM call.
+export async function getXpmPartnerOptions(): Promise<XpmPartnerOption[]> {
+  const directory = await getXpmClientDirectory();
+  const counts = new Map<string, number>();
+  for (const entry of Object.values(directory)) {
+    if (!entry.accountManagerName) continue;
+    counts.set(entry.accountManagerName, (counts.get(entry.accountManagerName) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([name, clientCount]) => ({ name, clientCount }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // Active clients whose accountManager (Partner) matches the given name --
 // shared by client/staff/job derivation so they all agree on exactly which
 // clients are "ours" out of the whole tenant.

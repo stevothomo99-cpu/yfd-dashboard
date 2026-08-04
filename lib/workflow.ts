@@ -41,7 +41,10 @@ interface CustomerRow {
   id: string;
   xpm_client_id: string | null;
   name: string;
+  // Both of a client's XPM allocations, stored on the client row:
+  // partner_id is its accountManager, manager_id its jobManager.
   partner_id: string | null;
+  manager_id: string | null;
 }
 
 interface JobRow {
@@ -172,7 +175,7 @@ export async function searchClientsForPartner(
   const admin = getSupabaseAdmin();
   let query = admin
     .from("customers")
-    .select("id, xpm_client_id, name, partner_id")
+    .select("id, xpm_client_id, name, partner_id, manager_id")
     .eq("partner_id", partnerId)
     .order("name");
 
@@ -284,7 +287,7 @@ const fetchLookupMaps = cache(async function fetchLookupMaps() {
       admin.from("task_types").select("id, name, color, sort_order").returns<TaskTypeRow[]>(),
       admin.from("staff").select("id, xpm_staff_id, name, email, role, included").returns<StaffRow[]>(),
       admin.from("jobs").select("id, customer_id, xpm_job_id, name, partner_id, manager_id").returns<JobRow[]>(),
-      admin.from("customers").select("id, xpm_client_id, name, partner_id").returns<CustomerRow[]>(),
+      admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").returns<CustomerRow[]>(),
     ]);
 
   return {
@@ -607,14 +610,14 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskWithD
   return getTasksForJobIds((jobs ?? []).map((j) => j.id));
 }
 
-// Builds the /clients tile-grid summary for every customer: manager (from
-// their job(s)) and task counts by tone. "Multiple" is shown for a client
-// whose jobs have more than one distinct manager.
+// Builds the /clients tile-grid summary for every customer: its Manager
+// (from the client's own XPM allocation -- see the note at the derivation
+// below) and task counts by tone.
 export const getClientSummaries = cache(async function getClientSummaries(): Promise<ClientSummary[]> {
   const admin = getSupabaseAdmin();
   const [{ data: customers, error: customersError }, { data: allTasks, error: tasksError }, lookups] =
     await Promise.all([
-      admin.from("customers").select("id, xpm_client_id, name, partner_id").order("name").returns<CustomerRow[]>(),
+      admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").order("name").returns<CustomerRow[]>(),
       // Only the five columns the tallies below actually read. This used to
       // be select("*"), which pulled every task body over the wire purely to
       // count them.
@@ -681,15 +684,13 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
   }
 
   return (customers ?? []).map((c) => {
-    const customerJobs = jobsByCustomerId.get(c.id) ?? [];
-    const managerIds = new Set(customerJobs.map((j) => j.manager_id).filter((id): id is string => Boolean(id)));
-
-    let managerName: string | null = null;
-    if (managerIds.size === 1) {
-      managerName = lookups.staffById.get(Array.from(managerIds)[0])?.name ?? null;
-    } else if (managerIds.size > 1) {
-      managerName = "Multiple";
-    }
+    // The client's own XPM Manager (jobManager), not an aggregate of its
+    // jobs' managers. Deriving it from jobs produced "Multiple" for any
+    // client whose work is legitimately split across service lines (a
+    // bookkeeper on the BAS jobs, an advisor on the CFO job), and let stale
+    // legacy jobs keep listing managers who no longer look after the client.
+    const managerName = c.manager_id ? lookups.staffById.get(c.manager_id)?.name ?? null : null;
+    const managerIds = c.manager_id ? [c.manager_id] : [];
 
     const tally = tallies.get(c.id);
 
@@ -698,7 +699,7 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
       xpmClientId: c.xpm_client_id,
       name: c.name,
       managerName,
-      managerIds: Array.from(managerIds),
+      managerIds,
       overdueCount: tally?.overdueCount ?? 0,
       inProgressCount: tally?.inProgressCount ?? 0,
       completedCount: tally?.completedCount ?? 0,
