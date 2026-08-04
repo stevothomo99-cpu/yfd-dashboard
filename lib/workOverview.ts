@@ -95,6 +95,25 @@ export function periodBounds(period: UtilisationPeriodKey, today: Date): { start
   }
 }
 
+// An explicit, inclusive date range -- the alternative to one of the fixed
+// week/month/quarter/fy buttons, so Timesheets can offer a custom From/To.
+export interface DateRange {
+  start: string; // ISO yyyy-mm-dd, inclusive
+  end: string; // ISO yyyy-mm-dd, inclusive
+}
+
+// Either a named period or an explicit range. Accepted everywhere a period
+// key used to be, so existing callers are unaffected.
+export type PeriodSelection = UtilisationPeriodKey | DateRange;
+
+function resolveSelection(selection: PeriodSelection, today: Date): { start: Date; end: Date } {
+  if (typeof selection === "string") return periodBounds(selection, today);
+  return {
+    start: new Date(selection.start + "T00:00:00Z"),
+    end: new Date(selection.end + "T00:00:00Z"),
+  };
+}
+
 function countWeekdays(start: Date, end: Date): number {
   let count = 0;
   const d = new Date(start);
@@ -107,7 +126,9 @@ function countWeekdays(start: Date, end: Date): number {
 }
 
 export interface WagesUtilisationResult {
-  period: UtilisationPeriodKey;
+  // The range actually measured, inclusive. Replaces the old period key: a
+  // custom range has no key, and callers want to display the dates anyway.
+  range: DateRange;
   clientHours: number;
   leaveHours: number;
   idleHours: number;
@@ -121,11 +142,11 @@ export interface WagesUtilisationResult {
 export function computeWagesUtilisation(
   timesheets: XpmTimesheet[],
   staffIds: string[],
-  period: UtilisationPeriodKey,
+  selection: PeriodSelection,
   todayIso: string,
 ): WagesUtilisationResult {
   const today = new Date(todayIso + "T00:00:00Z");
-  const { start, end } = periodBounds(period, today);
+  const { start, end } = resolveSelection(selection, today);
   const startIso = start.toISOString().slice(0, 10);
   const endIso = end.toISOString().slice(0, 10);
   const staffIdSet = new Set(staffIds);
@@ -152,7 +173,7 @@ export function computeWagesUtilisation(
   const accounted = clientHours + leaveHours;
 
   return {
-    period,
+    range: { start: startIso, end: endIso },
     clientHours,
     leaveHours,
     idleHours,
@@ -172,12 +193,12 @@ export interface ClientHoursBreakdown {
 export function computeHoursByClient(
   timesheets: XpmTimesheet[],
   staffIds: string[],
-  period: UtilisationPeriodKey,
+  selection: PeriodSelection,
   todayIso: string,
   clientNamesById: Map<string, string>,
 ): ClientHoursBreakdown[] {
   const today = new Date(todayIso + "T00:00:00Z");
-  const { start, end } = periodBounds(period, today);
+  const { start, end } = resolveSelection(selection, today);
   const startIso = start.toISOString().slice(0, 10);
   const endIso = end.toISOString().slice(0, 10);
   const staffIdSet = new Set(staffIds);
