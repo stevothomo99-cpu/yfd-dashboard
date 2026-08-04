@@ -1,6 +1,12 @@
 import SettingsPageClient from "./SettingsPageClient";
 import { getSettings } from "@/lib/settings";
-import { getXpmStaff, isXpmConfigured, XpmNotConfiguredError } from "@/lib/xpm";
+import {
+  getXpmStaff,
+  getXpmPartnerOptions,
+  isXpmConfigured,
+  XpmNotConfiguredError,
+  type XpmPartnerOption,
+} from "@/lib/xpm";
 import { loadKarbonUsersSnapshot } from "@/lib/karbon";
 import { linkKarbonToXpmByEmail, type LinkedStaff } from "@/lib/staffLink";
 import { STAFF, KARBON_USERS } from "@/lib/mock";
@@ -14,6 +20,9 @@ export interface SettingsSnapshot {
   karbonMode: "live" | "mock";
   xpmMode: "live" | "mock";
   partnerName: string;
+  // Empty when XPM isn't configured or the lookup failed -- the client then
+  // falls back to a free-text field so the setting stays editable.
+  partnerOptions: XpmPartnerOption[];
   roster: RosterEntry[];
   syncedAt: string;
   karbonMessage?: string;
@@ -57,14 +66,26 @@ async function loadXpmStaffSnapshot(
   }
 }
 
+// Best-effort: an empty list makes the Partner field fall back to free
+// text, which is how it behaved before the dropdown existed.
+async function loadPartnerOptions(): Promise<XpmPartnerOption[]> {
+  if (!isXpmConfigured()) return [];
+  try {
+    return await getXpmPartnerOptions();
+  } catch {
+    return [];
+  }
+}
+
 export default async function SettingsPage() {
   const settings = await getSettings();
 
   // Load the full, unfiltered Karbon roster (not exclusion-filtered) so the
   // toggle list can show everyone, including people currently excluded.
-  const [karbonSnapshot, xpmSnapshot] = await Promise.all([
+  const [karbonSnapshot, xpmSnapshot, partnerOptions] = await Promise.all([
     loadKarbonUsersSnapshot([], KARBON_USERS),
     loadXpmStaffSnapshot(settings.partnerName),
+    loadPartnerOptions(),
   ]);
 
   const linked = linkKarbonToXpmByEmail(karbonSnapshot.users, xpmSnapshot.staff);
@@ -81,6 +102,7 @@ export default async function SettingsPage() {
         karbonMode: karbonSnapshot.mode,
         xpmMode: xpmSnapshot.mode,
         partnerName: settings.partnerName,
+        partnerOptions,
         roster,
         syncedAt: new Date().toISOString(),
         karbonMessage: karbonSnapshot.message,

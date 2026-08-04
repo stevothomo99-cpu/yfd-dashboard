@@ -28,6 +28,7 @@ interface WorkflowSyncResult {
 }
 
 export default function SettingsPageClient({ initial }: { initial: SettingsSnapshot }) {
+  const partnerOptions = initial.partnerOptions;
   const [partnerName, setPartnerName] = useState(initial.partnerName);
   const [snapshot, setSnapshot] = useState(initial);
   const [syncing, setSyncing] = useState(false);
@@ -173,28 +174,44 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
           XPM Partner filter
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
-          Only jobs where Partner = this exact name are included. Staff returned with Manager role on
-          those jobs are matched to the Karbon roster below by email.
+          Only clients whose XPM <strong>Account Manager</strong> is this person are included, along
+          with their jobs. Each job&rsquo;s XPM <strong>Job Manager</strong> becomes the Manager you
+          filter by on Clients and My Work.
+          {partnerOptions.length === 0
+            ? " Listing Account Managers from XPM isn't available right now, so this is a free-text field -- it must match an XPM staff name exactly."
+            : ""}
         </div>
 
         <div style={{ display: "flex", gap: "10px", alignItems: "stretch", flexWrap: "wrap" }}>
-          <input
-            type="text"
-            value={partnerName}
-            onChange={(e) => setPartnerName(e.target.value)}
-            placeholder="e.g. Steve Thompson"
-            style={{
-              flex: 1,
-              minWidth: "240px",
-              fontSize: "13px",
-              padding: "10px 14px",
-              borderRadius: "8px",
-              border: "0.5px solid #e1e0d9",
-              background: "white",
-              color: "#111111",
-              outline: "none",
-            }}
-          />
+          {partnerOptions.length > 0 ? (
+            <select
+              value={partnerName}
+              onChange={(e) => setPartnerName(e.target.value)}
+              aria-label="XPM Partner"
+              style={partnerFieldStyle}
+            >
+              <option value="">Select a Partner…</option>
+              {partnerOptions.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name} ({p.clientCount} client{p.clientCount === 1 ? "" : "s"})
+                </option>
+              ))}
+              {/* Keep whatever is currently saved selectable even if XPM no
+                  longer lists it -- otherwise opening this page would
+                  silently offer to change a working setting. */}
+              {partnerName && !partnerOptions.some((p) => p.name === partnerName) ? (
+                <option value={partnerName}>{partnerName} (saved -- not an Account Manager in XPM)</option>
+              ) : null}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={partnerName}
+              onChange={(e) => setPartnerName(e.target.value)}
+              placeholder="e.g. Steve Thomas"
+              style={partnerFieldStyle}
+            />
+          )}
           <button
             type="button"
             disabled={!partnerName.trim() || syncing}
@@ -392,3 +409,16 @@ function Banner({ tone, children }: { tone: "warn" | "info" | "error"; children:
     </div>
   );
 }
+
+const partnerFieldStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: "240px",
+  fontSize: "13px",
+  padding: "10px 14px",
+  borderRadius: "8px",
+  border: "0.5px solid #e1e0d9",
+  background: "white",
+  color: "#111111",
+  outline: "none",
+  fontFamily: "inherit",
+};
