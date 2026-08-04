@@ -700,7 +700,17 @@ export async function fetchXpmTimesheetsForPartner(
 
   const perStaff = await Promise.all(
     allStaff.map(async (s) => {
-      const entries = await fetchXpmTimeEntriesForStaff(s.uuid, from, to).catch(() => [] as XpmTimeEntry[]);
+      // A failed call for one person must not fail the whole practice's
+      // timesheet load -- but it used to be swallowed entirely, which made
+      // "this person's time API errored" indistinguishable from "this
+      // person logged nothing". Logged loudly now.
+      const entries = await fetchXpmTimeEntriesForStaff(s.uuid, from, to).catch((err) => {
+        console.error(
+          `[xpm] time.api failed for staff ${s.name} (${s.uuid}) -- their hours will read as zero:`,
+          err instanceof Error ? err.message : err,
+        );
+        return [] as XpmTimeEntry[];
+      });
       const rows: XpmTimesheet[] = [];
       for (const e of entries) {
         const clientId = e.job?.id ? clientByJobId.get(e.job.id) : undefined;
@@ -727,6 +737,89 @@ export async function fetchXpmTimesheetsForPartner(
 // and it sits on the critical path of /dashboard, /clients and /timesheets.
 // Served stale-while-revalidate so an expired cache costs a background
 // refresh rather than making whoever loaded the page wait for all of it.
+export interface XpmTimesheetDiagnosticRow {
+  staffName: string;
+  staffId: string;
+  fetchFailed: boolean;
+  rawEntries: number;
+  keptEntries: number;
+  keptHours: number;
+  droppedEntries: number;
+  droppedHours: number;
+  // Jobs the entries were logged against that aren't in the Partner's job
+  // list, so every entry against them was discarded.
+  droppedJobs: { id: string; name: string; hours: number }[];
+}
+
+// Why a staff member reads as zero hours. Three quite different causes look
+// identical on /timesheets -- they logged nothing, their time.api call
+// failed, or everything they logged was against a job outside the Partner's
+// job list (a client allocated elsewhere, unallocated, or archived) and got
+// discarded by fetchXpmTimesheetsForPartner's filter.
+//
+// Deliberately uncached and not Partner-filtered on the staff side: it walks
+// the same path as the real fetch and reports what that path threw away.
+export async function diagnoseXpmTimesheetsForPartner(
+  partnerName: string,
+): Promise<XpmTimesheetDiagnosticRow[]> {
+  if (!isXpmConfigured()) throw new XpmNotConfiguredError();
+  const { from, to } = xpmJobListDateRange();
+
+  const [jobs, allStaff] = await Promise.all([
+    fetchXpmJobsForPartner(partnerName),
+    fetchAllXpmStaffRecords(),
+  ]);
+
+  const clientByJobId = new Map<string, string>();
+  for (const job of jobs) {
+    if (job.client?.uuid) clientByJobId.set(job.id, job.client.uuid);
+  }
+
+  return Promise.all(
+    allStaff.map(async (s) => {
+      let fetchFailed = false;
+      const entries = await fetchXpmTimeEntriesForStaff(s.uuid, from, to).catch(() => {
+        fetchFailed = true;
+        return [] as XpmTimeEntry[];
+      });
+
+      let keptEntries = 0;
+      let keptHours = 0;
+      let droppedEntries = 0;
+      let droppedHours = 0;
+      const droppedByJob = new Map<string, { id: string; name: string; hours: number }>();
+
+      for (const e of entries) {
+        const hours = e.minutes / 60;
+        const clientId = e.job?.id ? clientByJobId.get(e.job.id) : undefined;
+        if (clientId && e.job) {
+          keptEntries += 1;
+          keptHours += hours;
+          continue;
+        }
+        droppedEntries += 1;
+        droppedHours += hours;
+        const id = e.job?.id ?? "(no job on entry)";
+        const existing = droppedByJob.get(id);
+        if (existing) existing.hours += hours;
+        else droppedByJob.set(id, { id, name: e.job?.name ?? "(no job on entry)", hours });
+      }
+
+      return {
+        staffName: s.name,
+        staffId: s.uuid,
+        fetchFailed,
+        rawEntries: entries.length,
+        keptEntries,
+        keptHours,
+        droppedEntries,
+        droppedHours,
+        droppedJobs: Array.from(droppedByJob.values()).sort((a, b) => b.hours - a.hours),
+      };
+    }),
+  );
+}
+
 export async function getXpmTimesheets(
   partnerName: string,
   options: { forceRefresh?: boolean } = {},
