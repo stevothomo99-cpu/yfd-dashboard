@@ -132,8 +132,10 @@ export interface ClientSummary {
   name: string;
   managerName: string | null;
   // Every distinct staff id managing one of this client's jobs -- lets the
-  // Clients page filter by a single staff member even when managerName
-  // shows "Multiple".
+  // The client's Manager id, as a list purely so the Clients page filter
+  // can stay a simple `includes` check. Holds at most one id -- a client has
+  // one Manager in XPM (its jobManager); this is not an aggregate over its
+  // jobs' managers.
   managerIds: string[];
   overdueCount: number;
   inProgressCount: number;

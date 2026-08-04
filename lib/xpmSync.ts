@@ -118,10 +118,22 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
 
   // -- Customers: every active client whose accountManager is the Partner
   // (deduped by xpm_client_id, same reasoning as staff above) --
-  const customerById = new Map<string, { xpm_client_id: string; name: string; partner_id: string }>();
+  // manager_id is the client's own XPM jobManager -- stored on the client
+  // rather than only used as a per-job fallback, so /clients can show "who
+  // manages this client" without inferring it from the client's job list
+  // (which conflates service-line splits and stale legacy jobs).
+  const customerById = new Map<
+    string,
+    { xpm_client_id: string; name: string; partner_id: string; manager_id: string | null }
+  >();
   for (const c of clients) {
     if (customerById.has(c.id)) continue;
-    customerById.set(c.id, { xpm_client_id: c.id, name: c.name, partner_id: partnerLocalId });
+    customerById.set(c.id, {
+      xpm_client_id: c.id,
+      name: c.name,
+      partner_id: partnerLocalId,
+      manager_id: c.managerId ? staffIdByXpmId.get(c.managerId) ?? null : null,
+    });
   }
   const customerUpserts = Array.from(customerById.values());
 
