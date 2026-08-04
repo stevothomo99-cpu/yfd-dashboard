@@ -205,6 +205,42 @@ async function getAccessToken(): Promise<string> {
   return refreshAccessToken();
 }
 
+const RATE_LIMIT_RETRIES = 4;
+const RATE_LIMIT_BASE_DELAY_MS = 1000;
+
+// Xero permits 5 concurrent requests per tenant. Anything fanning out
+// per-staff or per-window must stay under that or the excess comes back 429.
+const XPM_MAX_CONCURRENCY = 4;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryable(status: number): boolean {
+  return status === 429 || (status >= 500 && status < 600);
+}
+
+// Promise.all with a ceiling on how many run at once. Results keep input
+// order, and a rejection propagates as it would from Promise.all.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export async function xpmFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
   const url = baseUrl() + path;
@@ -228,6 +264,23 @@ export async function xpmFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (res.status === 401) {
     token = await refreshAccessToken();
+    res = await fetch(url, { ...init, headers: buildHeaders(token) });
+  }
+
+  // Xero rate-limits hard (429) and occasionally 5xxs. Without this, a
+  // throttled call threw like any other failure -- and callers that catch
+  // per-item to stay resilient (fetchXpmTimesheetsForPartner catches per
+  // staff member) turned that into silently missing data rather than an
+  // error anyone would see. Retry-After is honoured when Xero sends it.
+  for (let attempt = 0; attempt < RATE_LIMIT_RETRIES && isRetryable(res.status); attempt += 1) {
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt;
+    console.warn(
+      `[xpm] ${path} got ${res.status}; retrying in ${waitMs}ms (attempt ${attempt + 1}/${RATE_LIMIT_RETRIES})`,
+    );
+    await sleep(waitMs);
     res = await fetch(url, { ...init, headers: buildHeaders(token) });
   }
 
@@ -698,8 +751,15 @@ export async function fetchXpmTimesheetsForPartner(
     if (job.client?.uuid) clientByJobId.set(job.id, job.client.uuid);
   }
 
-  const perStaff = await Promise.all(
-    allStaff.map(async (s) => {
+  // Throttled rather than Promise.all over the whole tenant roster: that
+  // fired one time.api call per staff member at once, well past Xero's
+  // 5-concurrent limit, so the surplus 429'd and -- being caught per staff
+  // member below -- silently reported those people as having logged zero
+  // hours. Joshua Manzano's 153h vanishing this way is what found it.
+  const perStaff = await mapWithConcurrency(
+    allStaff,
+    XPM_MAX_CONCURRENCY,
+    async (s) => {
       // A failed call for one person must not fail the whole practice's
       // timesheet load -- but it used to be swallowed entirely, which made
       // "this person's time API errored" indistinguishable from "this
@@ -726,7 +786,7 @@ export async function fetchXpmTimesheetsForPartner(
         });
       }
       return rows;
-    }),
+    },
   );
 
   return perStaff.flat();
@@ -775,8 +835,10 @@ export async function diagnoseXpmTimesheetsForPartner(
     if (job.client?.uuid) clientByJobId.set(job.id, job.client.uuid);
   }
 
-  return Promise.all(
-    allStaff.map(async (s) => {
+  // Same concurrency ceiling as the real fetch -- an unthrottled diagnostic
+  // would trip the very rate limit it's meant to detect and report everyone
+  // as failing.
+  return mapWithConcurrency(allStaff, XPM_MAX_CONCURRENCY, async (s) => {
       let fetchFailed = false;
       const entries = await fetchXpmTimeEntriesForStaff(s.uuid, from, to).catch(() => {
         fetchFailed = true;
@@ -816,8 +878,7 @@ export async function diagnoseXpmTimesheetsForPartner(
         droppedHours,
         droppedJobs: Array.from(droppedByJob.values()).sort((a, b) => b.hours - a.hours),
       };
-    }),
-  );
+  });
 }
 
 export async function getXpmTimesheets(
