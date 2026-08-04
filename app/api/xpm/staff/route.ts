@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { getXpmStaff, isXpmConfigured, XpmNotConfiguredError } from "@/lib/xpm";
 import { getSettings } from "@/lib/settings";
 import { STAFF } from "@/lib/mock";
@@ -84,10 +85,27 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
   }
 }
 
+// Admin-only: exposes the XPM staff roster and (via POST) forces a refresh
+// against XPM, spending rate-limit budget. Only the admin-gated Settings page
+// calls it. Nav-gating alone left it reachable by any signed-in user.
+async function requireAdmin(): Promise<NextResponse | null> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "admin") {
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+  }
+  return null;
+}
+
 export async function GET() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   return handle(false);
 }
 
 export async function POST() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   return handle(true);
 }

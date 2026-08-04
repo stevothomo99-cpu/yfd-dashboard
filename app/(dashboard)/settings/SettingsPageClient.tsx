@@ -107,10 +107,22 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
     }
   }
 
+  // Saves the Partner first, then resyncs. Previously this only resynced --
+  // so changing the Partner and pressing it discarded the change and rebuilt
+  // everything against the *old* Partner, with no indication anything had been
+  // ignored. Only the staff-roster button persisted the field, which is not
+  // where anyone would look for it.
   async function handleWorkflowSync() {
     setWorkflowSyncing(true);
     setWorkflowError(null);
     try {
+      const saved = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partnerName }),
+      });
+      if (!saved.ok) throw new Error("Couldn't save the Partner filter.");
+
       const res = await fetch("/api/xpm/sync-workflow", { method: "POST" });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Sync failed.");
@@ -159,8 +171,6 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         <Banner tone="info">{snapshot.xpmMessage}</Banner>
       ) : null}
 
-      {error ? <Banner tone="error">{error}</Banner> : null}
-
       <div
         style={{
           background: "white",
@@ -176,7 +186,8 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
           Only clients whose XPM <strong>Account Manager</strong> is this person are included, along
           with their jobs. Each job&rsquo;s XPM <strong>Job Manager</strong> becomes the Manager you
-          filter by on Clients and My Work.
+          filter by on Clients and My Work. Saving rebuilds the client, job and staff records behind
+          My Work, Clients, Timesheets and Dashboard, and clears the cached timesheet data.
           {partnerOptions.length === 0
             ? " Listing Account Managers from XPM isn't available right now, so this is a free-text field -- it must match an XPM staff name exactly."
             : ""}
@@ -214,27 +225,32 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
           )}
           <button
             type="button"
-            disabled={!partnerName.trim() || syncing}
-            onClick={handleSync}
+            disabled={!partnerName.trim() || workflowSyncing}
+            onClick={handleWorkflowSync}
             style={{
               fontSize: "13px",
               fontWeight: 500,
               padding: "10px 22px",
               borderRadius: "8px",
-              background: !partnerName.trim() || syncing ? "#b4b2a9" : "#2a78d6",
+              background: !partnerName.trim() || workflowSyncing ? "#b4b2a9" : "#2a78d6",
               color: "white",
               border: "none",
-              cursor: !partnerName.trim() || syncing ? "not-allowed" : "pointer",
+              cursor: !partnerName.trim() || workflowSyncing ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
             }}
           >
-            {syncing ? "Syncing…" : "Sync from XPM"}
+            {workflowSyncing ? "Saving & resyncing…" : "Save & resync clients, jobs, staff"}
           </button>
         </div>
 
-        <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
-          ✓ Last synced at{" "}
-          {new Date(snapshot.syncedAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
-        </div>
+        {workflowError ? <Banner tone="error">{workflowError}</Banner> : null}
+        {workflowResult ? (
+          <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
+            ✓ Staff {workflowResult.staffUpserted} synced / {workflowResult.staffRemoved} removed &middot;
+            Clients {workflowResult.customersUpserted} synced / {workflowResult.customersRemoved} removed
+            &middot; Jobs {workflowResult.jobsUpserted} synced / {workflowResult.jobsRemoved} removed
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -247,41 +263,38 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         }}
       >
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111", marginBottom: "4px" }}>
-          Live workflow data
+          Karbon staff roster
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
-          Replaces the staff/client/job records that power My Work, Clients, and Dashboard with the
-          Partner filter&rsquo;s current XPM data. Dashboard tasks aren&rsquo;t touched, except that a
-          job leaving the in-progress list takes its tasks with it.
+          Legacy: re-links the Karbon roster below against XPM by email, for the
+          include/exclude toggles that feed the old Karbon-derived pages. It does{" "}
+          <strong>not</strong> touch clients, jobs or timesheets &mdash; use{" "}
+          <em>Save &amp; resync</em> above for those.
         </div>
-
-        {workflowError ? <Banner tone="error">{workflowError}</Banner> : null}
 
         <button
           type="button"
-          disabled={!partnerName.trim() || workflowSyncing}
-          onClick={handleWorkflowSync}
+          disabled={!partnerName.trim() || syncing}
+          onClick={handleSync}
           style={{
             fontSize: "13px",
             fontWeight: 500,
-            padding: "10px 22px",
+            padding: "9px 18px",
             borderRadius: "8px",
-            background: !partnerName.trim() || workflowSyncing ? "#b4b2a9" : "#2a78d6",
-            color: "white",
-            border: "none",
-            cursor: !partnerName.trim() || workflowSyncing ? "not-allowed" : "pointer",
+            background: "white",
+            color: !partnerName.trim() || syncing ? "#b4b2a9" : "#444441",
+            border: "0.5px solid #e1e0d9",
+            cursor: !partnerName.trim() || syncing ? "not-allowed" : "pointer",
           }}
         >
-          {workflowSyncing ? "Syncing…" : "Sync workflow data from XPM"}
+          {syncing ? "Refreshing…" : "Refresh staff roster"}
         </button>
 
-        {workflowResult ? (
-          <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
-            ✓ Staff {workflowResult.staffUpserted} synced / {workflowResult.staffRemoved} removed &middot;
-            Clients {workflowResult.customersUpserted} synced / {workflowResult.customersRemoved} removed
-            &middot; Jobs {workflowResult.jobsUpserted} synced / {workflowResult.jobsRemoved} removed
-          </div>
-        ) : null}
+        {error ? <Banner tone="error">{error}</Banner> : null}
+        <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
+          ✓ Roster last refreshed at{" "}
+          {new Date(snapshot.syncedAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+        </div>
       </div>
 
       <div

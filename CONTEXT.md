@@ -1,9 +1,11 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 3.0
-**Last updated:** 26 July 2026
+**Version:** 4.0
+**Last updated:** 4 August 2026
 **Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
-**Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan. v2.0 described a single-CEO Karbon-derived dashboard; that has since been replaced by an XPM-native practice-management system (staff/customers/jobs/tasks) alongside the original Business KPIs page, which is why this version is a substantial rewrite.
+**Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan.
+
+v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
 
 ---
 
@@ -28,7 +30,7 @@ Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main
 | Middleware | This Next.js version renamed `middleware.ts` → **`proxy.ts`** (see `node_modules/next/dist/docs/`) — that's where the NextAuth `authorized` callback is actually wired up, not a top-level `middleware.ts`. |
 | Auth | NextAuth v5 beta, Credentials provider (`auth.ts`) backed entirely by `dashboard_users` (Supabase Auth for password storage) — see §7. |
 | Database | Supabase Postgres, project **`yfd-workflow`** (id `xbjxrvqydcbwldnrexqu`) — dashboard_users, staff, customers, jobs, tasks, and everything else in §6. RLS enabled with no policies on every table; all access goes through the service-role client (`lib/supabase.ts`'s `getSupabaseAdmin()`). Separate Supabase projects exist per-product for FocablyED/SiteMargin metrics (§4.5/4.6) — don't conflate them. |
-| Cache | Redis via `ioredis` (`REDIS_URL`, e.g. Upstash attached in Vercel's Storage tab). In-memory `Map` fallback in dev if unset. |
+| Cache | Redis via `ioredis` (`REDIS_URL`, e.g. Upstash attached in Vercel's Storage tab). In-memory `Map` fallback in dev if unset. **Cache only** — nothing is stored solely in Redis any more (see §6.2). Supports stale-while-revalidate (`cachedSWR`/`cachedEncryptedSWR`), which serves an expired value and refreshes after the response via `next/server`'s `after()`. |
 | Outbound email | Resend — two separate integrations: Supabase Auth's own SMTP relay (password reset emails) and `lib/resend.ts` (our own backend's transactional emails, e.g. to-do notifications). Same API key, genuinely separate wiring — see §7 and §4.8. |
 | Inbound email | Resend's Inbound feature (webhook-based) — see §4.8. |
 | Hosting | Vercel — repo push = deploy |
@@ -42,14 +44,14 @@ Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main
 | `/login` | public | Credentials login (username or email + password, optional TOTP step) |
 | `/forgot-password` → `/reset-password` | public | Self-service password reset via Supabase Auth's recovery email |
 | `/change-password` | any logged-in user | Voluntary password change; also where a forced first-login change lands (see §7) |
-| `/dashboard` | everyone | Personal "Work overview" — BAS status, overdue work items, billable utilisation tile, and the **To-Do** section (email-forwarded reminders, see §4.8) |
+| `/dashboard` | everyone | Personal "Work overview" — BAS status, overdue work items, billable utilisation tile, and **two To-Do tiles** side by side at 2:1 — confirmed items (Complete/Edit/Discard, sortable columns) and a to-confirm triage queue (see §4.8) |
 | `/my-work` | everyone | Karbon-style flat task table, scoped by Partner/Manager/Staff hierarchy (own tasks for Staff, team's for Manager, practice-wide for Partner); admin gets a "viewing as" staff-switcher others don't |
-| `/clients` | everyone | Tile grid — one tile per client, hours logged + revenue for a This Week/Month/Quarter/FY slicer, summary bar (Clients/Hours/Revenue/$-per-hr). Click a tile to open the Client drawer (jobs, tasks, notes, files, copy-task, save/apply template) |
-| `/timesheets` | everyone | Billable vs non-billable by period, collapsible practice-wide "Time by client" list, and a **By employee** table — each row expandable to that person's own client breakdown |
+| `/clients` | everyone | Tile grid — one tile per client, hours logged + revenue for a This Week/Month/Quarter/FY **or custom From/To** slicer, summary bar (Clients/Hours/Revenue/$-per-hr). Click a tile to open the Client drawer (jobs, tasks, notes, files, copy-task, save/apply template) |
+| `/timesheets` | everyone | Utilisation by period (fixed buttons **or custom From/To**), collapsible practice-wide "Time by client" list, and a **By employee** table — each row expandable to that person's own client breakdown. Two percentages side by side on purpose — see §6.1 |
 | `/personal` | admin only | Business KPIs — see §5, mostly unchanged from v2.0 |
 | `/team`, `/leaderboard` | admin only | Legacy, largely unchanged from v2.0 |
 | `/tasks`, `/bas` | nobody (unlinked) | Old Karbon-only pages, deliberately not removed but not in nav either ("quarantined") |
-| `/settings` | admin only (nav-gated; **not** all sub-routes are server-enforced — see gotcha in §9) | Staff & Sync (XPM partner name/exclusions, manual resync trigger), Dashboard Users (create/list/**pause**/**remove**), My Security (MFA) |
+| `/settings` | admin only, **now server-enforced on every sub-route** | Staff & Sync (Partner dropdown + "Save & resync", legacy Karbon roster refresh), Dashboard Users (create/list/**pause**/**remove**), My Security (MFA) |
 
 Nav itself (`components/layout/TopNav.tsx`) computes `isAdmin` once in `app/(dashboard)/layout.tsx` and conditionally includes Business KPIs/Team/Leaderboard/Settings — Dashboard/My Work/Clients/Timesheets are always shown.
 
@@ -64,6 +66,14 @@ Two undocumented-until-tested API quirks, both handled by paging across rolling 
 - `job.api/list` requires `from`/`to` (yyyyMMdd), span < 1 year.
 - `invoice.api/list` has the exact same constraint — this was missing entirely at one point and 400'd in production before being fixed.
 
+**Rate limiting is the single most damaging failure mode in this integration, because it loses data silently rather than erroring.** Xero allows ~5 concurrent requests per tenant. Three separate places fanned out past that — 8 job-list windows in one `Promise.all`, one `time.api` call per staff member in another, plus invoice windows — and the surplus came back `429`. Since `fetchXpmTimesheetsForPartner` catches per staff member (correctly: one person's failure shouldn't sink the whole load), a throttled call became *"that person logged no hours"*. Joshua Manzano's 153 logged hours — the most in the practice — read as 0.0, and the practice total was ~35% short. Which staff lost the race was arbitrary, so the output looked plausible.
+
+Now enforced structurally rather than per call site:
+- **`xpmFetch` holds a global concurrency gate** (4 concurrent, module-level semaphore) in front of *every* XPM request. Throttling individual call sites doesn't work — the fan-outs sit at different levels and their totals still collide. New call sites are covered automatically.
+- **`xpmFetch` retries 429/5xx** with backoff, honouring `Retry-After` **capped at 2s**. Uncapped it caused the opposite failure: Xero can request thousands of seconds on a daily-limit breach, and sleeping that long inside a request overruns the function timeout, which presents as the sync hanging forever.
+- **`fetchAllInProgressXpmJobs` stops paging early**, after two consecutive empty windows instead of always issuing 8. It was reaching back to 2018 for a practice whose oldest open job is mid-2024 — mostly guaranteed-empty calls spending rate-limit budget and making the useful ones fail.
+- The four heavy XPM routes declare `maxDuration`, since throttled requests can no longer overlap their way under the default timeout.
+
 **Client roster has no date dependency at all** (`client.api/list`, no date params) — only jobs/invoices are windowed. A client is "ours" if `isArchived !== "Yes" && isDeleted !== "Yes" && accountManager?.name === <Partner name in Settings>`. **Account Manager is a validated dropdown in XPM but is only *required* at the job level, not the client level** — a client can exist with no Account Manager set at all, and it will be silently invisible to this app's sync (indistinguishable from a real exclusion). `GET /api/xpm/client-allocations` (admin-only, unlinked) is a standing audit tool for exactly this: lists every active XPM client with its Account Manager/Job Manager, sorted so unallocated ones surface first.
 
 Real XPM Tax Returns / Activity Statement lodgment status (Draft/To Sign/Filed/etc., shown in XPM's own Tax > Returns screen) is **not exposed by any public XPM API** — confirmed via Xero's own Developer Ideas forum, where getting this is still an open feature request. Don't attempt to build against it; there's nothing to call.
@@ -72,7 +82,8 @@ Real XPM Tax Returns / Activity Statement lodgment status (Draft/To Sign/Filed/e
 |---|---|
 | `POST /api/xpm/sync-workflow` | Full-replace sync of staff/customers/jobs from XPM into Supabase (`lib/xpmSync.ts`) — admin-gated, triggered manually from Settings → Staff & Sync |
 | `GET /api/xpm/timesheets` | Raw time entries for the configured Partner's staff |
-| `GET /api/xpm/client-allocations` | Admin audit report (see above) |
+| `GET /api/xpm/client-allocations` | Admin audit report, Partner-scoped and gap-first: your clients with no Job Manager, then clients with no Account Manager at all, then healthy ones, then other Partners'. `?partner=` overrides; Account Manager chips show client counts so a name that doesn't match XPM's spelling is obvious. Reads live from XPM deliberately — the gaps it exists to find are the rows that never reached `customers` |
+| `GET /api/xpm/timesheet-gaps` | Admin report explaining why someone reads as zero hours. Separates the three causes that look identical on `/timesheets`: logged nothing / `time.api` call failed / logged time discarded because its job isn't in the Partner's job list. Reports raw entry count, hours counted, hours discarded, and which jobs the discarded time was on |
 | `GET /api/xpm/diagnose` | Debug endpoint, raw API response samples |
 
 ### 4.2 Xero Accounting (revenue) — `lib/xeroAccounting.ts`
@@ -88,7 +99,7 @@ A completely separate Xero product/connection from Practice Manager — connects
 | `GET/POST /api/xero-accounting/sales` | `/personal` "YFD — Sales" tile: Month + FY revenue, Month + FY billable hours (from XPM timesheets, practice-wide), and the derived $/hr for each |
 | `GET /api/xero-accounting/diagnose` | Admin debug — supports `?tenantIds=a,b` to compare multiple candidate Xero orgs directly (org name + invoice count) when it's unclear which one is the real invoicing file |
 
-`fetchRevenueByClientName`/`getRevenueByClientName` (15-min cached) feed `/clients`' per-tile and summary-bar revenue figures, prefetched server-side for all four period buttons at once.
+`fetchRevenueByClientName`/`getRevenueByClientName` (15-min cached, stale-while-revalidate) feed `/clients`' per-tile and summary-bar revenue figures, prefetched server-side for all four period buttons at once — which is why that slicer feels instant. A **custom** range can't be prefetched, so `/clients` fetches it from `GET /api/xero-accounting/revenue-by-client?from=&to=` on demand, through the same cached loader. The response is keyed by its range and only read when the key matches the current selection, so a slow reply for a range the user has moved on from can't be mistaken for the current one.
 
 ### 4.3 Karbon — `lib/karbon.ts`
 Bearer token. Legacy — `/tasks` and `/bas` (unlinked pages) are the only remaining consumers.
@@ -110,7 +121,9 @@ Two independent integration points, both now on the **same dedicated Resend acco
    - **Owner resolution**: if the shared address is in the email's **To** field, the owner is whoever sent it (self to-do). If it's only in **Cc** (someone Cc's the shared address while emailing a colleague directly), the owner is whoever's in **To** instead (delegated to-do) — lets Steve forward work to someone else without it landing on his own dashboard. Multiple To recipients that match staff each get their own item.
    - The webhook payload (`email.received` event) carries metadata (from/to/cc/subject) but **not the body** — the full text is fetched separately via `resend.emails.receiving.get(email_id)`.
    - **Signature verification uses `resend.webhooks.verify()`**, which needs the raw (unparsed) request body and the three `svix-id`/`svix-timestamp`/`svix-signature` headers passed as a plain `{id, timestamp, signature}` object — the SDK's `Headers` type here is its own interface, **not** the Fetch API `Headers` object; passing `request.headers` directly is a type error.
-   - A to-do stays lightweight (client + due date, "mark done" checkbox) if the owner sets it as one-off; if they set a recurrence, it's promoted into a real Task instead (auto-picks the job like New Task's client-first flow does) since recurring work needs the full Task machinery.
+   - A to-do stays lightweight (client + due date) if the owner sets it as one-off; if they set a recurrence, it's promoted into a real Task instead (auto-picks the job like New Task's client-first flow does) since recurring work needs the full Task machinery.
+   - **Renaming**: `todo_items.title` (migration 013) overrides the display name; null means never renamed and falls back to `subject`. Deliberately a separate column — `subject` is the forwarded email's actual Subject header and remains the record of where the item came from. Always read the name through `todoDisplayName()` in `lib/utils.ts`, including when converting to a Task (that path hardcoded `todo.subject` and would otherwise silently revert a rename). Search matches both, so a renamed item is still findable by its original subject.
+   - **Editing is a distinct API intent from populating** (`{intent: "edit"}` → `updateTodoItemDetails`): it changes client/due date while preserving status, so editing a completed item doesn't silently reopen it. `populateTodoItem` forces status back to `todo`, which is right when triaging and wrong when editing. The Edit modal omits recurrence — converting an existing to-do into a Task from a button labelled "Edit" would be a surprising thing for that button to do.
    - Needs manual setup once deployed: Resend Inbound enabled (MX records) on the `dashboard.yourfinancedept.com.au` subdomain, a webhook registered pointing at `/api/email/inbound` for the `email.received` event, and `RESEND_WEBHOOK_SECRET` set from that.
    - `/api/email/inbound` is a public webhook (Resend can't authenticate as a logged-in user) verified via signature instead of a session — it must stay excluded from `proxy.ts`'s auth matcher alongside `api/auth`, or every delivery gets redirected to `/login` before the route ever runs (this shipped broken once already — see §9).
 
@@ -145,7 +158,43 @@ The Karbon-replacement data model, all in the `yfd-workflow` Supabase project, a
 
 **Copy task / templates**: a task can be copied onto another client/job (fresh due date, unassigned, default open status). A client's current tasks can be saved as a named, reusable template (title/type/recurrence only — not dates/assignee/status) and bulk-applied to any job.
 
-**To-Do items** (`todo_items`, §4.8): distinct from Tasks — no job/status/type, just owner/client/due-date, created from forwarded emails. `status`: `pending_triage` (needs client+due date) → `todo`/`done` (populated one-off) or `converted` (became a real Task).
+**To-Do items** (`todo_items`, §4.8): distinct from Tasks — no job/status/type, just owner/client/due-date/title, created from forwarded emails. `status`: `pending_triage` (needs client+due date) → `todo`/`done` (populated one-off) or `converted` (became a real Task).
+
+**Note**: the `tasks` table is currently **empty**. Everything task-related — `/my-work`, To-Do→Task conversion, templates, copy-task — is built but carrying no data yet.
+
+---
+
+## 6.1 Timesheet & utilisation definitions
+
+Getting these wrong produced three separate rounds of "the dashboard is broken" when it was mostly measuring something other than what was assumed. All of it lives in `lib/workOverview.ts`.
+
+**Utilisation is everything except idle, against a 7.6hr day** (38hr/5). The internal client's time is not one lump: alongside `YFD - Idle` it carries `YFD - General Admin`, `YFD - Team Meeting - Paid` and leave — all paid time nobody can be marked down for. Bucketing everything internal-and-not-leave as idle wrote off 54 of 71 internal hours in Jul–Aug 2026 and understated the practice by 12 points. Idle is now identified **on its own** (`isIdleTask`, task name containing "idle") rather than by elimination, so a renamed variant can't quietly start counting as productive; everything else internal lands in `internalOtherHours` and counts.
+
+**Capacity is counted to today, never to the end of the period.** Logged hours are to-date, so measuring them against a whole period's capacity compares to-date effort with a not-yet-elapsed denominator — on 27 Jul the FY tile divided ~4 weeks of work by a full year (261 weekdays × 7.6 × 4 staff = 7934.4 std hrs) and reported 2% instead of 34%.
+
+**Two percentages are shown side by side, on purpose.** They have different denominators and will never agree:
+| Tile | Denominator | Answers |
+|---|---|---|
+| Capacity used | available capacity to date | is the team's time accounted for (falls on under-logging or spare capacity) |
+| Billable share | time actually logged | **this is the figure XPM's own Staff Time Summary Report calls %**, and the same basis as the per-employee column |
+
+For 6 Jul – 2 Aug those read 65% and 81% off identical data. Comparing the wrong one against XPM's report wastes an afternoon.
+
+**Partners are excluded from practice-wide figures** (`staff.role !== "Partner"`, decided in `timesheets/page.tsx`) — both their hours and their capacity, so time they do log can't inflate it either. A Partner carries no delivery workload; one in a team of four dragged the practice percentage down by a quarter. They still appear in the By employee table. Note neither pre-existing mechanism could do this: **`staff.included` is hardcoded `true` by the sync** (effectively a dead column) and **`settings.excludedStaffIds` is only read by the legacy Karbon routes** — neither reaches `/timesheets`.
+
+**Custom date ranges**: `DateRange`/`PeriodSelection` — the compute functions take either a period key or an explicit range, so existing callers are unaffected. Bounds are inclusive; a range extending past today still counts capacity only to today; reversed dates are swapped; a half-filled range falls back rather than measuring an open-ended window; a range with no weekdays yields 0% not `NaN`.
+
+**`XpmTimesheet.billable` is never read.** "Billable" throughout means *client-coded* (not against the internal client). The two coincide in current data, so figures reconcile with XPM — but they are different fields and could diverge.
+
+---
+
+## 6.2 Settings storage
+
+`app_settings` (migration 015, single row, `id = 1`) is the **source of truth**; Redis is a cache in front of it with a 5-minute TTL and write-through on update.
+
+This was previously Redis-only with no TTL and nothing behind it. That holds until the cache doesn't: an eviction, a flush or swapping the Upstash instance silently blanked `partnerName` — and since that value scopes which clients, jobs and staff the entire app can see, losing it empties the practice while presenting as "Set a Partner name in Settings", indistinguishable from a genuine first run.
+
+`updateSettings` reads straight from Postgres before merging, bypassing both the request memo and the cache, so a read-modify-write can't drop a concurrent change to the other field. A database read error is **thrown, not defaulted** — returning an empty Partner would look exactly like "not configured yet".
 
 ---
 
@@ -190,7 +239,7 @@ RESEND_WEBHOOK_SECRET=             # from the inbound webhook's Resend dashboard
 TODO_INBOUND_EMAIL=                # todo@dashboard.yourfinancedept.com.au (subdomain, not the bare domain)
 ```
 
-All live in Vercel → Project Settings → Environment Variables. Redeploy required after changing any.
+All live in Vercel → Project Settings → Environment Variables. Redeploy required after changing any. No new variables were added in v4.0 — the Partner filter moved from Redis to Postgres (§6.2), not to an env var.
 
 ---
 
@@ -206,7 +255,13 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 - **Resend webhook verification** needs the RAW request body (parsing as JSON first breaks the signature) and its own `{id, timestamp, signature}` header shape — not the Fetch API `Headers` object despite the SDK naming a type `Headers`.
 - **Supabase's SMTP settings only affect Supabase Auth's own emails** (password reset, etc.) — sending email from our own backend code (e.g. To-Do notifications) requires a second, separate integration via the Resend SDK directly (`lib/resend.ts`), same API key or not.
 - A reset-password page needs its **own** browser Supabase client instance (not the shared server-oriented one with `persistSession: false`), or session/recovery-token detection silently doesn't work.
-- **`lib/supabase.ts` must never throw at import time** — `auth.ts` imports it on every request. Always lazy-init.
+- **`lib/supabase.ts` must never throw at import time** — `auth.ts` imports it on every request. Always lazy-init. **`lib/google.ts` violated this** and was fixed in v4.0: it built credentials in a module-level `const`, so importing it threw when `GOOGLE_PRIVATE_KEY_BASE64` was unset and took down `next build` at page-data collection rather than failing the one route that needed Google.
+- **XPM rate limiting loses data silently, it does not error.** See §4.1. Never add an unthrottled `Promise.all` over XPM calls — `xpmFetch` gates concurrency globally, so just call it. And never honour `Retry-After` uncapped inside a request.
+- **A per-item `catch` that returns an empty array converts a failure into believable missing data.** This is why a whole staff member's timesheet vanished without a trace. The catch was right; the silence wasn't. Log it.
+- **The workflow sync does not refresh everything XPM-derived.** It rebuilds `staff`/`customers`/`jobs` in Postgres, but timesheets are served from the `xpm:timesheets:<partner>` cache. It now invalidates that cache explicitly — without it, a sync left stale (possibly rate-limit-truncated) hours in place, which reads as "I synced and the numbers are still wrong".
+- **Categories defined by elimination are a trap.** Idle was "internal and not leave", which swallowed paid admin and meeting time (§6.1). `getClientSummaries`'s "Multiple" manager was inferred from a client's jobs rather than read from the client (§6). Both looked like data problems and were definition problems.
+- **Two buttons whose labels both mean "sync from XPM" cost real debugging time.** `/api/xpm/staff` refreshes only the legacy Karbon-linking roster; `/api/xpm/sync-workflow` is the real one. Now labelled "Refresh staff roster" vs "Save & resync clients, jobs, staff", with the real one beside the Partner field. The resync also **saves the Partner first** — previously only the roster button persisted that field, so changing the Partner and pressing resync rebuilt everything against the *old* Partner with no indication anything had been ignored.
+- **Vercel deploys lag your testing.** Several rounds of "still wrong" were the previous deployment still serving. Check the retry/backoff numbers or `dep=` in the runtime logs before re-diagnosing.
 
 ---
 
@@ -217,7 +272,13 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 - Mobile responsive layout — not yet tested/optimized.
 - Sync failure alerts (email an admin if a scheduled XPM/Karbon/Google sync errors silently) — no XPM dependency, not yet built.
 - Weekly performance summary / overdue-task digest emails — would reuse the `lib/resend.ts` outbound integration built for To-Do notifications, not yet built.
-- Some `/settings` sub-routes (`/api/settings` PATCH, `/api/xpm/staff`) have no server-side admin check of their own — nav hides them from Staff, but it isn't a hard wall underneath. Worth closing if this app is ever exposed beyond a small trusted team.
+- **Per-person exclusion from practice figures.** Only Partners are excluded today (§6.1). Excluding a non-Partner needs a real toggle *and* `lib/xpmSync.ts` to stop hardcoding `included: true`, which would otherwise wipe the setting on every sync.
+- **Job-level manager gaps in XPM**: ~120 of 493 jobs have no Job Manager (concentrated in a handful of clients). Doesn't affect client tiles, which read the client record, but does affect each person's work board. Fix in XPM, then resync.
+- **`/leaderboard` and `/team`** are still Karbon-derived legacy, as are the quarantined `/tasks` and `/bas`.
+- **Dependabot backlog**: several open PRs, of which TypeScript 5.9→7.0 and ESLint 9→10 are major versions needing a build check.
+- **Three pre-existing lint errors** remain (`settings/users/page.tsx`, `api/hubspot/deals/route.ts`, `lib/hubspot.ts`) — unrelated to v4.0 work, verified as pre-existing.
+
+*Closed in v4.0*: `/api/settings` PATCH and `/api/xpm/staff` now enforce admin server-side; `partnerName` is durably stored (§6.2); `lib/google.ts` no longer throws at import; `getClientSummaries` no longer walks the tasks table per customer.
 
 ---
 
