@@ -1,10 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import ClientTile, { statusOf, type TileStatus } from "@/components/dashboard/ClientTile";
 import TileDrawer from "@/components/dashboard/TileDrawer";
-import { computeHoursByClient, UTILISATION_PERIODS, type UtilisationPeriodKey } from "@/lib/workOverview";
+import {
+  computeHoursByClient,
+  UTILISATION_PERIODS,
+  type DateRange,
+  type PeriodSelection,
+  type UtilisationPeriodKey,
+} from "@/lib/workOverview";
 import type { ClientSummary } from "@/types/workflow";
 import type { XpmTimesheet } from "@/types/xpm";
 
@@ -61,17 +67,90 @@ export default function ClientsPageClient({
   const [search, setSearch] = useState("");
   const [staffId, setStaffId] = useState("");
   const [activeTile, setActiveTile] = useState<ClientSummary | null>(null);
-  const [hoursPeriod, setHoursPeriod] = useState<UtilisationPeriodKey>("fy");
+  const [hoursPeriod, setHoursPeriod] = useState<UtilisationPeriodKey | "custom">("fy");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  // Revenue for the four fixed periods is prefetched server-side, which is
+  // what makes those buttons instant. A custom range can't be prefetched, so
+  // it's fetched on demand.
+  const [customRevenue, setCustomRevenue] = useState<{
+    key: string;
+    byId: Record<string, number>;
+  } | null>(null);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+  const [revenueError, setRevenueError] = useState<string | null>(null);
 
   const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
 
-  const hoursByClientId = useMemo(() => {
-    const byClient = computeHoursByClient(timesheets, staffIds, hoursPeriod, todayIso(), clientNamesMap);
-    return Object.fromEntries(byClient.map((c) => [c.clientId, c.hours]));
-  }, [timesheets, staffIds, hoursPeriod, clientNamesMap]);
+  // A half-filled custom range would measure an open-ended window, so it
+  // falls back to FY until both ends are set. Reversed dates are swapped.
+  const customComplete = hoursPeriod === "custom" && Boolean(customFrom) && Boolean(customTo);
+  const customRange: DateRange | null = useMemo(() => {
+    if (!customComplete) return null;
+    return customFrom <= customTo
+      ? { start: customFrom, end: customTo }
+      : { start: customTo, end: customFrom };
+  }, [customComplete, customFrom, customTo]);
 
-  const revenueByClientId = revenueByPeriodByClientId[hoursPeriod];
-  const hoursPeriodLabel = UTILISATION_PERIODS.find((p) => p.value === hoursPeriod)?.label ?? "";
+  const selection: PeriodSelection = customRange ?? (hoursPeriod === "custom" ? "fy" : hoursPeriod);
+
+  const hoursByClientId = useMemo(() => {
+    const byClient = computeHoursByClient(timesheets, staffIds, selection, todayIso(), clientNamesMap);
+    return Object.fromEntries(byClient.map((c) => [c.clientId, c.hours]));
+  }, [timesheets, staffIds, selection, clientNamesMap]);
+
+  const rangeKey = customRange ? `${customRange.start}:${customRange.end}` : null;
+
+  useEffect(() => {
+    if (!rangeKey) return;
+    const [start, end] = rangeKey.split(":");
+    let cancelled = false;
+
+    const load = async () => {
+      setRevenueLoading(true);
+      setRevenueError(null);
+      try {
+        const res = await fetch(`/api/xero-accounting/revenue-by-client?from=${start}&to=${end}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.error ?? "Failed to load revenue");
+        // Xero returns revenue keyed by contact name; the grid is keyed by
+        // our client id, matched by exact name (no stored link between the
+        // two systems -- same rule the server-side prefetch uses).
+        const idByName = new Map(allTiles.map((t) => [t.name, t.id]));
+        const byId: Record<string, number> = {};
+        for (const { clientName, revenue } of data.revenue ?? []) {
+          const id = idByName.get(clientName);
+          if (id) byId[id] = revenue;
+        }
+        setCustomRevenue({ key: rangeKey, byId });
+      } catch (err) {
+        if (cancelled) return;
+        setCustomRevenue({ key: rangeKey, byId: {} });
+        setRevenueError(err instanceof Error ? err.message : "Failed to load revenue");
+      } finally {
+        if (!cancelled) setRevenueLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [rangeKey, allTiles]);
+
+  const revenueByClientId = useMemo(() => {
+    if (rangeKey) {
+      // Only trust a payload fetched for exactly this range; anything else is
+      // a leftover from a previous selection.
+      return customRevenue?.key === rangeKey ? customRevenue.byId : {};
+    }
+    return revenueByPeriodByClientId[hoursPeriod === "custom" ? "fy" : hoursPeriod];
+  }, [rangeKey, customRevenue, revenueByPeriodByClientId, hoursPeriod]);
+
+  const hoursPeriodLabel = customRange
+    ? `${fmtShortDate(customRange.start)} – ${fmtShortDate(customRange.end)}`
+    : UTILISATION_PERIODS.find((p) => p.value === hoursPeriod)?.label ?? "";
 
   // Only offer staff who actually manage at least one client -- no point
   // listing someone with an empty result every time.
@@ -146,6 +225,50 @@ export default function ClientsPageClient({
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setHoursPeriod("custom")}
+            style={{
+              fontSize: "12px",
+              fontWeight: 500,
+              padding: "6px 12px",
+              borderRadius: "999px",
+              background: hoursPeriod === "custom" ? "#111111" : "white",
+              color: hoursPeriod === "custom" ? "white" : "#444441",
+              border: "0.5px solid " + (hoursPeriod === "custom" ? "#111111" : "#e1e0d9"),
+              cursor: "pointer",
+            }}
+          >
+            Custom…
+          </button>
+          {hoursPeriod === "custom" ? (
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo || undefined}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label="From date"
+                style={dateInputStyle}
+              />
+              <span style={{ fontSize: "12px", color: "#888780" }}>to</span>
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom || undefined}
+                onChange={(e) => setCustomTo(e.target.value)}
+                aria-label="To date"
+                style={dateInputStyle}
+              />
+              {!customComplete ? (
+                <span style={{ fontSize: "11px", color: "#888780" }}>Pick both — showing FY meanwhile.</span>
+              ) : revenueLoading ? (
+                <span style={{ fontSize: "11px", color: "#888780" }}>Loading revenue…</span>
+              ) : revenueError ? (
+                <span style={{ fontSize: "11px", color: "#A32D2D" }}>Revenue unavailable</span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -256,3 +379,18 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+function fmtShortDate(iso: string): string {
+  return new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
+
+const dateInputStyle: React.CSSProperties = {
+  fontSize: "12px",
+  padding: "5px 8px",
+  borderRadius: "8px",
+  border: "0.5px solid #e1e0d9",
+  background: "white",
+  color: "#111111",
+  outline: "none",
+  fontFamily: "inherit",
+};

@@ -17,6 +17,10 @@ import type { XpmTimesheet } from "@/types/xpm";
 interface StaffOption {
   id: string;
   name: string;
+  role: string;
+  // False for Partners -- see the note in page.tsx. Kept as data rather than
+  // re-deriving from role here so the rule lives in one place.
+  countsTowardPracticeTotal: boolean;
 }
 
 interface TimesheetsPageClientProps {
@@ -142,7 +146,16 @@ export default function TimesheetsPageClient({
   const [showTimeByClient, setShowTimeByClient] = useState(false);
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
 
-  const allStaffIds = useMemo(() => staffOptions.map((s) => s.id), [staffOptions]);
+  // Practice-wide tiles count only delivery staff; the By employee table
+  // below still lists everyone.
+  const practiceStaffIds = useMemo(
+    () => staffOptions.filter((s) => s.countsTowardPracticeTotal).map((s) => s.id),
+    [staffOptions],
+  );
+  const excludedNames = useMemo(
+    () => staffOptions.filter((s) => !s.countsTowardPracticeTotal).map((s) => s.name),
+    [staffOptions],
+  );
   const today = todayIso();
   const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
 
@@ -158,13 +171,13 @@ export default function TimesheetsPageClient({
   }, [customComplete, period, customFrom, customTo]);
 
   const utilisation = useMemo(
-    () => computeWagesUtilisation(timesheets, allStaffIds, selection, today),
-    [timesheets, allStaffIds, selection, today],
+    () => computeWagesUtilisation(timesheets, practiceStaffIds, selection, today),
+    [timesheets, practiceStaffIds, selection, today],
   );
 
   const byClient = useMemo(
-    () => computeHoursByClient(timesheets, allStaffIds, selection, today, clientNamesMap),
-    [timesheets, allStaffIds, selection, today, clientNamesMap],
+    () => computeHoursByClient(timesheets, practiceStaffIds, selection, today, clientNamesMap),
+    [timesheets, practiceStaffIds, selection, today, clientNamesMap],
   );
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
@@ -173,7 +186,12 @@ export default function TimesheetsPageClient({
     <div>
       <PageHeader
         title="Timesheets"
-        subtitle="Billable vs Leave vs non-billable · live from XPM · 38hr/week standard, counted to date, not prorated for part-timers"
+        subtitle={
+          "Billable vs Leave vs non-billable · live from XPM · 38hr/week standard, counted to date, not prorated for part-timers" +
+          (excludedNames.length
+            ? ` · practice totals exclude ${excludedNames.join(", ")}`
+            : "")
+        }
       />
 
       {message ? (
