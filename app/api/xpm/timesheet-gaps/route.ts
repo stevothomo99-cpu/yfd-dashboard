@@ -3,6 +3,10 @@ import { auth } from "@/auth";
 import { getSettings } from "@/lib/settings";
 import { diagnoseXpmTimesheetsForPartner, isXpmConfigured } from "@/lib/xpm";
 
+// Walks the same call path as the real timesheet fetch, so it needs the
+// same headroom.
+export const maxDuration = 300;
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

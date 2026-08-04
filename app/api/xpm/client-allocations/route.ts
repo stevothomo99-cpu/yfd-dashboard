@@ -3,6 +3,9 @@ import { auth } from "@/auth";
 import { getSettings } from "@/lib/settings";
 import { fetchXpmClientAllocationReport, isXpmConfigured } from "@/lib/xpm";
 
+// Fetches the whole tenant client roster; give it room.
+export const maxDuration = 120;
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

@@ -3,6 +3,13 @@ import { auth } from "@/auth";
 import { syncWorkflowFromXpm } from "@/lib/xpmSync";
 import { XpmNotConfiguredError } from "@/lib/xpm";
 
+// The sync is inherently many XPM calls -- 8 job-list windows plus the
+// client and staff rosters -- and xpmFetch caps concurrency at 4 to stay
+// inside Xero's limit, so they can't all overlap. The default timeout is
+// too tight for that and cut the sync off mid-flight, which presented as
+// the button hanging forever.
+export const maxDuration = 300;
+
 // Admin-only trigger for the full-replace staff/customers/jobs sync (see
 // lib/xpmSync.ts) -- separate from /api/xpm/staff, which only feeds the
 // legacy Karbon<->XPM staff-linking widget and never touches these tables.

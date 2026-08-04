@@ -4,6 +4,10 @@ import { getSettings } from "@/lib/settings";
 import { TIMESHEETS } from "@/lib/mock";
 import type { XpmTimesheet } from "@/types/xpm";
 
+// Same reasoning as the workflow sync: a cold timesheet fetch is the
+// job-list windows plus one time.api call per staff member, throttled.
+export const maxDuration = 300;
+
 interface ResponseBody {
   mode: "live" | "mock";
   timesheets: XpmTimesheet[];
