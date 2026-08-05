@@ -1,69 +1,27 @@
 import SettingsPageClient from "./SettingsPageClient";
 import { getSettings } from "@/lib/settings";
-import {
-  getXpmStaff,
-  getXpmPartnerOptions,
-  isXpmConfigured,
-  XpmNotConfiguredError,
-  type XpmPartnerOption,
-} from "@/lib/xpm";
-import { loadKarbonUsersSnapshot } from "@/lib/karbon";
-import { linkKarbonToXpmByEmail, type LinkedStaff } from "@/lib/staffLink";
-import { STAFF, KARBON_USERS } from "@/lib/mock";
-import type { XpmStaff } from "@/types/xpm";
+import { listStaff } from "@/lib/workflow";
+import { getXpmPartnerOptions, isXpmConfigured, type XpmPartnerOption } from "@/lib/xpm";
 
-export interface RosterEntry extends LinkedStaff {
+export interface RosterEntry {
+  // Local staff row id, not the XPM uuid -- this is what the toggle writes to.
+  id: string;
+  name: string;
+  email: string;
+  role: string;
   included: boolean;
 }
 
 export interface SettingsSnapshot {
-  karbonMode: "live" | "mock";
-  xpmMode: "live" | "mock";
   partnerName: string;
   // Empty when XPM isn't configured or the lookup failed -- the client then
   // falls back to a free-text field so the setting stays editable.
   partnerOptions: XpmPartnerOption[];
   roster: RosterEntry[];
-  syncedAt: string;
-  karbonMessage?: string;
-  xpmMessage?: string;
-}
-
-// Same email convention as lib/mock's KARBON_USERS, so the two mock rosters
-// link by email out of the box.
-function mockXpmStaff(): XpmStaff[] {
-  return STAFF.map((s) => ({
-    id: s.id,
-    name: s.name,
-    email: `${s.id}@yfd.example`,
-    role: "Manager" as const,
-    included: true,
-  }));
-}
-
-async function loadXpmStaffSnapshot(
-  partnerName: string,
-): Promise<{ mode: "live" | "mock"; staff: XpmStaff[]; message?: string }> {
-  if (!isXpmConfigured()) {
-    return {
-      mode: "mock",
-      staff: mockXpmStaff(),
-      message:
-        "Showing mock data because XPM_CLIENT_ID, XPM_CLIENT_SECRET, XPM_REFRESH_TOKEN, or XPM_TENANT_ID are not set.",
-    };
-  }
-  if (!partnerName) {
-    return { mode: "live", staff: [], message: "Set a Partner name and sync to load staff from XPM." };
-  }
-  try {
-    const staff = await getXpmStaff(partnerName);
-    return { mode: "live", staff };
-  } catch (err) {
-    if (err instanceof XpmNotConfiguredError) {
-      return { mode: "mock", staff: mockXpmStaff(), message: err.message };
-    }
-    return { mode: "live", staff: [], message: err instanceof Error ? err.message : "Unknown error" };
-  }
+  // Partners are shown as context rather than as a toggleable row -- see the
+  // note in the client.
+  partnerRoster: RosterEntry[];
+  rosterMessage?: string;
 }
 
 // Best-effort: an empty list makes the Partner field fall back to free
@@ -78,35 +36,44 @@ async function loadPartnerOptions(): Promise<XpmPartnerOption[]> {
 }
 
 export default async function SettingsPage() {
-  const settings = await getSettings();
-
-  // Load the full, unfiltered Karbon roster (not exclusion-filtered) so the
-  // toggle list can show everyone, including people currently excluded.
-  const [karbonSnapshot, xpmSnapshot, partnerOptions] = await Promise.all([
-    loadKarbonUsersSnapshot([], KARBON_USERS),
-    loadXpmStaffSnapshot(settings.partnerName),
+  const [settings, staff, partnerOptions] = await Promise.all([
+    getSettings(),
+    // The synced XPM roster, straight from Postgres -- the same rows every
+    // XPM-backed page reads. Replaces the old Karbon roster, which had to be
+    // email-joined to XPM to be useful and dragged along entries like
+    // "Karbon Support" that were never people here.
+    listStaff(),
     loadPartnerOptions(),
   ]);
 
-  const linked = linkKarbonToXpmByEmail(karbonSnapshot.users, xpmSnapshot.staff);
-  const roster: RosterEntry[] = linked.map((l) => ({
-    ...l,
-    included:
-      !settings.excludedStaffIds.includes(l.karbonId) &&
-      !(l.xpmId ? settings.excludedStaffIds.includes(l.xpmId) : false),
-  }));
+  const toEntry = (s: (typeof staff)[number]): RosterEntry => ({
+    id: s.id,
+    name: s.name,
+    email: s.email,
+    role: s.role,
+    included: s.included,
+  });
+
+  // The Partner is split out, not hidden: they're set by the field above and
+  // already excluded from practice-wide figures by role, so a toggle next to
+  // their name would imply a control that doesn't apply. Dropping the row
+  // entirely would just look like someone missing from the roster.
+  const roster = staff.filter((s) => s.role !== "Partner").map(toEntry);
+  const partnerRoster = staff.filter((s) => s.role === "Partner").map(toEntry);
 
   return (
     <SettingsPageClient
       initial={{
-        karbonMode: karbonSnapshot.mode,
-        xpmMode: xpmSnapshot.mode,
         partnerName: settings.partnerName,
         partnerOptions,
         roster,
-        syncedAt: new Date().toISOString(),
-        karbonMessage: karbonSnapshot.message,
-        xpmMessage: xpmSnapshot.message,
+        partnerRoster,
+        rosterMessage:
+          staff.length === 0
+            ? settings.partnerName
+              ? "No staff synced yet — press Save & resync above."
+              : "Select a Partner and press Save & resync to load staff from XPM."
+            : undefined,
       }}
     />
   );

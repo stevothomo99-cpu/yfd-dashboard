@@ -96,9 +96,9 @@ export const STAFF: StaffMember[] = [
   },
 ];
 
-// Same email convention as the /api/xpm/staff mock fallback (`${id}@yfd.example`)
-// so the two mock rosters link up by email out of the box, demonstrating the
-// Karbon<->XPM join without needing live data from either system.
+// Legacy Karbon mock roster, still used by the quarantined Karbon-derived
+// pages (/tasks, /bas, /team, /leaderboard). The Settings staff roster no
+// longer touches this -- it reads the XPM-synced `staff` table instead.
 export const KARBON_USERS: KarbonUser[] = STAFF.map((s) => ({
   id: s.id,
   name: s.name,

@@ -25,7 +25,11 @@ import type { XpmTimesheet } from "@/types/xpm";
 // XPM clients by exact name (confirmed decision -- no stored link between
 // an XPM client and a Xero Accounting contact).
 export default async function ClientsPage() {
-  const [tiles, staff] = await Promise.all([getClientSummaries(), listStaff()]);
+  const [tiles, allStaff] = await Promise.all([getClientSummaries(), listStaff()]);
+  // Settings → Included staff. Excluded people drop out of the slicer and out
+  // of the hours totals, so the two agree -- a slicer option that can't be
+  // reached from the totals would just look broken.
+  const staff = allStaff.filter((s) => s.included);
   const staffOptions = staff
     .map((s) => ({ id: s.id, name: s.name }))
     .sort((a, b) => a.name.localeCompare(b.name));

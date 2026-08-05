@@ -11,8 +11,8 @@ import { XpmNotConfiguredError } from "@/lib/xpm";
 export const maxDuration = 300;
 
 // Admin-only trigger for the full-replace staff/customers/jobs sync (see
-// lib/xpmSync.ts) -- separate from /api/xpm/staff, which only feeds the
-// legacy Karbon<->XPM staff-linking widget and never touches these tables.
+// lib/xpmSync.ts). This is what the Settings page's "Save & resync" button
+// calls, and the only thing that rebuilds these tables.
 export async function POST() {
   const session = await auth();
   if (!session?.user || session.user.role !== "admin") {

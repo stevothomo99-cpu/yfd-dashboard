@@ -5,17 +5,7 @@ import Link from "next/link";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import { initialsOf } from "@/lib/utils";
-import { linkKarbonToXpmByEmail } from "@/lib/staffLink";
-import type { XpmStaff } from "@/types/xpm";
 import type { SettingsSnapshot } from "./page";
-
-interface XpmStaffResponse {
-  mode: "live" | "mock";
-  partnerName: string;
-  staff: XpmStaff[];
-  syncedAt: string;
-  message?: string;
-}
 
 interface WorkflowSyncResult {
   partnerName: string;
@@ -31,79 +21,32 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
   const partnerOptions = initial.partnerOptions;
   const [partnerName, setPartnerName] = useState(initial.partnerName);
   const [snapshot, setSnapshot] = useState(initial);
-  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [workflowSyncing, setWorkflowSyncing] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowResult, setWorkflowResult] = useState<WorkflowSyncResult | null>(null);
 
-  async function persistExclusions(roster: SettingsSnapshot["roster"]) {
-    const excludedStaffIds = roster
-      .filter((r) => !r.included)
-      .flatMap((r) => (r.xpmId ? [r.karbonId, r.xpmId] : [r.karbonId]));
-
-    const res = await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ excludedStaffIds }),
-    });
-    if (!res.ok) throw new Error("Failed to save.");
-  }
-
-  async function handleToggle(karbonId: string) {
-    const nextRoster = snapshot.roster.map((r) =>
-      r.karbonId === karbonId ? { ...r, included: !r.included } : r,
-    );
-    setSnapshot({ ...snapshot, roster: nextRoster });
+  // Optimistic, then reverted on failure -- a toggle that appears to work and
+  // silently didn't would be worse here than a brief flicker, since the
+  // consequence is invisible until someone reads a utilisation figure.
+  async function handleToggle(staffId: string) {
+    const flip = (roster: SettingsSnapshot["roster"]) =>
+      roster.map((r) => (r.id === staffId ? { ...r, included: !r.included } : r));
+    const next = flip(snapshot.roster);
+    const target = next.find((r) => r.id === staffId);
+    setSnapshot({ ...snapshot, roster: next });
     setError(null);
 
     try {
-      await persistExclusions(nextRoster);
-    } catch {
-      setSnapshot((prev) => ({
-        ...prev,
-        roster: prev.roster.map((r) => (r.karbonId === karbonId ? { ...r, included: !r.included } : r)),
-      }));
-      setError("Couldn't save that change — try again.");
-    }
-  }
-
-  async function handleSync() {
-    setSyncing(true);
-    setError(null);
-    try {
-      await fetch("/api/settings", {
+      const res = await fetch("/api/workflow/staff", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partnerName }),
+        body: JSON.stringify({ staffId, included: target?.included ?? true }),
       });
-      const res = await fetch("/api/xpm/staff", { method: "POST" });
-      const body: XpmStaffResponse = await res.json();
-      if (!res.ok) throw new Error(body.message ?? "Sync failed.");
-
-      // Re-link the existing Karbon roster against fresh XPM data, carrying
-      // each person's current included/excluded state across the re-sync.
-      const includedByKarbonId = new Map(snapshot.roster.map((r) => [r.karbonId, r.included]));
-      const relinked = linkKarbonToXpmByEmail(
-        snapshot.roster.map((r) => ({ id: r.karbonId, name: r.name, email: r.email })),
-        body.staff,
-      );
-      const nextRoster = relinked.map((l) => ({
-        ...l,
-        included: includedByKarbonId.get(l.karbonId) ?? true,
-      }));
-
-      setSnapshot({
-        ...snapshot,
-        xpmMode: body.mode,
-        xpmMessage: body.message,
-        roster: nextRoster,
-        syncedAt: body.syncedAt,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sync failed.");
-    } finally {
-      setSyncing(false);
+      if (!res.ok) throw new Error("Failed to save.");
+    } catch {
+      setSnapshot((prev) => ({ ...prev, roster: flip(prev.roster) }));
+      setError("Couldn't save that change — try again.");
     }
   }
 
@@ -159,17 +102,7 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         </Link>
       </div>
 
-      {snapshot.karbonMode === "mock" ? (
-        <Banner tone="warn">Karbon roster: showing mock data — {snapshot.karbonMessage ?? "Karbon is not configured."}</Banner>
-      ) : null}
-
-      {snapshot.xpmMode === "mock" ? (
-        <Banner tone="warn">XPM staff: showing mock data — {snapshot.xpmMessage ?? "XPM is not configured."}</Banner>
-      ) : null}
-
-      {snapshot.xpmMode === "live" && snapshot.xpmMessage ? (
-        <Banner tone="info">{snapshot.xpmMessage}</Banner>
-      ) : null}
+      {snapshot.rosterMessage ? <Banner tone="info">{snapshot.rosterMessage}</Banner> : null}
 
       <div
         style={{
@@ -259,50 +192,6 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
           border: "0.5px solid #e1e0d9",
           borderRadius: "14px",
           padding: "1.4rem 1.5rem",
-          marginBottom: "14px",
-        }}
-      >
-        <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111", marginBottom: "4px" }}>
-          Karbon staff roster
-        </div>
-        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
-          Legacy: re-links the Karbon roster below against XPM by email, for the
-          include/exclude toggles that feed the old Karbon-derived pages. It does{" "}
-          <strong>not</strong> touch clients, jobs or timesheets &mdash; use{" "}
-          <em>Save &amp; resync</em> above for those.
-        </div>
-
-        <button
-          type="button"
-          disabled={!partnerName.trim() || syncing}
-          onClick={handleSync}
-          style={{
-            fontSize: "13px",
-            fontWeight: 500,
-            padding: "9px 18px",
-            borderRadius: "8px",
-            background: "white",
-            color: !partnerName.trim() || syncing ? "#b4b2a9" : "#444441",
-            border: "0.5px solid #e1e0d9",
-            cursor: !partnerName.trim() || syncing ? "not-allowed" : "pointer",
-          }}
-        >
-          {syncing ? "Refreshing…" : "Refresh staff roster"}
-        </button>
-
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
-          ✓ Roster last refreshed at{" "}
-          {new Date(snapshot.syncedAt).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
-        </div>
-      </div>
-
-      <div
-        style={{
-          background: "white",
-          border: "0.5px solid #e1e0d9",
-          borderRadius: "14px",
-          padding: "1.4rem 1.5rem",
         }}
       >
         <div
@@ -315,23 +204,27 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         >
           <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Included staff</div>
           <div style={{ fontSize: "11px", color: "#888780" }}>
-            {includedCount} of {snapshot.roster.length} active
+            {includedCount} of {snapshot.roster.length} included
           </div>
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
-          Roster comes from Karbon. Toggle who appears in dashboards and slicers — excluded staff are
-          hidden everywhere. &ldquo;Linked&rdquo; means a Karbon and XPM record share the same email.
+          Synced from XPM by <em>Save &amp; resync</em> above. Excluding someone removes them from the
+          Timesheets figures (both their hours <strong>and</strong> their 38hr capacity), the Clients
+          staff slicer, and the My Work staff switcher. They can still be assigned tasks, and their
+          time stays in XPM &mdash; this only governs what the dashboard reports on.
         </div>
+
+        {error ? <Banner tone="error">{error}</Banner> : null}
 
         {snapshot.roster.length === 0 ? (
           <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>
-            No staff found in Karbon.
+            No staff synced from XPM yet.
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column" }}>
             {snapshot.roster.map((r, i) => (
               <div
-                key={r.karbonId}
+                key={r.id}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -347,23 +240,12 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
                     {r.email || "No email on file"}
                   </div>
                 </div>
-                <div
-                  style={{
-                    fontSize: "10px",
-                    padding: "3px 9px",
-                    borderRadius: "8px",
-                    fontWeight: 500,
-                    background: r.xpmId ? "#EAF3DE" : "#f5f4f0",
-                    color: r.xpmId ? "#27500A" : "#888780",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {r.xpmId ? `Linked · ${r.xpmName}` : "Not linked to XPM"}
-                </div>
+                <div style={{ fontSize: "11px", color: "#888780", whiteSpace: "nowrap" }}>{r.role}</div>
                 <button
                   type="button"
-                  onClick={() => handleToggle(r.karbonId)}
+                  onClick={() => handleToggle(r.id)}
                   aria-pressed={r.included}
+                  aria-label={`${r.included ? "Exclude" : "Include"} ${r.name}`}
                   style={{
                     position: "relative",
                     width: "40px",
@@ -395,6 +277,52 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
             ))}
           </div>
         )}
+
+        {/* The Partner, listed without a toggle. They're already out of the
+            practice-wide figures by role (see timesheets/page.tsx) and they're
+            set by the field above, so a switch here would imply a control that
+            does nothing. Omitting the row altogether just reads as a missing
+            person. */}
+        {snapshot.partnerRoster.length > 0 ? (
+          <div
+            style={{
+              marginTop: "16px",
+              paddingTop: "14px",
+              borderTop: "0.5px solid #e1e0d9",
+            }}
+          >
+            <div style={{ fontSize: "11px", color: "#888780", marginBottom: "10px" }}>
+              Set by the Partner filter above, and always out of the practice-wide Timesheets
+              figures — a Partner carries no delivery workload, so their 38hr week in the
+              denominator would understate everyone else. Their own hours still show in the By
+              employee table.
+            </div>
+            {snapshot.partnerRoster.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <StaffAvatar initials={initialsOf(r.name)} size={32} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{r.name}</div>
+                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
+                    {r.email || "No email on file"}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontSize: "10px",
+                    padding: "3px 9px",
+                    borderRadius: "8px",
+                    fontWeight: 500,
+                    background: "#f5f4f0",
+                    color: "#888780",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Partner
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

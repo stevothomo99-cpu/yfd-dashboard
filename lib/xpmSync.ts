@@ -88,20 +88,25 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   // up with unexpected self-references (e.g. the Partner also managing one
   // of their own jobs), so dedup defensively rather than chasing each case
   // individually. --
+  //
+  // `included` is deliberately NOT in this payload. It's the include/exclude
+  // toggle on the Settings page, so the sync must leave whatever is stored
+  // alone -- writing `included: true` here (as it used to) silently switched
+  // every excluded person back on the next time anyone pressed resync. New
+  // rows still default to true via the column default (migration 003).
   const staffById = new Map<
     string,
-    { xpm_staff_id: string; name: string; email: string; role: "Partner" | "Staff"; included: true }
+    { xpm_staff_id: string; name: string; email: string; role: "Partner" | "Staff" }
   >();
   staffById.set(partnerRecord.uuid, {
     xpm_staff_id: partnerRecord.uuid,
     name: partnerRecord.name,
     email: partnerRecord.email,
     role: "Partner",
-    included: true,
   });
   for (const s of managerRecords) {
     if (staffById.has(s.uuid)) continue;
-    staffById.set(s.uuid, { xpm_staff_id: s.uuid, name: s.name, email: s.email, role: "Staff", included: true });
+    staffById.set(s.uuid, { xpm_staff_id: s.uuid, name: s.name, email: s.email, role: "Staff" });
   }
   const staffUpserts = Array.from(staffById.values());
 
