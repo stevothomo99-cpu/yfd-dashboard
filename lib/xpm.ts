@@ -894,9 +894,15 @@ export interface XpmTimesheetDiagnosticRow {
 // the same path as the real fetch and reports what that path threw away.
 export async function diagnoseXpmTimesheetsForPartner(
   partnerName: string,
+  window?: { from: string; to: string },
 ): Promise<XpmTimesheetDiagnosticRow[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
-  const { from, to } = xpmJobListDateRange();
+  // Defaults to the same window the live fetch uses, but narrowable to an
+  // explicit range. Over the full window someone who logged three weeks out
+  // of four still reads as healthy -- the missing week is invisible in a
+  // total. Scoping to the week in question is the only way to see whether
+  // XPM has anything for them in it at all.
+  const { from, to } = window ?? xpmJobListDateRange();
 
   const [jobs, allStaff] = await Promise.all([
     fetchXpmJobsForPartner(partnerName),

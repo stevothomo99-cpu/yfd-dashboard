@@ -7,6 +7,8 @@ import { diagnoseXpmTimesheetsForPartner, isXpmConfigured } from "@/lib/xpm";
 // same headroom.
 export const maxDuration = 300;
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -58,11 +60,34 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const rows = await diagnoseXpmTimesheetsForPartner(partner);
+    // ?from=&to= (yyyy-mm-dd) narrows the report to one period. Without it
+    // the whole rolling window is totalled, and someone who logged three
+    // weeks out of four reads as perfectly healthy -- a missing week doesn't
+    // show up in a total. Converted to the yyyyMMdd time.api wants.
+    const fromParam = request.nextUrl.searchParams.get("from");
+    const toParam = request.nextUrl.searchParams.get("to");
+    let window: { from: string; to: string } | undefined;
+    if (fromParam || toParam) {
+      if (!fromParam || !toParam || !ISO_DATE.test(fromParam) || !ISO_DATE.test(toParam)) {
+        return NextResponse.json(
+          { error: "from and to must both be given as yyyy-mm-dd." },
+          { status: 400 },
+        );
+      }
+      // Tolerate a reversed range rather than rejecting it, same as the
+      // custom-revenue endpoint.
+      const [start, end] = fromParam <= toParam ? [fromParam, toParam] : [toParam, fromParam];
+      window = { from: start.replace(/-/g, ""), to: end.replace(/-/g, "") };
+    }
+
+    const rows = await diagnoseXpmTimesheetsForPartner(partner, window);
+    const windowLabel = window
+      ? `${fromParam} → ${toParam}`
+      : "full rolling window (~360 days to today)";
 
     const verdict = (r: (typeof rows)[number]) => {
       if (r.fetchFailed) return { label: "time.api call FAILED", cls: "bad" };
-      if (r.rawEntries === 0) return { label: "No time logged in XPM", cls: "muted" };
+      if (r.rawEntries === 0) return { label: "No time logged in XPM", cls: "warn" };
       if (r.keptEntries === 0) return { label: "All entries discarded", cls: "warn" };
       if (r.droppedEntries > 0) return { label: "Some entries discarded", cls: "warn" };
       return { label: "OK", cls: "ok" };
@@ -121,6 +146,7 @@ export async function GET(request: NextRequest) {
     <span class="count">Partner: <strong>${escapeHtml(partner)}</strong></span>
     <span class="count"><strong>${rows.length}</strong> staff in XPM</span>
     <span class="count"><strong style="color:#633806">${hrs(totalDropped)}</strong> logged but discarded</span>
+    <div style="margin-top:6px">Window: <strong>${escapeHtml(windowLabel)}</strong></div>
   </div>
 
   <div class="note">
@@ -129,7 +155,14 @@ export async function GET(request: NextRequest) {
     job's client is allocated to a different Account Manager, has none set at all, or is archived — the
     hours are real and simply invisible here. Fix the allocation in XPM
     (see <a href="/api/xpm/client-allocations">client allocations</a>), then resync.
-    Figures cover the same rolling window the live timesheet fetch uses, and are not cached.
+    Figures are not cached.
+    <br><br>
+    <strong>Raw entries</strong> is what XPM returned for that person <em>before</em> any filtering —
+    it is the number that separates &ldquo;never entered their timesheet&rdquo; (0 raw) from
+    &ldquo;entered it and we dropped it&rdquo; (raw &gt; 0, counted 0). Add
+    <code>?from=yyyy-mm-dd&amp;to=yyyy-mm-dd</code> to scope this to one week or month; over the full
+    window someone who logged three weeks out of four still reads as healthy, because a missing week
+    doesn't show in a total.
   </div>
 
   <table>
