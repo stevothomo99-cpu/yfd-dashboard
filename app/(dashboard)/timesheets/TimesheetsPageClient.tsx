@@ -65,6 +65,53 @@ function ClientBreakdownList({ byClient, totalHours }: { byClient: ClientHoursBr
   );
 }
 
+// One width for every numeric column, shared by the header and the data
+// rows so the two can't drift out of alignment.
+const CELL_WIDTH = "84px";
+
+function Cell({
+  children,
+  dim,
+  strong,
+  color,
+}: {
+  children: React.ReactNode;
+  dim?: boolean;
+  strong?: boolean;
+  color?: string;
+}) {
+  return (
+    <div
+      style={{
+        width: CELL_WIDTH,
+        flex: "0 0 auto",
+        textAlign: "right",
+        fontSize: "12px",
+        fontWeight: strong ? 600 : 400,
+        color: color ?? (dim ? "#888780" : "#444441"),
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function HeadCell({ children }: { children: React.ReactNode }) {
+  return <div style={{ width: CELL_WIDTH, flex: "0 0 auto", textAlign: "right" }}>{children}</div>;
+}
+
+function fmtVariance(hours: number): string {
+  if (Math.abs(hours) < 0.05) return "—";
+  return hours > 0 ? `${hours.toFixed(1)} short` : `${Math.abs(hours).toFixed(1)} over`;
+}
+
+function pctColor(pct: number | null): string {
+  if (pct === null) return "#888780";
+  if (pct < 60) return "#e24b4a";
+  if (pct < 75) return "#b26a00";
+  return "#1a7f4b";
+}
+
 function EmployeeRow({
   staff,
   timesheets,
@@ -94,8 +141,6 @@ function EmployeeRow({
 
   const nonBillable =
     utilisation.leaveHours + utilisation.internalOtherHours + utilisation.idleHours;
-  const loggedTotal = utilisation.clientHours + nonBillable;
-  const billablePct = loggedTotal > 0 ? Math.round((utilisation.clientHours / loggedTotal) * 100) : null;
 
   return (
     <div style={{ borderBottom: "0.5px solid #e1e0d9" }}>
@@ -116,15 +161,28 @@ function EmployeeRow({
       >
         <div style={{ fontSize: "11px", color: "#888780", width: "12px" }}>{expanded ? "▾" : "▸"}</div>
         <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
-        <div style={{ width: "90px", textAlign: "right", fontSize: "12px", color: "#444441" }}>
-          {utilisation.clientHours.toFixed(1)}h billable
-        </div>
-        <div style={{ width: "110px", textAlign: "right", fontSize: "12px", color: "#888780" }}>
-          {nonBillable.toFixed(1)}h non-billable
-        </div>
-        <div style={{ width: "60px", textAlign: "right", fontSize: "12px", fontWeight: 500, color: billablePct !== null && billablePct < 50 ? "#e24b4a" : "#444441" }}>
-          {billablePct !== null ? `${billablePct}%` : "—"}
-        </div>
+        <Cell>{utilisation.clientHours.toFixed(1)}</Cell>
+        <Cell dim>{nonBillable.toFixed(1)}</Cell>
+        <Cell dim>{utilisation.standardHours.toFixed(1)}</Cell>
+        {/* The gap this whole column exists for: hours in neither the
+            billable nor the non-billable figure because they were never
+            entered. Red when time is missing, green when someone logged
+            past their standard week. */}
+        <Cell
+          color={
+            utilisation.unloggedHours > 0.05
+              ? "#e24b4a"
+              : utilisation.unloggedHours < -0.05
+                ? "#1a7f4b"
+                : "#888780"
+          }
+        >
+          {fmtVariance(utilisation.unloggedHours)}
+        </Cell>
+        <Cell dim>{utilisation.billableSharePct !== null ? `${utilisation.billableSharePct}%` : "—"}</Cell>
+        <Cell strong color={pctColor(utilisation.billableCapacityPct)}>
+          {utilisation.billableCapacityPct !== null ? `${utilisation.billableCapacityPct}%` : "—"}
+        </Cell>
       </button>
       {expanded ? (
         <div style={{ padding: "0 0 12px 24px" }}>
@@ -181,14 +239,6 @@ export default function TimesheetsPageClient({
     [timesheets, practiceStaffIds, selection, today, clientNamesMap],
   );
 
-  // Billable as a share of time actually logged -- XPM's own definition, and
-  // the same basis as the per-employee column further down. Leave and idle
-  // both count as logged-but-not-billable, matching XPM's Non-Bill column.
-  const loggedTotal =
-    utilisation.clientHours + utilisation.leaveHours + utilisation.idleHours;
-  const billableSharePct =
-    loggedTotal > 0 ? Math.round((utilisation.clientHours / loggedTotal) * 100) : null;
-
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
 
   return (
@@ -196,7 +246,7 @@ export default function TimesheetsPageClient({
       <PageHeader
         title="Timesheets"
         subtitle={
-          "Billable vs Leave vs non-billable · live from XPM · 38hr/week standard, counted to date, not prorated for part-timers" +
+          "Live from XPM · 38hr/week standard, counted to date, not prorated for part-timers · unlogged hours are treated as non-billable" +
           (excludedNames.length
             ? ` · practice totals exclude ${excludedNames.join(", ")}`
             : "")
@@ -271,19 +321,10 @@ export default function TimesheetsPageClient({
           marginBottom: "14px",
         }}
       >
-        {/* Two different denominators, side by side on purpose, because
-            comparing the wrong one against XPM's own Staff Time Summary
-            Report wastes an afternoon:
-
-            "Capacity used"   -- against available capacity to date. Answers
-                                 "is the team's time accounted for", and so
-                                 falls when people under-log or have spare
-                                 capacity.
-            "Billable share"  -- against time actually logged. This is the
-                                 figure XPM's report calls %, and the same
-                                 basis as the per-employee column below.
-
-            For 6 Jul - 2 Aug these read 65% and 81% off identical data. */}
+        {/* Row 1 -- three percentages off identical data, side by side on
+            purpose. Comparing the wrong one against XPM's own Staff Time
+            Summary Report wastes an afternoon. For 6 Jul - 2 Aug 2026 they
+            read 77%, 81% and 65%. Definitions live in lib/workOverview.ts. */}
         <KpiCard
           label="Capacity used"
           value={utilisation.pct + "%"}
@@ -300,26 +341,70 @@ export default function TimesheetsPageClient({
           valueColor={utilisation.pct < 70 ? "#e24b4a" : undefined}
         />
         <KpiCard
-          label="Billable share"
-          value={billableSharePct !== null ? billableSharePct + "%" : "—"}
+          label="Billable share (logged)"
+          value={utilisation.billableSharePct !== null ? utilisation.billableSharePct + "%" : "—"}
           sub={
-            billableSharePct !== null
-              ? utilisation.clientHours.toFixed(1) + " of " + loggedTotal.toFixed(1) + " hrs logged"
+            utilisation.billableSharePct !== null
+              ? utilisation.clientHours.toFixed(1) +
+                " of " +
+                utilisation.loggedHours.toFixed(1) +
+                " hrs logged — ignores unlogged"
               : "No time logged"
           }
         />
-        <KpiCard label="Client hours" value={utilisation.clientHours.toFixed(1) + " hrs"} />
+        <KpiCard
+          label="Billable utilisation"
+          value={
+            utilisation.billableCapacityPct !== null ? utilisation.billableCapacityPct + "%" : "—"
+          }
+          sub={
+            utilisation.billableCapacityPct !== null
+              ? utilisation.clientHours.toFixed(1) +
+                " of " +
+                Math.max(0, utilisation.standardHours - utilisation.leaveHours).toFixed(1) +
+                " hrs capacity — unlogged counts against"
+              : "No capacity in range"
+          }
+          valueColor={pctColor(utilisation.billableCapacityPct)}
+        />
+
+        {/* Rows 2-3 -- the four buckets that make up logged time, then the
+            variance and the total, so the reconciliation is on the screen
+            instead of being done by hand: client + admin + leave + idle =
+            logged, and logged + unlogged = capacity. */}
+        <KpiCard label="Client hours" value={utilisation.clientHours.toFixed(1) + " hrs"} sub="Billable" />
         <KpiCard
           label="Admin / meetings"
           value={utilisation.internalOtherHours.toFixed(1) + " hrs"}
-          sub="Paid internal — counts as utilised"
+          sub="Paid internal — non-billable, still utilised"
         />
-        <KpiCard label="Leave" value={utilisation.leaveHours.toFixed(1) + " hrs"} />
+        <KpiCard
+          label="Leave"
+          value={utilisation.leaveHours.toFixed(1) + " hrs"}
+          sub="Taken out of capacity, not charged against it"
+        />
         <KpiCard
           label="Idle"
           value={utilisation.idleHours.toFixed(1) + " hrs"}
-          sub="The only time excluded"
+          sub="Logged, non-billable, excluded from capacity used"
           valueColor={utilisation.idleHours > 0 ? "#e24b4a" : undefined}
+        />
+        <KpiCard
+          label={utilisation.unloggedHours < 0 ? "Logged over standard" : "Unlogged (variance)"}
+          value={Math.abs(utilisation.unloggedHours).toFixed(1) + " hrs"}
+          sub={
+            utilisation.standardHours.toFixed(1) +
+            " capacity − " +
+            utilisation.loggedHours.toFixed(1) +
+            " logged" +
+            (utilisation.unloggedHours > 0.05 ? " — treated as non-billable" : "")
+          }
+          valueColor={utilisation.unloggedHours > 0.05 ? "#e24b4a" : undefined}
+        />
+        <KpiCard
+          label="Total logged"
+          value={utilisation.loggedHours.toFixed(1) + " hrs"}
+          sub="Client + admin + leave + idle"
         />
       </div>
 
@@ -367,8 +452,34 @@ export default function TimesheetsPageClient({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
           <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>By employee</div>
           <div style={{ fontSize: "11px", color: "#888780" }}>
-            % = billable share of logged time · click a name for their client breakdown
+            Hours · click a name for their client breakdown
           </div>
+        </div>
+
+        {/* Six numeric columns need labels. "% log" is XPM's basis, "% cap"
+            counts unlogged time against the person -- the two disagree by
+            exactly the Unlogged column. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "12px",
+            padding: "0 0 6px",
+            borderBottom: "0.5px solid #e1e0d9",
+            fontSize: "10px",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            color: "#888780",
+          }}
+        >
+          <div style={{ width: "12px" }} />
+          <div style={{ flex: 1 }}>Employee</div>
+          <HeadCell>Billable</HeadCell>
+          <HeadCell>Non-bill</HeadCell>
+          <HeadCell>Capacity</HeadCell>
+          <HeadCell>Unlogged</HeadCell>
+          <HeadCell>% log</HeadCell>
+          <HeadCell>% cap</HeadCell>
         </div>
 
         {staffOptions.length === 0 ? (

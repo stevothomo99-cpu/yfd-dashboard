@@ -33,18 +33,29 @@ export function getBasTasks(board: TaskWithDetails[], today: string): TaskWithDe
     });
 }
 
-// Wages/timesheet utilisation -- confirmed directly with the practice:
-// each staff member has a 38hr standard week. Time coded to any client is
-// billable; time coded to the single internal "YFD Internal" job is idle
-// UNLESS it's coded to that job's "YFD - Leave" task specifically, which
-// counts as accounted-for time same as client work. Whatever's left to
-// reach the 38hr/week standard for the period is implicitly non-billable
-// too, because the denominator is always the full standard (38 * weekdays
-// in the period, per staff member), not the sum of what was actually
-// logged -- so billable% = (clientHours + leaveHours) / standardHours,
-// naturally reading low if a staff member hasn't logged enough to cover
-// the standard week. Periods always use their FULL target, never prorated
-// to elapsed days, even mid-week/mid-month/mid-FY (confirmed decision).
+// Wages/timesheet utilisation -- confirmed directly with the practice: each
+// staff member has a 38hr standard week (7.6hr weekday).
+//
+// Time coded to any client is billable. Time coded to the single internal
+// "YFD Internal" job splits four ways by task name -- leave, idle, and
+// everything else (general admin, paid team meetings), the last of which is
+// paid time nobody can be marked down for.
+//
+// There are three percentages here and they answer different questions, so
+// the right one depends on what's being asked. Against identical data for
+// 6 Jul - 2 Aug 2026 they read 77%, 81% and 65%:
+//
+//   pct (capacity used)   accounted / standard. Is the team's time accounted
+//                         for at all? Falls when people under-log.
+//   billableSharePct      client / logged. XPM's own % column. Blind to
+//                         hours nobody entered, so it flatters anyone who
+//                         logs little but logs it all to clients.
+//   billableCapacityPct   client / (standard - leave). Treats unlogged time
+//                         as non-billable, which is what it is until proven
+//                         otherwise. The one to performance-manage on.
+//
+// Capacity is counted to today, never to the end of an unfinished period --
+// see the note on capacityEnd below.
 export const INTERNAL_CLIENT_XPM_ID = "c4a69e58-19b6-4f69-be97-43fa007f6f06"; // Your Finance Department Pty Ltd
 const LEAVE_TASK_NAME = "YFD - Leave";
 // Only genuinely idle time is excluded from utilisation. Matched on the task
@@ -142,7 +153,22 @@ export interface WagesUtilisationResult {
   leaveHours: number;
   idleHours: number;
   standardHours: number;
+  // Everything actually entered in XPM for the range -- the sum of the four
+  // buckets above. The one number that reconciles this result against XPM's
+  // own Staff Time Summary Report.
+  loggedHours: number;
+  // standardHours - loggedHours. Positive means time that was never entered
+  // at all; negative means more was logged than the standard week allows
+  // for. Signed on purpose -- clamping it to zero hides genuine overtime.
+  unloggedHours: number;
   pct: number;
+  // Billable as a share of time actually logged. This is the figure XPM's
+  // report calls %, and it says nothing about hours nobody entered.
+  billableSharePct: number | null;
+  // Billable against available capacity, which treats unlogged time as
+  // non-billable -- the honest version of the number above, and the one
+  // that moves when someone under-logs.
+  billableCapacityPct: number | null;
 }
 
 // staffIds determines both whose hours count AND how many people's 38hr
@@ -191,6 +217,19 @@ export function computeWagesUtilisation(
   const standardHours = countWeekdays(start, capacityEnd) * STANDARD_HOURS_PER_DAY * staffIds.length;
   const accounted = clientHours + leaveHours + internalOtherHours;
 
+  // Every percentage the page shows is derived here, not at the call site.
+  // Two of them used to be computed in TimesheetsPageClient -- the tile and
+  // the per-employee row each summed their own denominator, drifted apart
+  // when internalOtherHours was added as a bucket, and the tile spent a
+  // while reporting 95% where the same data gave 81%.
+  const loggedHours = clientHours + leaveHours + internalOtherHours + idleHours;
+
+  // Leave comes out of the capacity denominator rather than counting as
+  // unbillable time. Approved leave isn't available capacity, so charging it
+  // against someone's billable percentage would mark them down for taking
+  // it -- a fortnight off would read as a fortnight of nothing billed.
+  const billableCapacity = Math.max(0, standardHours - leaveHours);
+
   return {
     range: { start: startIso, end: endIso },
     clientHours,
@@ -198,7 +237,12 @@ export function computeWagesUtilisation(
     internalOtherHours,
     idleHours,
     standardHours,
+    loggedHours,
+    unloggedHours: standardHours - loggedHours,
     pct: standardHours > 0 ? Math.round((accounted / standardHours) * 100) : 0,
+    billableSharePct: loggedHours > 0 ? Math.round((clientHours / loggedHours) * 100) : null,
+    billableCapacityPct:
+      billableCapacity > 0 ? Math.round((clientHours / billableCapacity) * 100) : null,
   };
 }
 
