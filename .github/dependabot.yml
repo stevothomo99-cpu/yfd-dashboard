@@ -5,3 +5,27 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    ignore:
+      # Two major bumps were tried and both break the build outright. Without
+      # these rules Dependabot reopens them every week, and a PR that can't be
+      # merged is noise that crowds out the ones that can -- the limit above is
+      # 10, and it was already full.
+      #
+      # typescript 7.x is the native rewrite: the package ships no JS API entry
+      # point at all (no `main`, no lib/typescript.js -- just a `tsc` binary).
+      # Next 16 resolves TypeScript by requiring that API, so `next build`
+      # reports "you do not have the required package(s) installed",
+      # reinstalls typescript, then dies on `The "id" argument must be of type
+      # string`. Separately, typescript-eslint 8.x (vendored inside
+      # eslint-config-next) hard-caps at <6.1.0, so type-aware linting breaks
+      # too. Revisit once Next and typescript-eslint both support it.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # eslint 10.x removes the rule-context API that eslint-plugin-react still
+      # calls (`contextOrFilename.getFilename`), so every file fails with a
+      # TypeError before a single rule runs. The plugin is vendored inside
+      # eslint-config-next and its latest release (7.37.5) still declares
+      # `eslint: ^9.7`, so there is no version to override to. Revisit when
+      # eslint-plugin-react ships ESLint 10 support.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
