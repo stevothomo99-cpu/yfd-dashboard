@@ -51,10 +51,13 @@ export interface DashboardUser {
   mfa_enabled: boolean;
   must_change_password: boolean;
   suspended: boolean;
+  // null = has never logged in. Distinct from "logged in long ago" on the
+  // User Management screen, so it stays nullable rather than defaulting.
+  last_login_at: string | null;
 }
 
 const DASHBOARD_USER_COLUMNS =
-  "id, email, username, role, created_at, mfa_enabled, must_change_password, suspended";
+  "id, email, username, role, created_at, mfa_enabled, must_change_password, suspended, last_login_at";
 
 /**
  * Looks up a dashboard_users row by username or email, then verifies the
@@ -105,6 +108,30 @@ export async function verifyDashboardUserPassword(
   } catch (err) {
     console.error("[verifyDashboardUserPassword]", err);
     return null;
+  }
+}
+
+/**
+ * Stamps a successful login. Called from authorize() only once the whole
+ * login has passed, MFA step included, so the column means "got in" rather
+ * than "tried" -- a correct password followed by a failed TOTP code must not
+ * count.
+ *
+ * Deliberately never throws and never blocks the login: this is a reporting
+ * nicety, and refusing someone entry because a timestamp write failed would
+ * be a much worse outcome than a stale value in one table column.
+ */
+export async function recordDashboardUserLogin(userId: string): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  try {
+    const admin = getSupabaseAdmin();
+    const { error } = await admin
+      .from("dashboard_users")
+      .update({ last_login_at: new Date().toISOString() })
+      .eq("id", userId);
+    if (error) console.error("[recordDashboardUserLogin]", error.message);
+  } catch (err) {
+    console.error("[recordDashboardUserLogin]", err);
   }
 }
 
