@@ -15,8 +15,7 @@ import type { JobWithCustomer } from "@/types/workflow";
 // Server entry point for the per-user Work Item board. Identity is resolved
 // strictly from the logged-in session's email, matched (case-insensitively)
 // against staff.email -- the same email a person's XPM user record uses, so
-// the two are expected to already line up (see lib/staffLink.ts for the
-// same convention applied to Karbon<->XPM). The board itself is scoped by
+// the two are expected to already line up. The board itself is scoped by
 // that staff member's place in the Partner > Manager > Staff hierarchy (see
 // lib/workflow.ts's getWorkBoardForStaff): a Partner sees a practice-wide
 // roll-up, a Manager sees their team's work, plain Staff see just their own.
@@ -43,7 +42,10 @@ export default async function MyWorkPage() {
 
   // Only admins get the staff-switcher, so only they receive the roster as
   // `allStaff`; everyone else's switcher is absent and the list stays empty.
-  const allStaff = isAdmin ? staffForForm : [];
+  // Filtered by the Settings → Included staff toggle, unlike `staffForForm`
+  // below: someone excluded from reporting can still be *assigned* work, so
+  // the "+ New Task" assignee picker deliberately keeps everyone.
+  const allStaff = isAdmin ? staffForForm.filter((s) => s.included) : [];
   const activeStaff = sessionStaff ?? (isAdmin ? allStaff[0] ?? null : null);
   const tasks = activeStaff ? await getWorkBoardForStaff(activeStaff) : [];
 

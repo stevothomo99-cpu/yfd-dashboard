@@ -126,8 +126,7 @@ function mapJob(row: JobRow): WorkflowJob {
 
 // Case-insensitive match, since the login email and the XPM staff email it
 // must match are entered by different people at different times (login
-// creation vs. XPM staff sync) -- same convention as lib/staffLink.ts's
-// Karbon<->XPM email join.
+// creation vs. XPM staff sync).
 export const getStaffByEmail = cache(async function getStaffByEmail(
   email: string,
 ): Promise<WorkflowStaff | null> {
@@ -164,6 +163,16 @@ export const listStaff = cache(async function listStaff(role?: StaffRole): Promi
 
 export async function getPartners(): Promise<WorkflowStaff[]> {
   return listStaff("Partner");
+}
+
+// The Settings page's include/exclude toggle. `included` lives on the staff
+// row rather than in a settings array of ids: the row is already the thing
+// every XPM-backed page reads, and the old settings.excludedStaffIds only
+// ever reached the legacy Karbon pages.
+export async function setStaffIncluded(staffId: string, included: boolean): Promise<void> {
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("staff").update({ included }).eq("id", staffId);
+  if (error) throw new Error(`Failed to update staff: ${error.message}`);
 }
 
 // Clients attached to a Partner, optionally narrowed by a search string

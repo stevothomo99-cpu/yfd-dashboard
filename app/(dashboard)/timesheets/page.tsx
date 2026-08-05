@@ -71,7 +71,12 @@ export default async function TimesheetsPage() {
   // in a team of four drags the practice percentage down by a quarter). They
   // still appear in the By employee table, so any time they do log is
   // visible -- it just doesn't set the bar for the team.
+  // `included` is the Settings → Included staff toggle. Excluding someone
+  // drops both their hours and their 38hr capacity, so the practice
+  // percentages read as if they weren't on the team -- which is the point for
+  // a departed or non-delivery staff member still present in XPM.
   const staffOptions = staff
+    .filter((s) => s.included)
     .filter((s): s is typeof s & { xpmStaffId: string } => Boolean(s.xpmStaffId))
     .map((s) => ({
       id: s.xpmStaffId,

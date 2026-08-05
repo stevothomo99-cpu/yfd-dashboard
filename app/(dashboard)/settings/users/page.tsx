@@ -11,6 +11,30 @@ interface User {
   role: "admin" | "user";
   created_at: string;
   suspended: boolean;
+  // null = never logged in. Worth showing as its own state rather than as a
+  // blank cell -- an account created weeks ago and never used is either
+  // someone who needs chasing or access nobody needed.
+  last_login_at: string | null;
+}
+
+// "5 Aug 2026, 11:14 pm" -- date alone isn't enough for a last-login column
+// (knowing someone got in today but not whether it was this morning defeats
+// the point), and a bare ISO string is unreadable.
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function relativeDays(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days} days ago`;
 }
 
 export default function UsersPage() {
@@ -251,19 +275,20 @@ export default function UsersPage() {
                 <th className="px-6 py-3 text-left text-sm font-semibold">Role</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold">Status</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold">Created</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Last login</th>
                 <th className="px-6 py-3 text-right text-sm font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-3 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-3 text-center text-gray-500">
                     Loading users...
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-3 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-3 text-center text-gray-500">
                     No users found
                   </td>
                 </tr>
@@ -294,6 +319,18 @@ export default function UsersPage() {
                     </td>
                     <td className="px-6 py-3 text-sm">
                       {new Date(user.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-3 text-sm whitespace-nowrap">
+                      {user.last_login_at ? (
+                        <>
+                          <div>{fmtDateTime(user.last_login_at)}</div>
+                          <div className="text-xs text-gray-500">
+                            {relativeDays(user.last_login_at)}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-amber-700">Never</span>
+                      )}
                     </td>
                     <td className="px-6 py-3 text-sm text-right whitespace-nowrap">
                       <button

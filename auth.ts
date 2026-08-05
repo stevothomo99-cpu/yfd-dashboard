@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { authConfig } from "./auth.config";
-import { verifyDashboardUserPassword, getMfaSecret } from "./lib/supabase";
+import { verifyDashboardUserPassword, getMfaSecret, recordDashboardUserLogin } from "./lib/supabase";
 import { verifyMfaCode } from "./lib/mfa";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -39,6 +39,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
           if (!verifyMfaCode(secret, submittedTotpCode)) return null;
         }
+
+        // Only here, past the MFA gate -- a correct password with a failed
+        // TOTP code is not a login. Awaited rather than fired and forgotten:
+        // authorize() runs in a serverless invocation that can be frozen the
+        // moment it returns, which would drop an un-awaited write.
+        await recordDashboardUserLogin(dashboardUser.id);
 
         return {
           id: dashboardUser.id,
