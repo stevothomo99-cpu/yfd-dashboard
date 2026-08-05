@@ -1,11 +1,11 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 4.1
+**Version:** 4.2
 **Last updated:** 5 August 2026
 **Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
 **Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan.
 
-v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
+v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
 
 ---
 
@@ -51,7 +51,7 @@ Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main
 | `/personal` | admin only | Business KPIs — see §5, mostly unchanged from v2.0 |
 | `/team`, `/leaderboard` | admin only | Legacy, largely unchanged from v2.0 |
 | `/tasks`, `/bas` | nobody (unlinked) | Old Karbon-only pages, deliberately not removed but not in nav either ("quarantined") |
-| `/settings` | admin only, **now server-enforced on every sub-route** | Staff & Sync (Partner dropdown + "Save & resync", legacy Karbon roster refresh), Dashboard Users (create/list/**pause**/**remove**), My Security (MFA) |
+| `/settings` | admin only, **now server-enforced on every sub-route** | Staff & Sync (Partner dropdown + "Save & resync", **Included staff** toggles — see §6.3), Dashboard Users (create/list/**pause**/**remove**, with **Last login**), My Security (MFA) |
 
 Nav itself (`components/layout/TopNav.tsx`) computes `isAdmin` once in `app/(dashboard)/layout.tsx` and conditionally includes Business KPIs/Team/Leaderboard/Settings — Dashboard/My Work/Clients/Timesheets are always shown.
 
@@ -187,7 +187,7 @@ For 6 Jul – 2 Aug 2026 those read **77%, 81% and 65%** off identical data. Com
 
 **Leave is netted out of the `Billable utilisation` denominator, not counted as non-billable** — confirmed directly. Approved leave is not available capacity, so charging it against someone's billable percentage would mark them down for taking it: a fortnight off would read as a fortnight of nothing billed.
 
-**Partners are excluded from practice-wide figures** (`staff.role !== "Partner"`, decided in `timesheets/page.tsx`) — both their hours and their capacity, so time they do log can't inflate it either. A Partner carries no delivery workload; one in a team of four dragged the practice percentage down by a quarter. They still appear in the By employee table. Note neither pre-existing mechanism could do this: **`staff.included` is hardcoded `true` by the sync** (effectively a dead column) and **`settings.excludedStaffIds` is only read by the legacy Karbon routes** — neither reaches `/timesheets`.
+**Partners are excluded from practice-wide figures** (`staff.role !== "Partner"`, decided in `timesheets/page.tsx`) — both their hours and their capacity, so time they do log can't inflate it either. A Partner carries no delivery workload; one in a team of four dragged the practice percentage down by a quarter. They still appear in the By employee table. This is separate from, and takes precedence over, the `staff.included` toggle in §6.3.
 
 **Custom date ranges**: `DateRange`/`PeriodSelection` — the compute functions take either a period key or an explicit range, so existing callers are unaffected. Bounds are inclusive; a range extending past today still counts capacity only to today; reversed dates are swapped; a half-filled range falls back rather than measuring an open-ended window; a range with no weekdays yields 0% not `NaN`.
 
@@ -205,6 +205,32 @@ This was previously Redis-only with no TTL and nothing behind it. That holds unt
 
 ---
 
+## 6.3 Included staff & the email join
+
+Settings → **Included staff** is the switch for who the dashboard reports on. It went through two wrong shapes before this one, both worth knowing about.
+
+**It used to be sourced from Karbon.** The roster came from Karbon's user list and had to be email-joined to XPM to mean anything, which is why each row carried a "Linked / Not linked to XPM" badge. It dragged in entries that were never people here (`Karbon Support`, `onboarding@karbonhq.com`) and needed its own *Refresh staff roster* button beside the real resync — two buttons whose labels both read as "sync from XPM". Karbon roster, button, `lib/staffLink.ts` and `/api/xpm/staff` are all removed.
+
+**The toggles used to do nothing.** They wrote `settings.excludedStaffIds`, which is read by the quarantined Karbon pages (`/tasks`, `/bas`, `/team`, `/leaderboard`) and by nothing else — so a control captioned "excluded staff are hidden everywhere" had no effect on Timesheets, Clients or My Work. They now write **`staff.included`**.
+
+**The list is `dashboard_users`, joined to `staff` on `lower(email)`.** Logins are the thing an admin actually manages, so that's what the rows are; the XPM staff record matched by email is what the toggle writes to, because that's what carries the hours. Both sides of a failed join are surfaced rather than left silent:
+
+| Case | Shown as |
+|---|---|
+| Login matches an XPM staff row | Normal row with a toggle |
+| Login with no XPM match (e.g. `kim@focablyED.com.au`) | Row with "No XPM staff with this email" instead of a toggle — nothing to include or exclude |
+| XPM staff with no login | Warning listing them: they stay included in every figure and there is no row to switch them off from |
+
+Case matters here only in that it must *not*: the login and the XPM record are created by different people at different times, so both sides are lowercased for the join.
+
+**What excluding actually does**, and where it deliberately stops:
+- `/timesheets` — drops the person's hours **and** their 38hr capacity, so the practice percentages read as if they were never on the team. That's the point for someone departed or non-delivery who still exists in XPM.
+- `/clients` — drops them from the staff slicer and the hours totals together, so the two agree.
+- `/my-work` — drops them from the admin staff switcher, but **not** from the "+ New Task" assignee picker. Excluded from reporting doesn't mean unassignable.
+
+`staff.included` has existed since migration 003 but was dead until now, because the sync wrote `included: true` on every upsert — any toggle would have been flipped back on the next resync. It's out of the upsert payload; new rows still default true via the column default.
+
+---
 ## 7. Auth
 
 Single NextAuth `Credentials` provider (`auth.ts`), entirely backed by the `dashboard_users` table — **there is no separate CEO env-var login anymore** (that was v2.0; removed in favour of dashboard_users covering everyone, including the CEO).
@@ -267,7 +293,7 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 - **A per-item `catch` that returns an empty array converts a failure into believable missing data.** This is why a whole staff member's timesheet vanished without a trace. The catch was right; the silence wasn't. Log it.
 - **The workflow sync does not refresh everything XPM-derived.** It rebuilds `staff`/`customers`/`jobs` in Postgres, but timesheets are served from the `xpm:timesheets:<partner>` cache. It now invalidates that cache explicitly — without it, a sync left stale (possibly rate-limit-truncated) hours in place, which reads as "I synced and the numbers are still wrong".
 - **Categories defined by elimination are a trap.** Idle was "internal and not leave", which swallowed paid admin and meeting time (§6.1). `getClientSummaries`'s "Multiple" manager was inferred from a client's jobs rather than read from the client (§6). Both looked like data problems and were definition problems.
-- **Two buttons whose labels both mean "sync from XPM" cost real debugging time.** `/api/xpm/staff` refreshes only the legacy Karbon-linking roster; `/api/xpm/sync-workflow` is the real one. Now labelled "Refresh staff roster" vs "Save & resync clients, jobs, staff", with the real one beside the Partner field. The resync also **saves the Partner first** — previously only the roster button persisted that field, so changing the Partner and pressing resync rebuilt everything against the *old* Partner with no indication anything had been ignored.
+- **Two buttons whose labels both meant "sync from XPM" cost real debugging time.** `/api/xpm/staff` refreshed only the legacy Karbon-linking roster while `/api/xpm/sync-workflow` was the real one. Both that button and that route are **gone** (§6.3); `sync-workflow` is the only sync now, and it **saves the Partner first** — previously only the roster button persisted that field, so changing the Partner and pressing resync rebuilt everything against the *old* Partner with no indication anything had been ignored.
 - **Vercel deploys lag your testing.** Several rounds of "still wrong" were the previous deployment still serving. Check the retry/backoff numbers or `dep=` in the runtime logs before re-diagnosing.
 
 ---
@@ -285,7 +311,7 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 - **Dependabot backlog**: several open PRs, of which TypeScript 5.9→7.0 and ESLint 9→10 are major versions needing a build check.
 - **Three pre-existing lint errors** remain (`settings/users/page.tsx`, `api/hubspot/deals/route.ts`, `lib/hubspot.ts`) — unrelated to v4.0 work, verified as pre-existing.
 
-*Closed in v4.0*: `/api/settings` PATCH and `/api/xpm/staff` now enforce admin server-side; `partnerName` is durably stored (§6.2); `lib/google.ts` no longer throws at import; `getClientSummaries` no longer walks the tasks table per customer.
+*Closed in v4.0*: `/api/settings` PATCH and the staff routes now enforce admin server-side; `partnerName` is durably stored (§6.2); `lib/google.ts` no longer throws at import; `getClientSummaries` no longer walks the tasks table per customer.
 
 ---
 

@@ -112,6 +112,27 @@ export async function verifyDashboardUserPassword(
 }
 
 /**
+ * Every dashboard login account, newest first. Feeds the Settings staff
+ * roster, which is now keyed on who can actually log in rather than on who
+ * exists in XPM.
+ */
+export async function listDashboardUsers(): Promise<DashboardUser[]> {
+  if (!isSupabaseConfigured()) return [];
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("dashboard_users")
+    .select(DASHBOARD_USER_COLUMNS)
+    .order("created_at", { ascending: false })
+    .returns<DashboardUser[]>();
+
+  if (error) {
+    console.error("[listDashboardUsers]", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+/**
  * Stamps a successful login. Called from authorize() only once the whole
  * login has passed, MFA step included, so the column means "got in" rather
  * than "tried" -- a correct password followed by a failed TOTP code must not

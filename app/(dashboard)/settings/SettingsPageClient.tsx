@@ -26,14 +26,17 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowResult, setWorkflowResult] = useState<WorkflowSyncResult | null>(null);
 
-  // Optimistic, then reverted on failure -- a toggle that appears to work and
+  // The row is a dashboard login, but the thing being toggled is the XPM
+  // staff record matched to it by email -- that's what carries the hours.
+  //
+  // Optimistic, then reverted on failure: a toggle that appears to work and
   // silently didn't would be worse here than a brief flicker, since the
   // consequence is invisible until someone reads a utilisation figure.
-  async function handleToggle(staffId: string) {
+  async function handleToggle(userId: string, staffId: string) {
     const flip = (roster: SettingsSnapshot["roster"]) =>
-      roster.map((r) => (r.id === staffId ? { ...r, included: !r.included } : r));
+      roster.map((r) => (r.userId === userId ? { ...r, included: !r.included } : r));
     const next = flip(snapshot.roster);
-    const target = next.find((r) => r.id === staffId);
+    const target = next.find((r) => r.userId === userId);
     setSnapshot({ ...snapshot, roster: next });
     setError(null);
 
@@ -77,13 +80,17 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
     }
   }
 
-  const includedCount = snapshot.roster.filter((r) => r.included).length;
+  // Counted over rows that actually have an XPM match -- a login with no
+  // matching staff record has no hours either way, so counting it would
+  // overstate how many people the figures cover.
+  const matchedRoster = snapshot.roster.filter((r) => r.staffId);
+  const includedCount = matchedRoster.filter((r) => r.included).length;
 
   return (
     <div>
       <PageHeader
         title="Settings"
-        subtitle="Configure the XPM Partner filter and which staff appear across the dashboard"
+        subtitle="Configure the XPM Partner filter and which staff the dashboard reports on"
       />
 
       <div className="mb-6 flex gap-4">
@@ -204,27 +211,33 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         >
           <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Included staff</div>
           <div style={{ fontSize: "11px", color: "#888780" }}>
-            {includedCount} of {snapshot.roster.length} included
+            {includedCount} of {matchedRoster.length} included
           </div>
         </div>
-        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "16px" }}>
-          Synced from XPM by <em>Save &amp; resync</em> above. Excluding someone removes them from the
-          Timesheets figures (both their hours <strong>and</strong> their 38hr capacity), the Clients
-          staff slicer, and the My Work staff switcher. They can still be assigned tasks, and their
-          time stays in XPM &mdash; this only governs what the dashboard reports on.
+        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "10px" }}>
+          The list is your <Link href="/settings/users" style={linkStyle}>Dashboard Users</Link>, matched
+          to XPM by email. Excluding someone removes them from the Timesheets figures (both their hours{" "}
+          <strong>and</strong> their 38hr capacity), the Clients staff slicer, and the My Work staff
+          switcher. They can still be assigned tasks, and their time stays in XPM &mdash; this only
+          governs what the dashboard reports on.
+        </div>
+        <div style={{ fontSize: "12px", color: "#633806", background: "#FAEEDA", border: "0.5px solid #f0d9a8", borderRadius: "10px", padding: "8px 12px", marginBottom: "16px" }}>
+          A Dashboard User&rsquo;s email <strong>must match their XPM staff email exactly</strong> (case
+          doesn&rsquo;t matter). That email is the only link between the two &mdash; if it differs,
+          their XPM hours can&rsquo;t be attributed to them here and there&rsquo;s nothing to toggle.
         </div>
 
         {error ? <Banner tone="error">{error}</Banner> : null}
 
         {snapshot.roster.length === 0 ? (
           <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>
-            No staff synced from XPM yet.
+            No dashboard users yet — add them under Dashboard Users.
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column" }}>
             {snapshot.roster.map((r, i) => (
               <div
-                key={r.id}
+                key={r.userId}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -233,50 +246,106 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
                   borderBottom: i < snapshot.roster.length - 1 ? "0.5px solid #e1e0d9" : "none",
                 }}
               >
-                <StaffAvatar initials={initialsOf(r.name)} size={32} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{r.name}</div>
-                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
-                    {r.email || "No email on file"}
+                <StaffAvatar initials={initialsOf(r.staffName ?? r.username)} size={32} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>
+                    {r.staffName ?? r.username}
+                    {r.isAdmin ? (
+                      <span style={{ fontSize: "10px", color: "#888780", fontWeight: 400, marginLeft: "6px" }}>
+                        admin
+                      </span>
+                    ) : null}
+                    {r.suspended ? (
+                      <span style={{ fontSize: "10px", color: "#888780", fontWeight: 400, marginLeft: "6px" }}>
+                        · login paused
+                      </span>
+                    ) : null}
                   </div>
+                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>{r.email}</div>
                 </div>
-                <div style={{ fontSize: "11px", color: "#888780", whiteSpace: "nowrap" }}>{r.role}</div>
-                <button
-                  type="button"
-                  onClick={() => handleToggle(r.id)}
-                  aria-pressed={r.included}
-                  aria-label={`${r.included ? "Exclude" : "Include"} ${r.name}`}
-                  style={{
-                    position: "relative",
-                    width: "40px",
-                    height: "22px",
-                    borderRadius: "999px",
-                    background: r.included ? "#1baf7a" : "#d3d2cb",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 0,
-                    transition: "background 0.15s",
-                    flexShrink: 0,
-                  }}
-                >
-                  <span
+
+                {/* No XPM match means no hours to include or exclude, so the
+                    toggle is replaced by the reason rather than shown doing
+                    nothing. */}
+                {r.staffId ? (
+                  <>
+                    <div style={{ fontSize: "11px", color: "#888780", whiteSpace: "nowrap" }}>
+                      {r.staffRole}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(r.userId, r.staffId as string)}
+                      aria-pressed={r.included}
+                      aria-label={`${r.included ? "Exclude" : "Include"} ${r.staffName ?? r.username}`}
+                      style={{
+                        position: "relative",
+                        width: "40px",
+                        height: "22px",
+                        borderRadius: "999px",
+                        background: r.included ? "#1baf7a" : "#d3d2cb",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                        transition: "background 0.15s",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: "2px",
+                          left: r.included ? "20px" : "2px",
+                          width: "18px",
+                          height: "18px",
+                          borderRadius: "50%",
+                          background: "white",
+                          transition: "left 0.15s",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                        }}
+                      />
+                    </button>
+                  </>
+                ) : (
+                  <div
                     style={{
-                      position: "absolute",
-                      top: "2px",
-                      left: r.included ? "20px" : "2px",
-                      width: "18px",
-                      height: "18px",
-                      borderRadius: "50%",
-                      background: "white",
-                      transition: "left 0.15s",
-                      boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                      fontSize: "10px",
+                      padding: "3px 9px",
+                      borderRadius: "8px",
+                      fontWeight: 500,
+                      background: "#FAEEDA",
+                      color: "#633806",
+                      whiteSpace: "nowrap",
                     }}
-                  />
-                </button>
+                  >
+                    No XPM staff with this email
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
+
+        {/* The other side of the email join: someone in XPM with no login
+            here. They keep counting in every figure and there's no row to
+            switch them off from, which is worth saying out loud. */}
+        {snapshot.unmatchedStaffNames.length > 0 ? (
+          <div
+            style={{
+              fontSize: "11px",
+              color: "#633806",
+              background: "#FAEEDA",
+              border: "0.5px solid #f0d9a8",
+              borderRadius: "10px",
+              padding: "8px 12px",
+              marginTop: "14px",
+            }}
+          >
+            In XPM but with no Dashboard User:{" "}
+            <strong>{snapshot.unmatchedStaffNames.join(", ")}</strong>. They stay included in every
+            figure and can&rsquo;t be toggled from here — add a Dashboard User with the same email to
+            get a switch for them.
+          </div>
+        ) : null}
 
         {/* The Partner, listed without a toggle. They're already out of the
             practice-wide figures by role (see timesheets/page.tsx) and they're
@@ -298,13 +367,13 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
               employee table.
             </div>
             {snapshot.partnerRoster.map((r) => (
-              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <StaffAvatar initials={initialsOf(r.name)} size={32} />
+              <div key={r.userId} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <StaffAvatar initials={initialsOf(r.staffName ?? r.username)} size={32} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>{r.name}</div>
-                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
-                    {r.email || "No email on file"}
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>
+                    {r.staffName ?? r.username}
                   </div>
+                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>{r.email}</div>
                 </div>
                 <div
                   style={{
@@ -350,6 +419,11 @@ function Banner({ tone, children }: { tone: "warn" | "info" | "error"; children:
     </div>
   );
 }
+
+const linkStyle: React.CSSProperties = {
+  color: "#2a78d6",
+  textDecoration: "underline",
+};
 
 const partnerFieldStyle: React.CSSProperties = {
   flex: 1,
