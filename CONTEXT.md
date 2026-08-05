@@ -1,11 +1,11 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 4.0
-**Last updated:** 4 August 2026
+**Version:** 4.1
+**Last updated:** 5 August 2026
 **Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
 **Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan.
 
-v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
+v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
 
 ---
 
@@ -47,7 +47,7 @@ Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main
 | `/dashboard` | everyone | Personal "Work overview" — BAS status, overdue work items, billable utilisation tile, and **two To-Do tiles** side by side at 2:1 — confirmed items (Complete/Edit/Discard, sortable columns) and a to-confirm triage queue (see §4.8) |
 | `/my-work` | everyone | Karbon-style flat task table, scoped by Partner/Manager/Staff hierarchy (own tasks for Staff, team's for Manager, practice-wide for Partner); admin gets a "viewing as" staff-switcher others don't |
 | `/clients` | everyone | Tile grid — one tile per client, hours logged + revenue for a This Week/Month/Quarter/FY **or custom From/To** slicer, summary bar (Clients/Hours/Revenue/$-per-hr). Click a tile to open the Client drawer (jobs, tasks, notes, files, copy-task, save/apply template) |
-| `/timesheets` | everyone | Utilisation by period (fixed buttons **or custom From/To**), collapsible practice-wide "Time by client" list, and a **By employee** table — each row expandable to that person's own client breakdown. Two percentages side by side on purpose — see §6.1 |
+| `/timesheets` | everyone | Utilisation by period (fixed buttons **or custom From/To**), collapsible practice-wide "Time by client" list, and a **By employee** table (billable / non-bill / capacity / unlogged / % log / % cap), each row expandable to that person's own client breakdown. Three percentages side by side on purpose, and an unlogged-hours variance — see §6.1 |
 | `/personal` | admin only | Business KPIs — see §5, mostly unchanged from v2.0 |
 | `/team`, `/leaderboard` | admin only | Legacy, largely unchanged from v2.0 |
 | `/tasks`, `/bas` | nobody (unlinked) | Old Karbon-only pages, deliberately not removed but not in nav either ("quarantined") |
@@ -172,13 +172,20 @@ Getting these wrong produced three separate rounds of "the dashboard is broken" 
 
 **Capacity is counted to today, never to the end of the period.** Logged hours are to-date, so measuring them against a whole period's capacity compares to-date effort with a not-yet-elapsed denominator — on 27 Jul the FY tile divided ~4 weeks of work by a full year (261 weekdays × 7.6 × 4 staff = 7934.4 std hrs) and reported 2% instead of 34%.
 
-**Two percentages are shown side by side, on purpose.** They have different denominators and will never agree:
+**Three percentages are shown side by side, on purpose.** They have different denominators and will never agree:
 | Tile | Denominator | Answers |
 |---|---|---|
 | Capacity used | available capacity to date | is the team's time accounted for (falls on under-logging or spare capacity) |
-| Billable share | time actually logged | **this is the figure XPM's own Staff Time Summary Report calls %**, and the same basis as the per-employee column |
+| Billable share (logged) | time actually logged | **this is the figure XPM's own Staff Time Summary Report calls %.** Blind to hours nobody entered, so it flatters anyone who logs little but logs it all to clients |
+| Billable utilisation | capacity − leave | billable against what was *available*, so unlogged time counts as non-billable. The one to performance-manage on |
 
-For 6 Jul – 2 Aug those read 65% and 81% off identical data. Comparing the wrong one against XPM's report wastes an afternoon.
+For 6 Jul – 2 Aug 2026 those read **77%, 81% and 65%** off identical data. Comparing the wrong one against XPM's report wastes an afternoon.
+
+**All three are derived inside `computeWagesUtilisation`, never at the call site.** They used to be re-summed in `TimesheetsPageClient`, where the tile and the per-employee row each built their own denominator. When `internalOtherHours` was added as a bucket the tile's line wasn't updated, so it divided by `client + leave + idle` = 315.1 and reported **95%** where the same data gave 81% — with the employee rows beside it reading 99/72/75 on the correct basis. One definition, one place.
+
+**Unlogged hours are a first-class figure, not a gap.** `loggedHours` is all four buckets; `unloggedHours` is `standardHours − loggedHours`, **signed** — positive means time never entered, negative means someone logged past their standard week (clamping it would hide genuine overtime). For 6 Jul – 2 Aug that was 456.0 capacity against 369.0 logged: **87.0 hrs that appeared in no tile, no column, and neither percentage.** Joel showed 72% off 114.0 logged hours against a 152.0hr standard month — a quarter of his time was outside the calculation entirely.
+
+**Leave is netted out of the `Billable utilisation` denominator, not counted as non-billable** — confirmed directly. Approved leave is not available capacity, so charging it against someone's billable percentage would mark them down for taking it: a fortnight off would read as a fortnight of nothing billed.
 
 **Partners are excluded from practice-wide figures** (`staff.role !== "Partner"`, decided in `timesheets/page.tsx`) — both their hours and their capacity, so time they do log can't inflate it either. A Partner carries no delivery workload; one in a team of four dragged the practice percentage down by a quarter. They still appear in the By employee table. Note neither pre-existing mechanism could do this: **`staff.included` is hardcoded `true` by the sync** (effectively a dead column) and **`settings.excludedStaffIds` is only read by the legacy Karbon routes** — neither reaches `/timesheets`.
 
