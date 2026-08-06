@@ -1,9 +1,9 @@
 import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { copyTaskToJob } from "@/lib/workflow";
+import { copyTaskToClient } from "@/lib/workflow";
 
-// Copies an existing task onto a (usually different) job/client -- see
-// lib/workflow.ts's copyTaskToJob for exactly what is/isn't carried over.
+// Copies an existing task onto a (usually different) client -- see
+// lib/workflow.ts's copyTaskToClient for exactly what is/isn't carried over.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) {
@@ -11,13 +11,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const { id } = await params;
-  const body = (await request.json()) as { jobId?: string };
-  const jobId = body.jobId?.trim();
-  if (!jobId) {
-    return NextResponse.json({ error: "jobId is required" }, { status: 400 });
+  const body = (await request.json()) as { customerId?: string };
+  const customerId = body.customerId?.trim();
+  if (!customerId) {
+    return NextResponse.json({ error: "customerId is required" }, { status: 400 });
   }
 
-  const task = await copyTaskToJob(id, jobId);
+  const task = await copyTaskToClient(id, customerId);
   if (!task) {
     return NextResponse.json({ error: "Failed to copy task" }, { status: 500 });
   }

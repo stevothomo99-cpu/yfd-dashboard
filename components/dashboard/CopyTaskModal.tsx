@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import ClientJobPicker from "./ClientJobPicker";
+import ClientPicker from "./ClientPicker";
 import type { TaskWithDetails } from "@/types/workflow";
 
 interface ClientOption {
@@ -16,20 +16,19 @@ interface CopyTaskModalProps {
   onCopied: () => void;
 }
 
-// Lets a task be duplicated onto a different client/job -- same title/
-// type/recurrence, but always a fresh due date, no assignee, and the
-// default open status (never "Completed"). See lib/workflow.ts's
-// copyTaskToJob for the full rationale.
+// Lets a task be duplicated onto a different client -- same title/type/
+// recurrence, but always a fresh due date, no assignee, and the default
+// open status (never "Completed"). See lib/workflow.ts's copyTaskToClient
+// for the full rationale.
 export default function CopyTaskModal({ task, clients, onClose, onCopied }: CopyTaskModalProps) {
   const [clientId, setClientId] = useState("");
-  const [jobId, setJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!jobId) {
-      setError("Choose a destination job.");
+    if (!clientId) {
+      setError("Choose a destination client.");
       return;
     }
     setSubmitting(true);
@@ -38,7 +37,7 @@ export default function CopyTaskModal({ task, clients, onClose, onCopied }: Copy
       const res = await fetch(`/api/workflow/tasks/${task.id}/copy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify({ customerId: clientId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to copy task");
@@ -109,19 +108,13 @@ export default function CopyTaskModal({ task, clients, onClose, onCopied }: Copy
         ) : null}
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <ClientJobPicker
-            clients={clients}
-            selectedClientId={clientId}
-            onSelectClient={setClientId}
-            selectedJobId={jobId}
-            onSelectJob={setJobId}
-          />
+          <ClientPicker clients={clients} selectedClientId={clientId} onSelectClient={setClientId} />
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>
             <button type="button" onClick={onClose} style={secondaryButtonStyle}>
               Cancel
             </button>
-            <button type="submit" disabled={submitting || !jobId} style={{ ...primaryButtonStyle, opacity: submitting || !jobId ? 0.6 : 1 }}>
+            <button type="submit" disabled={submitting || !clientId} style={{ ...primaryButtonStyle, opacity: submitting || !clientId ? 0.6 : 1 }}>
               {submitting ? "Copying…" : "Copy task"}
             </button>
           </div>

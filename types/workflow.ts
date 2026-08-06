@@ -1,6 +1,13 @@
 // Types for the XPM-native work-item system that replaces Karbon (see
 // lib/workflow.ts). staff/customers/jobs mirror XPM's Partner -> Client ->
 // Job hierarchy; tasks are dashboard-native (not synced from anywhere).
+//
+// Tasks belong to a CLIENT, not a job -- confirmed directly with the
+// practice: time is captured against jobs in XPM and jobs are billed to
+// clients, which is the only place jobs are used. Workflow/tasks are
+// recorded against clients (see migration 017). Jobs still exist here for
+// XPM/billing reference (WorkflowJob, JobWithManager, the Clients drawer's
+// Jobs section) but a Task never references one.
 
 export type StaffRole = "Partner" | "Manager" | "Staff";
 
@@ -27,10 +34,6 @@ export interface WorkflowJob {
   name: string;
   partnerId: string | null;
   managerId: string | null;
-}
-
-export interface JobWithCustomer extends WorkflowJob {
-  customerName: string;
 }
 
 export interface JobWithManager extends WorkflowJob {
@@ -62,7 +65,7 @@ export interface WorkflowTaskType {
 
 export interface WorkflowTask {
   id: string;
-  jobId: string;
+  customerId: string;
   title: string;
   assigneeId: string | null;
   tempAssigneeId: string | null;
@@ -81,7 +84,6 @@ export interface WorkflowTask {
 // A task, hydrated with everything a board/list view needs to render
 // without further lookups.
 export interface TaskWithDetails extends WorkflowTask {
-  jobName: string;
   customerName: string;
   statusName: string;
   statusColor: string;
@@ -98,7 +100,7 @@ export interface TaskWithDetails extends WorkflowTask {
 }
 
 export interface CreateTaskInput {
-  jobId: string;
+  customerId: string;
   title: string;
   assigneeId?: string | null;
   dueDate?: string | null;
@@ -110,9 +112,9 @@ export interface CreateTaskInput {
 
 // Same shape as CreateTaskInput but every field optional -- PATCH only
 // touches fields actually present in the request body, so e.g. omitting
-// jobId leaves a task on its existing job rather than clearing it.
+// customerId leaves a task on its existing client rather than clearing it.
 export interface UpdateTaskInput {
-  jobId?: string;
+  customerId?: string;
   title?: string;
   assigneeId?: string | null;
   dueDate?: string | null;
@@ -131,7 +133,6 @@ export interface ClientSummary {
   xpmClientId: string | null;
   name: string;
   managerName: string | null;
-  // Every distinct staff id managing one of this client's jobs -- lets the
   // The client's Manager id, as a list purely so the Clients page filter
   // can stay a simple `includes` check. Holds at most one id -- a client has
   // one Manager in XPM (its jobManager); this is not an aggregate over its

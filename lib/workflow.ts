@@ -6,7 +6,6 @@ import type {
   CreateTaskInput,
   CustomerFile,
   CustomerNote,
-  JobWithCustomer,
   JobWithManager,
   RecurrenceInterval,
   StaffRole,
@@ -73,7 +72,7 @@ interface TaskTypeRow {
 
 interface TaskRow {
   id: string;
-  job_id: string;
+  customer_id: string;
   title: string;
   assignee_id: string | null;
   temp_assignee_id: string | null;
@@ -91,7 +90,7 @@ interface TaskRow {
 
 // Just the columns getClientSummaries' tallies read -- it counts tasks
 // rather than rendering them, so it has no use for the full TaskRow.
-type ClientSummaryTaskRow = Pick<TaskRow, "job_id" | "status_id" | "type_id" | "due_date">;
+type ClientSummaryTaskRow = Pick<TaskRow, "customer_id" | "status_id" | "type_id" | "due_date">;
 
 function mapStaff(row: StaffRow): WorkflowStaff {
   return {
@@ -200,27 +199,19 @@ export async function searchClientsForPartner(
   return (data ?? []).map(mapCustomer);
 }
 
-type JobRowWithCustomer = JobRow & { customers: { name: string } | null };
-
-function mapJobWithCustomer(row: JobRowWithCustomer): JobWithCustomer {
-  return {
-    ...mapJob(row),
-    customerName: row.customers?.name ?? "Unknown client",
-  };
-}
-
-// In-progress jobs attached to a Manager (jobs table only ever holds jobs
-// synced from XPM's InProgress job list -- see lib/xpm.ts's
-// fetchXpmJobsForPartner -- so every row here already represents an
-// in-progress job; there's no separate status column to filter on).
-export async function getInProgressJobsForManager(
+// Clients attached to a Manager, optionally narrowed by a search string --
+// the Manager-scope counterpart to searchClientsForPartner above. Per this
+// system's real data, "Staff"-role people are the actual job-manager tier
+// (see getClientsInScopeForStaff's comment), so this is queried by
+// customers.manager_id regardless of the staff row's role.
+export async function getClientsForManager(
   managerId: string,
   search?: string
-): Promise<JobWithCustomer[]> {
+): Promise<WorkflowCustomer[]> {
   const admin = getSupabaseAdmin();
   let query = admin
-    .from("jobs")
-    .select("id, customer_id, xpm_job_id, name, partner_id, manager_id, customers(name)")
+    .from("customers")
+    .select("id, xpm_client_id, name, partner_id, manager_id")
     .eq("manager_id", managerId)
     .order("name");
 
@@ -228,74 +219,49 @@ export async function getInProgressJobsForManager(
     query = query.ilike("name", `%${search.trim()}%`);
   }
 
-  const { data, error } = await query.returns<JobRowWithCustomer[]>();
+  const { data, error } = await query.returns<CustomerRow[]>();
   if (error) {
-    console.error("[workflow] getInProgressJobsForManager failed:", error.message);
+    console.error("[workflow] getClientsForManager failed:", error.message);
     return [];
   }
-
-  return (data ?? []).map(mapJobWithCustomer);
+  return (data ?? []).map(mapCustomer);
 }
 
-// Every in-progress job under a Partner, across all their Managers -- feeds
-// the "all managers" view on /jobs. Same in-progress caveat as above.
-export async function getInProgressJobsForPartner(
-  partnerId: string,
-  search?: string
-): Promise<JobWithCustomer[]> {
-  const admin = getSupabaseAdmin();
-  let query = admin
-    .from("jobs")
-    .select("id, customer_id, xpm_job_id, name, partner_id, manager_id, customers(name)")
-    .eq("partner_id", partnerId)
-    .order("name");
-
-  if (search?.trim()) {
-    query = query.ilike("name", `%${search.trim()}%`);
-  }
-
-  const { data, error } = await query.returns<JobRowWithCustomer[]>();
-  if (error) {
-    console.error("[workflow] getInProgressJobsForPartner failed:", error.message);
-    return [];
-  }
-
-  return (data ?? []).map(mapJobWithCustomer);
-}
-
-// Every in-progress job a staff member is allowed to create/edit tasks
-// within, per their place in the Partner > Manager > Staff hierarchy --
-// mirrors getWorkBoardForStaff's role dispatch, but for jobs rather than
-// tasks. Partners get their whole Partner-scope roll-up; Managers (and, per
-// this system's real data, "Staff"-role people, who are the actual
-// job-manager tier -- see getInProgressJobsForManager's comment) get only
-// the jobs they personally manage. There's no narrower case: Staff is the
-// bottom of the job-scope hierarchy, so it shares the Manager branch.
-export async function getJobsInScopeForStaff(staff: WorkflowStaff): Promise<JobWithCustomer[]> {
+// Every client a staff member is allowed to create/edit tasks against, per
+// their place in the Partner > Manager > Staff hierarchy -- mirrors
+// getWorkBoardForStaff's role dispatch. Partners get their whole
+// Partner-scope roll-up; Managers (and, per this system's real data,
+// "Staff"-role people, who are the actual client-manager tier -- e.g.
+// Andre/Joel/Joshua all carry role "Staff" but manage clients directly) get
+// only the clients they personally manage. There's no narrower case: Staff
+// is the bottom of the scope hierarchy, so it shares the Manager branch.
+export async function getClientsInScopeForStaff(staff: WorkflowStaff): Promise<WorkflowCustomer[]> {
   switch (staff.role) {
     case "Partner":
-      return getInProgressJobsForPartner(staff.id);
+      return searchClientsForPartner(staff.id);
     case "Manager":
     default:
-      return getInProgressJobsForManager(staff.id);
+      return getClientsForManager(staff.id);
   }
 }
 
-// Wrapped in React's cache() so the five reference-table reads happen once
+// Wrapped in React's cache() so the four reference-table reads happen once
 // per request, not once per caller. A single page render can reach this via
-// three or four different paths (work board, client summaries, job pickers)
-// -- each of which used to re-fetch all five tables.
+// three or four different paths (work board, client summaries, client
+// pickers) -- each of which used to re-fetch all four tables.
+//
+// jobs is deliberately not read here any more: tasks are client-scoped
+// (migration 017), so hydrating a task never needs to look one up.
 //
 // cache() is per-request and does not persist across requests, so this
 // stays as fresh as the un-memoized version was.
 const fetchLookupMaps = cache(async function fetchLookupMaps() {
   const admin = getSupabaseAdmin();
-  const [{ data: statuses }, { data: taskTypes }, { data: staff }, { data: jobs }, { data: customers }] =
+  const [{ data: statuses }, { data: taskTypes }, { data: staff }, { data: customers }] =
     await Promise.all([
       admin.from("statuses").select("id, name, color, sort_order, is_complete").returns<StatusRow[]>(),
       admin.from("task_types").select("id, name, color, sort_order").returns<TaskTypeRow[]>(),
       admin.from("staff").select("id, xpm_staff_id, name, email, role, included").returns<StaffRow[]>(),
-      admin.from("jobs").select("id, customer_id, xpm_job_id, name, partner_id, manager_id").returns<JobRow[]>(),
       admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").returns<CustomerRow[]>(),
     ]);
 
@@ -303,7 +269,6 @@ const fetchLookupMaps = cache(async function fetchLookupMaps() {
     statusesById: new Map((statuses ?? []).map((s) => [s.id, s])),
     taskTypesById: new Map((taskTypes ?? []).map((t) => [t.id, t])),
     staffById: new Map((staff ?? []).map((s) => [s.id, s])),
-    jobsById: new Map((jobs ?? []).map((j) => [j.id, j])),
     customersById: new Map((customers ?? []).map((c) => [c.id, c])),
   };
 });
@@ -314,8 +279,7 @@ function hydrateTask(
 ): TaskWithDetails {
   const status = lookups.statusesById.get(row.status_id);
   const type = row.type_id ? lookups.taskTypesById.get(row.type_id) : undefined;
-  const job = lookups.jobsById.get(row.job_id);
-  const customer = job ? lookups.customersById.get(job.customer_id) : undefined;
+  const customer = lookups.customersById.get(row.customer_id);
   const assignee = row.assignee_id ? lookups.staffById.get(row.assignee_id) : undefined;
   const tempAssignee = row.temp_assignee_id ? lookups.staffById.get(row.temp_assignee_id) : undefined;
 
@@ -324,7 +288,7 @@ function hydrateTask(
 
   return {
     id: row.id,
-    jobId: row.job_id,
+    customerId: row.customer_id,
     title: row.title,
     assigneeId: row.assignee_id,
     tempAssigneeId: row.temp_assignee_id,
@@ -338,7 +302,6 @@ function hydrateTask(
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    jobName: job?.name ?? "Unknown job",
     customerName: customer?.name ?? "Unknown client",
     statusName: status?.name ?? "Unknown",
     statusColor: status?.color ?? "#888780",
@@ -376,17 +339,17 @@ export async function getTasksForStaff(staffId: string): Promise<TaskWithDetails
     .sort((a, b) => (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
 }
 
-async function getTasksForJobIds(jobIds: string[]): Promise<TaskWithDetails[]> {
-  if (jobIds.length === 0) return [];
+async function getTasksForCustomerIds(customerIds: string[]): Promise<TaskWithDetails[]> {
+  if (customerIds.length === 0) return [];
 
   const admin = getSupabaseAdmin();
   const [{ data, error }, lookups] = await Promise.all([
-    admin.from("tasks").select("*").in("job_id", jobIds).returns<TaskRow[]>(),
+    admin.from("tasks").select("*").in("customer_id", customerIds).returns<TaskRow[]>(),
     fetchLookupMaps(),
   ]);
 
   if (error) {
-    console.error("[workflow] getTasksForJobIds failed:", error.message);
+    console.error("[workflow] getTasksForCustomerIds failed:", error.message);
     return [];
   }
 
@@ -401,26 +364,27 @@ function dedupeAndSortTasks(taskLists: TaskWithDetails[][]): TaskWithDetails[] {
   );
 }
 
-// A Manager's board: every task under a job they manage (their team's work),
-// plus anything personally assigned/temporarily handed to them directly.
+// A Manager's board: every task on a client they manage (their team's
+// work), plus anything personally assigned/temporarily handed to them
+// directly.
 export async function getTasksForManager(managerId: string): Promise<TaskWithDetails[]> {
-  const managedJobs = await getInProgressJobsForManager(managerId);
-  const [jobTasks, personalTasks] = await Promise.all([
-    getTasksForJobIds(managedJobs.map((j) => j.id)),
+  const managedClients = await getClientsForManager(managerId);
+  const [clientTasks, personalTasks] = await Promise.all([
+    getTasksForCustomerIds(managedClients.map((c) => c.id)),
     getTasksForStaff(managerId),
   ]);
-  return dedupeAndSortTasks([jobTasks, personalTasks]);
+  return dedupeAndSortTasks([clientTasks, personalTasks]);
 }
 
-// A Partner's board: every task under every job attached to their Partner
+// A Partner's board: every task on every client attached to their Partner
 // scope (a practice-wide roll-up), plus any personal assignments.
 export async function getTasksForPartner(partnerId: string): Promise<TaskWithDetails[]> {
-  const partnerJobs = await getInProgressJobsForPartner(partnerId);
-  const [jobTasks, personalTasks] = await Promise.all([
-    getTasksForJobIds(partnerJobs.map((j) => j.id)),
+  const partnerClients = await searchClientsForPartner(partnerId);
+  const [clientTasks, personalTasks] = await Promise.all([
+    getTasksForCustomerIds(partnerClients.map((c) => c.id)),
     getTasksForStaff(partnerId),
   ]);
-  return dedupeAndSortTasks([jobTasks, personalTasks]);
+  return dedupeAndSortTasks([clientTasks, personalTasks]);
 }
 
 // Dispatches to the right scope for a staff member's own "My Work" board,
@@ -492,7 +456,7 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
   const { data, error } = await admin
     .from("tasks")
     .insert({
-      job_id: input.jobId,
+      customer_id: input.customerId,
       title: input.title,
       assignee_id: input.assigneeId ?? null,
       due_date: input.dueDate ?? null,
@@ -513,7 +477,7 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
 
 // Edits an existing task -- only fields present on patch are touched (see
 // UpdateTaskInput's comment), so e.g. reassigning just the assignee doesn't
-// require re-sending the job/title/etc. Returns the freshly-hydrated task
+// require re-sending the client/title/etc. Returns the freshly-hydrated task
 // so the caller can drop it straight into its board state without a refetch.
 export async function updateTask(
   taskId: string,
@@ -521,7 +485,7 @@ export async function updateTask(
 ): Promise<TaskWithDetails | null> {
   const admin = getSupabaseAdmin();
   const update: Record<string, unknown> = {};
-  if (patch.jobId !== undefined) update.job_id = patch.jobId;
+  if (patch.customerId !== undefined) update.customer_id = patch.customerId;
   if (patch.title !== undefined) update.title = patch.title;
   if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
   if (patch.dueDate !== undefined) update.due_date = patch.dueDate;
@@ -605,18 +569,9 @@ export async function getJobsForCustomer(customerId: string): Promise<JobWithMan
   }));
 }
 
-// Every task under every job attached to a given customer -- feeds the
-// /clients drawer's task list.
+// Every task on a given customer -- feeds the /clients drawer's task list.
 export async function getTasksForCustomer(customerId: string): Promise<TaskWithDetails[]> {
-  const admin = getSupabaseAdmin();
-  const { data: jobs, error } = await admin.from("jobs").select("id").eq("customer_id", customerId).returns<
-    { id: string }[]
-  >();
-  if (error) {
-    console.error("[workflow] getTasksForCustomer failed:", error.message);
-    return [];
-  }
-  return getTasksForJobIds((jobs ?? []).map((j) => j.id));
+  return getTasksForCustomerIds([customerId]);
 }
 
 // Builds the /clients tile-grid summary for every customer: its Manager
@@ -627,10 +582,10 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
   const [{ data: customers, error: customersError }, { data: allTasks, error: tasksError }, lookups] =
     await Promise.all([
       admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").order("name").returns<CustomerRow[]>(),
-      // Only the five columns the tallies below actually read. This used to
+      // Only the four columns the tallies below actually read. This used to
       // be select("*"), which pulled every task body over the wire purely to
       // count them.
-      admin.from("tasks").select("job_id, status_id, type_id, due_date").returns<ClientSummaryTaskRow[]>(),
+      admin.from("tasks").select("customer_id, status_id, type_id, due_date").returns<ClientSummaryTaskRow[]>(),
       fetchLookupMaps(),
     ]);
 
@@ -639,22 +594,9 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Index jobs by customer once, rather than re-scanning the whole job list
-  // per customer.
-  const jobsByCustomerId = new Map<string, JobRow[]>();
-  for (const job of lookups.jobsById.values()) {
-    const list = jobsByCustomerId.get(job.customer_id);
-    if (list) list.push(job);
-    else jobsByCustomerId.set(job.customer_id, [job]);
-  }
-
-  const customerIdByJobId = new Map<string, string>();
-  for (const job of lookups.jobsById.values()) customerIdByJobId.set(job.id, job.customer_id);
-
-  // Tally every task in a single pass, attributing each to its customer via
-  // the job index above. The previous shape walked the entire tasks table
-  // once per customer -- O(customers x tasks), which was invisible only
-  // because the tasks table was empty.
+  // Tally every task in a single pass, keyed directly on its own
+  // customer_id -- tasks are client-scoped (migration 017), so this no
+  // longer needs a job index to attribute a task to its client.
   interface Tally {
     overdueCount: number;
     inProgressCount: number;
@@ -673,9 +615,7 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
   };
 
   for (const task of allTasks ?? []) {
-    const customerId = customerIdByJobId.get(task.job_id);
-    if (!customerId) continue;
-    const tally = tallyFor(customerId);
+    const tally = tallyFor(task.customer_id);
 
     const isComplete = lookups.statusesById.get(task.status_id)?.is_complete ?? false;
     const isOverdue = Boolean(task.due_date && task.due_date < today);
@@ -914,16 +854,16 @@ async function defaultOpenStatusId(): Promise<string | null> {
   return openStatus?.id ?? statuses[0]?.id ?? null;
 }
 
-// Copies a task onto a (usually different) job/client: same title/type/
+// Copies a task onto a (usually different) client: same title/type/
 // recurrence, but a fresh due_date/start_date (left null -- a copied task's
-// timing is specific to the client/job it came from, not something that
-// should silently carry over onto someone else's schedule), no assignee
-// (the destination client likely has a different responsible staff member),
-// and the default open status rather than whatever the source task's
-// status was (in particular, never copies over "Completed").
-export async function copyTaskToJob(
+// timing is specific to the client it came from, not something that should
+// silently carry over onto someone else's schedule), no assignee (the
+// destination client likely has a different responsible staff member), and
+// the default open status rather than whatever the source task's status was
+// (in particular, never copies over "Completed").
+export async function copyTaskToClient(
   taskId: string,
-  destinationJobId: string
+  destinationCustomerId: string
 ): Promise<{ id: string } | null> {
   const admin = getSupabaseAdmin();
   const { data: source, error } = await admin
@@ -933,18 +873,18 @@ export async function copyTaskToJob(
     .single<{ title: string; type_id: string | null; recurrence: RecurrenceInterval }>();
 
   if (error || !source) {
-    console.error("[workflow] copyTaskToJob (fetch source) failed:", error?.message);
+    console.error("[workflow] copyTaskToClient (fetch source) failed:", error?.message);
     return null;
   }
 
   const statusId = await defaultOpenStatusId();
   if (!statusId) {
-    console.error("[workflow] copyTaskToJob: no statuses configured");
+    console.error("[workflow] copyTaskToClient: no statuses configured");
     return null;
   }
 
   return createTask({
-    jobId: destinationJobId,
+    customerId: destinationCustomerId,
     title: source.title,
     typeId: source.type_id,
     recurrence: source.recurrence,
@@ -1094,13 +1034,14 @@ export async function getTaskTemplate(templateId: string): Promise<TaskTemplateW
   };
 }
 
-// Bulk-creates fresh tasks on destinationJobId from a template's items --
-// same "no dates, no assignee, default open status" rule as copyTaskToJob,
-// since applying a template should never smuggle in stale scheduling from
-// whichever client the template was originally captured from.
-export async function applyTemplateToJob(
+// Bulk-creates fresh tasks on destinationCustomerId from a template's items
+// -- same "no dates, no assignee, default open status" rule as
+// copyTaskToClient, since applying a template should never smuggle in stale
+// scheduling from whichever client the template was originally captured
+// from.
+export async function applyTemplateToClient(
   templateId: string,
-  destinationJobId: string
+  destinationCustomerId: string
 ): Promise<{ created: number } | null> {
   const template = await getTaskTemplate(templateId);
   if (!template) return null;
@@ -1108,14 +1049,14 @@ export async function applyTemplateToJob(
 
   const statusId = await defaultOpenStatusId();
   if (!statusId) {
-    console.error("[workflow] applyTemplateToJob: no statuses configured");
+    console.error("[workflow] applyTemplateToClient: no statuses configured");
     return null;
   }
 
   const admin = getSupabaseAdmin();
   const { error } = await admin.from("tasks").insert(
     template.items.map((item) => ({
-      job_id: destinationJobId,
+      customer_id: destinationCustomerId,
       title: item.title,
       type_id: item.typeId,
       recurrence: item.recurrence,
@@ -1124,7 +1065,7 @@ export async function applyTemplateToJob(
   );
 
   if (error) {
-    console.error("[workflow] applyTemplateToJob failed:", error.message);
+    console.error("[workflow] applyTemplateToClient failed:", error.message);
     return null;
   }
 

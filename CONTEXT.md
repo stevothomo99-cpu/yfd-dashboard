@@ -1,11 +1,11 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 4.2
-**Last updated:** 5 August 2026
+**Version:** 4.3
+**Last updated:** 6 August 2026
 **Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
 **Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan.
 
-v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
+v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). v4.3 moves tasks/workflow off jobs and onto clients entirely (§6) — the same job-vs-client confusion already fixed once on Manager allocations, this time in the tasks table's own foreign key. Those are documented in detail because each was expensive to find and none of them looked like a bug from the UI — they looked like plausible numbers.
 
 ---
 
@@ -141,26 +141,30 @@ The Karbon-replacement data model, all in the `yfd-workflow` Supabase project, a
 
 **Two separate role systems — do not conflate them:**
 1. `dashboard_users.role`: `"admin" | "user"` — a login-level flag, gates nav and gives full bypass everywhere (task permissions, To-Do visibility, etc.).
-2. `staff.role`: `"Partner" | "Manager" | "Staff"` — XPM-derived work hierarchy. **`jobs.manager_id` is actually populated by "Staff"-role people's ids**, not "Manager" — confirmed directly against the practice; the schema's "Manager" tier is effectively vestigial. A Staff-role person's own board = `getInProgressJobsForManager(staff.id)`.
+2. `staff.role`: `"Partner" | "Manager" | "Staff"` — XPM-derived work hierarchy. **`customers.manager_id` is actually populated by "Staff"-role people's ids**, not "Manager" — confirmed directly against the practice (e.g. Andre/Joel/Joshua all carry role "Staff" but manage clients directly); the schema's "Manager" tier is effectively vestigial. A Staff-role person's own board = `getClientsForManager(staff.id)`.
 
-**Client allocations**: a client carries **both** of its XPM allocations on its own row — `customers.partner_id` (XPM `accountManager`) and `customers.manager_id` (XPM `jobManager`). `/clients` reads the Manager from `customers.manager_id`, *not* by aggregating its jobs' managers: doing that showed "Multiple" for any client whose work is legitimately split across service lines (a bookkeeper on the BAS jobs, an advisor on the CFO job), and let stale legacy jobs keep listing managers who no longer look after the client. `jobs.manager_id` still exists and still drives each person's own work board — a job's own manager, falling back to its client's.
+**Client allocations**: a client carries **both** of its XPM allocations on its own row — `customers.partner_id` (XPM `accountManager`) and `customers.manager_id` (XPM `jobManager`). `/clients` reads the Manager from `customers.manager_id`, *not* by aggregating its jobs' managers: doing that showed "Multiple" for any client whose work is legitimately split across service lines (a bookkeeper on the BAS jobs, an advisor on the CFO job), and let stale legacy jobs keep listing managers who no longer look after the client.
+
+**Tasks/workflow belong to the CLIENT, not the job (migration 017).** Confirmed directly with the practice: time is captured against jobs in XPM, and jobs are billed to clients — that's the *only* place jobs are used; workflow and tasks are recorded against clients. `tasks.job_id` used to be `NOT NULL`, forcing every task through a job purely to reach its client — `hydrateTask` did `job → job.customer_id → customer` just to find out which client a task belonged to, and the job carried no other meaning for a task. That's the same job-vs-client confusion already fixed once on `customers.manager_id` above. `tasks.customer_id` is now the direct, only link; `job_id` is gone from the table entirely. Jobs still exist for XPM/billing reference (the Clients drawer's Jobs section, `getJobsForCustomer`) — a Task just never references one.
 
 **Tables**: `staff`, `customers`, `jobs`, `tasks`, `statuses`, `task_types`, `customer_notes`, `customer_files`, `task_templates` + `task_template_items`, `todo_items` (§4.8). Only staff/customers/jobs are XPM-synced (full-replace, `lib/xpmSync.ts`); everything else is native to this app.
 
-**Task permissions** (`getJobsInScopeForStaff`, `canModifyTask` in `lib/workflow.ts`):
-- Non-admin create: only on jobs in scope (their own managed jobs for Staff/Manager, whole roll-up for Partner).
-- Non-admin edit/delete/reassign: only tasks already on their own board (`getWorkBoardForStaff`); reassigning to a different job re-checks scope.
+**Task permissions** (`getClientsInScopeForStaff`, `canModifyTask` in `lib/workflow.ts`):
+- Non-admin create: only on clients in scope (their own managed clients for Staff/Manager, whole roll-up for Partner).
+- Non-admin edit/delete/reassign: only tasks already on their own board (`getWorkBoardForStaff`); reassigning to a different client re-checks scope.
 - Admin: unrestricted everywhere.
 
-**New Task creation is client-first**, not job-first — the modal groups the caller's already-scoped job list by client, auto-selecting the job if there's only one, only showing a job sub-picker when a client has several (avoids exposing a flat "Client — Job Name" list where multi-year recurring jobs made the same client show up many times).
+**New Task creation is a flat client picker** — one dropdown, sorted by name. This used to be a client-then-job picker (only showing the job sub-picker when a client had more than one), which existed purely because a task had to attach to a job at all; with tasks client-scoped there is nothing left to disambiguate.
 
 **Notes** (`customer_notes`) support an optional `title` and a `pinned` boolean (pinned sort first, then newest-first).
 
-**Copy task / templates**: a task can be copied onto another client/job (fresh due date, unassigned, default open status). A client's current tasks can be saved as a named, reusable template (title/type/recurrence only — not dates/assignee/status) and bulk-applied to any job.
+**Copy task / templates**: a task can be copied onto another client (fresh due date, unassigned, default open status). A client's current tasks can be saved as a named, reusable template (title/type/recurrence only — not dates/assignee/status) and bulk-applied to any client.
 
-**To-Do items** (`todo_items`, §4.8): distinct from Tasks — no job/status/type, just owner/client/due-date/title, created from forwarded emails. `status`: `pending_triage` (needs client+due date) → `todo`/`done` (populated one-off) or `converted` (became a real Task).
+**To-Do items** (`todo_items`, §4.8): distinct from Tasks — no status/type, just owner/client/due-date/title, created from forwarded emails. `status`: `pending_triage` (needs client+due date) → `todo`/`done` (populated one-off) or `converted` (became a real Task). Converting a recurring to-do used to have to resolve a destination *job* first — and would refuse to convert at all if the client had more than one — since tasks are client-scoped that whole failure mode is gone.
 
-**Note**: the `tasks` table is currently **empty**. Everything task-related — `/my-work`, To-Do→Task conversion, templates, copy-task — is built but carrying no data yet.
+**`tasks.type_id` was `NOT NULL` on the live table**, contradicting both migration 004 (no `NOT NULL` specified) and the app, which has always treated Category as optional (`NewTaskModal`'s "None" option, `createTask`'s `type_id: input.typeId ?? null`). Found while testing migration 017: an insert with no category failed on this constraint. Since `tasks` had been empty the whole time this was live, "create a task with no category" had likely never actually succeeded end to end. Fixed by dropping the constraint (`type_id` is genuinely optional now, matching the code that was always written as if it were).
+
+**Note**: the `tasks` table is currently **empty**. Everything task-related — `/my-work`, To-Do→Task conversion, templates, copy-task — is built but carrying no data yet. Verified directly against Supabase rather than relying on a clean build: inserted a task with only `customer_id` (no category), reproduced `hydrateTask`'s exact join, reproduced `getClientSummaries`' tally, reproduced a Manager-scoped board query, reproduced `copyTaskToClient`'s insert shape onto a second client — all correct, then deleted the test rows.
 
 ---
 

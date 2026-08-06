@@ -476,7 +476,8 @@ function WorkItemRow({
           {task.title}
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginTop: "4px" }}>
-          {task.jobName} · {task.assigneeName ?? "Unassigned"} · Due {task.dueDate ?? "—"}
+          {task.typeName ? `${task.typeName} · ` : ""}
+          {task.assigneeName ?? "Unassigned"} · Due {task.dueDate ?? "—"}
         </div>
       </div>
       <button

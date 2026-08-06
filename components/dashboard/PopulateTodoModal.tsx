@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import ClientJobPicker from "./ClientJobPicker";
+import ClientPicker from "./ClientPicker";
 import { todoDisplayName } from "@/lib/utils";
 import type { RecurrenceInterval, TodoItem } from "@/types/workflow";
 
@@ -47,7 +47,6 @@ export default function PopulateTodoModal({
   const isEdit = mode === "edit";
   const [name, setName] = useState(todoDisplayName(todo));
   const [clientId, setClientId] = useState(isEdit ? todo.customerId ?? "" : "");
-  const [jobId, setJobId] = useState("");
   const [dueDate, setDueDate] = useState(isEdit ? todo.dueDate ?? "" : "");
   const [recurrence, setRecurrence] = useState<RecurrenceInterval>("none");
   const [submitting, setSubmitting] = useState(false);
@@ -73,7 +72,6 @@ export default function PopulateTodoModal({
                 customerId: clientId,
                 dueDate: dueDate || null,
                 recurrence,
-                jobId: jobId || undefined,
               },
         ),
       });
@@ -171,13 +169,7 @@ export default function PopulateTodoModal({
                 </label>
               ) : null}
 
-              <ClientJobPicker
-                clients={allClients}
-                selectedClientId={clientId}
-                onSelectClient={setClientId}
-                selectedJobId={jobId}
-                onSelectJob={setJobId}
-              />
+              <ClientPicker clients={allClients} selectedClientId={clientId} onSelectClient={setClientId} />
 
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={labelStyle}>Due date</span>

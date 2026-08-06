@@ -1,14 +1,15 @@
 import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { createTask, getJobsInScopeForStaff, getStaffByEmail } from "@/lib/workflow";
+import { createTask, getClientsInScopeForStaff, getStaffByEmail } from "@/lib/workflow";
 import type { CreateTaskInput } from "@/types/workflow";
 
 // Any authenticated user may create a task, but non-admins are scoped to
-// jobs within their own Partner/Manager/Staff hierarchy -- a "Staff"-role
-// person can only create on a job belonging to a client they manage (see
-// getJobsInScopeForStaff), Manager/Partner get their existing broader scope,
-// and admins (session.user.role === "admin", the login-level flag -- not to
-// be confused with staff.role) get no restriction at all, same as today.
+// clients within their own Partner/Manager/Staff hierarchy -- a "Staff"-role
+// person can only create on a client they manage (see
+// getClientsInScopeForStaff), Manager/Partner get their existing broader
+// scope, and admins (session.user.role === "admin", the login-level flag --
+// not to be confused with staff.role) get no restriction at all, same as
+// today.
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) {
@@ -23,27 +24,27 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = (await request.json()) as Partial<CreateTaskInput>;
-    const { jobId, title, statusId } = body;
+    const { customerId, title, statusId } = body;
 
-    if (!jobId || !title?.trim() || !statusId) {
+    if (!customerId || !title?.trim() || !statusId) {
       return NextResponse.json(
-        { error: "jobId, title, and statusId are required" },
+        { error: "customerId, title, and statusId are required" },
         { status: 400 }
       );
     }
 
     if (!isAdmin && staff) {
-      const scopedJobs = await getJobsInScopeForStaff(staff);
-      if (!scopedJobs.some((j) => j.id === jobId)) {
+      const scopedClients = await getClientsInScopeForStaff(staff);
+      if (!scopedClients.some((c) => c.id === customerId)) {
         return NextResponse.json(
-          { error: "You don't have permission to create a task on that job" },
+          { error: "You don't have permission to create a task on that client" },
           { status: 403 }
         );
       }
     }
 
     const task = await createTask({
-      jobId,
+      customerId,
       title: title.trim(),
       assigneeId: body.assigneeId ?? null,
       dueDate: body.dueDate ?? null,
