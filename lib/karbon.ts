@@ -82,6 +82,16 @@ async function fetchAllWorkItems(filter?: string): Promise<Record<string, unknow
   return rows;
 }
 
+// Raw, unmapped WorkItem rows -- unlike fetchKarbonTasks/fetchKarbonWorkItems,
+// nothing here is picked out into a fixed shape. The Karbon Import mapping
+// page needs the tenant's actual field names (whatever Karbon calls them) so
+// a person can drag them onto this app's task fields, not the narrow subset
+// those two functions already commit to.
+export async function fetchKarbonWorkItemsSample(limit: number): Promise<Record<string, unknown>[]> {
+  const page: ODataList<Record<string, unknown>> = await karbonFetch(`/WorkItems?$top=${limit}`);
+  return page.value;
+}
+
 // /Users is confirmed to exist in Karbon's public OpenAPI spec (GET /v3/Users)
 // but the exact field names weren't resolvable from the spec file directly —
 // it's too large to fetch in full. Field lookup below tries the same naming
