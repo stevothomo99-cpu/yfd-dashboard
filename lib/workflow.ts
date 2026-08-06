@@ -475,10 +475,119 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
   return data;
 }
 
+// A recurring series is a flat star, not a chain: the first task ever
+// created for it is the "root" (recurrence_parent_id null); every occurrence
+// generated after that points directly at the root, never at the previous
+// occurrence. That keeps "who else is in this series" a single query
+// regardless of how many occurrences have accumulated.
+function seriesRootIdOf(task: Pick<TaskRow, "id" | "recurrence_parent_id">): string {
+  return task.recurrence_parent_id ?? task.id;
+}
+
+// Every task in the same series as seriesRootId, root included.
+async function getSeriesMembers(seriesRootId: string): Promise<TaskRow[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("tasks")
+    .select("*")
+    .or(`id.eq.${seriesRootId},recurrence_parent_id.eq.${seriesRootId}`)
+    .returns<TaskRow[]>();
+  if (error) {
+    console.error("[workflow] getSeriesMembers failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+// Picks out the fields that describe the recurring item itself rather than
+// one occurrence of it -- customer/title/assignee/category/recurrence. This
+// is what "linked" means. due_date/start_date/status/completion are
+// deliberately excluded: each occurrence has its own schedule and its own
+// progress, and propagating a due-date edit would move every other
+// occurrence's deadline along with it.
+function sharedFieldUpdate(patch: UpdateTaskInput): Record<string, unknown> | null {
+  const update: Record<string, unknown> = {};
+  if (patch.customerId !== undefined) update.customer_id = patch.customerId;
+  if (patch.title !== undefined) update.title = patch.title;
+  if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
+  if (patch.typeId !== undefined) update.type_id = patch.typeId;
+  if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
+  return Object.keys(update).length > 0 ? update : null;
+}
+
+function advanceDueDate(dueDateIso: string, recurrence: RecurrenceInterval): string {
+  const d = new Date(dueDateIso + "T00:00:00Z");
+  switch (recurrence) {
+    case "daily":
+      d.setUTCDate(d.getUTCDate() + 1);
+      break;
+    case "weekly":
+      d.setUTCDate(d.getUTCDate() + 7);
+      break;
+    case "fortnightly":
+      d.setUTCDate(d.getUTCDate() + 14);
+      break;
+    case "monthly":
+      d.setUTCMonth(d.getUTCMonth() + 1);
+      break;
+    case "quarterly":
+      d.setUTCMonth(d.getUTCMonth() + 3);
+      break;
+    case "none":
+      break;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+// Completing an occurrence of a recurring task rolls the series forward --
+// due date advanced by the interval, everything else (client/title/
+// assignee/category) copied from the task as it stands right now, so an
+// edit made before completing it carries into the next occurrence. Guarded
+// against double-generation: if the series already has an open member
+// (e.g. someone completed the same occurrence twice, or a sibling was
+// already generated), nothing new is created.
+async function generateNextOccurrence(completed: TaskRow, lookups: Awaited<ReturnType<typeof fetchLookupMaps>>): Promise<void> {
+  if (completed.recurrence === "none") return;
+
+  const seriesRootId = seriesRootIdOf(completed);
+  const members = await getSeriesMembers(seriesRootId);
+  const hasOpenMember = members.some((m) => !(lookups.statusesById.get(m.status_id)?.is_complete ?? false));
+  if (hasOpenMember) return;
+
+  const statusId = await defaultOpenStatusId();
+  if (!statusId) {
+    console.error("[workflow] generateNextOccurrence: no statuses configured");
+    return;
+  }
+
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("tasks").insert({
+    customer_id: completed.customer_id,
+    title: completed.title,
+    assignee_id: completed.assignee_id,
+    type_id: completed.type_id,
+    recurrence: completed.recurrence,
+    due_date: advanceDueDate(completed.due_date ?? new Date().toISOString().slice(0, 10), completed.recurrence),
+    start_date: null,
+    status_id: statusId,
+    recurrence_parent_id: seriesRootId,
+  });
+  if (error) console.error("[workflow] generateNextOccurrence (insert) failed:", error.message);
+}
+
 // Edits an existing task -- only fields present on patch are touched (see
 // UpdateTaskInput's comment), so e.g. reassigning just the assignee doesn't
 // require re-sending the client/title/etc. Returns the freshly-hydrated task
 // so the caller can drop it straight into its board state without a refetch.
+//
+// Two side effects beyond the row itself, both confirmed directly:
+//  - Editing a shared field (client/title/assignee/category/recurrence)
+//    propagates to every other NOT-completed member of the same series --
+//    that's what "linked" means. Attempted unconditionally when a shared
+//    field changes; if this task has no siblings the update just matches
+//    zero rows.
+//  - Marking an occurrence complete rolls the series forward -- see
+//    generateNextOccurrence.
 export async function updateTask(
   taskId: string,
   patch: UpdateTaskInput
@@ -505,16 +614,76 @@ export async function updateTask(
     console.error("[workflow] updateTask failed:", error.message);
     return null;
   }
+
   const lookups = await fetchLookupMaps();
+
+  const shared = sharedFieldUpdate(patch);
+  if (shared) {
+    const seriesRootId = seriesRootIdOf(data);
+    const siblingIds = (await getSeriesMembers(seriesRootId))
+      .filter((m) => m.id !== data.id && !(lookups.statusesById.get(m.status_id)?.is_complete ?? false))
+      .map((m) => m.id);
+    if (siblingIds.length > 0) {
+      const { error: propagateError } = await admin.from("tasks").update(shared).in("id", siblingIds);
+      if (propagateError) {
+        console.error("[workflow] updateTask (series propagation) failed:", propagateError.message);
+      }
+    }
+  }
+
+  if (lookups.statusesById.get(data.status_id)?.is_complete) {
+    await generateNextOccurrence(data, lookups);
+  }
+
   return hydrateTask(data, lookups);
 }
 
+// Deletes just this one occurrence -- the rest of its series, if any, is
+// untouched. This is the default; see deleteTaskSeries for "remove the
+// whole thing".
 export async function deleteTask(taskId: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
   const { error } = await admin.from("tasks").delete().eq("id", taskId);
 
   if (error) {
     console.error("[workflow] deleteTask failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+// Removes the whole series: taskId itself plus every other NOT-completed
+// member. Completed occurrences are left alone as a record of work actually
+// done -- confirmed directly. If the deleted set includes the series root,
+// any surviving completed member's recurrence_parent_id is nulled out by
+// the column's ON DELETE SET NULL rather than the row itself being
+// destroyed, so its own history (title/due date/completion) stays intact,
+// just no longer linked to a series that no longer exists.
+export async function deleteTaskSeries(taskId: string): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  const { data: anchor, error: fetchError } = await admin
+    .from("tasks")
+    .select("id, recurrence_parent_id")
+    .eq("id", taskId)
+    .single<Pick<TaskRow, "id" | "recurrence_parent_id">>();
+
+  if (fetchError || !anchor) {
+    console.error("[workflow] deleteTaskSeries (fetch anchor) failed:", fetchError?.message);
+    return false;
+  }
+
+  const [members, lookups] = await Promise.all([
+    getSeriesMembers(seriesRootIdOf(anchor)),
+    fetchLookupMaps(),
+  ]);
+  const openIds = members
+    .filter((m) => !(lookups.statusesById.get(m.status_id)?.is_complete ?? false))
+    .map((m) => m.id);
+  if (openIds.length === 0) return true;
+
+  const { error } = await admin.from("tasks").delete().in("id", openIds);
+  if (error) {
+    console.error("[workflow] deleteTaskSeries failed:", error.message);
     return false;
   }
   return true;

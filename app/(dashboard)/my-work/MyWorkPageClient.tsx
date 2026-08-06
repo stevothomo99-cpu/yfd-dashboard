@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
+import DeleteTaskDialog from "@/components/dashboard/DeleteTaskDialog";
 import type {
   TaskWithDetails,
   WorkflowCustomer,
@@ -113,6 +114,7 @@ export default function MyWorkPageClient({
   const [loading, setLoading] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
+  const [deletingTask, setDeletingTask] = useState<TaskWithDetails | null>(null);
 
   const [view, setView] = useState<MasterView>("all");
   const [search, setSearch] = useState("");
@@ -193,15 +195,30 @@ export default function MyWorkPageClient({
   // boundary.
   const canModifyTasks = isAdmin || Boolean(defaultStaffId);
 
-  async function handleDelete(t: TaskWithDetails) {
-    if (!window.confirm(`Delete "${t.title}"? This can't be undone.`)) return;
-    const res = await fetch(`/api/workflow/tasks/${t.id}`, { method: "DELETE" });
+  async function deleteTaskRequest(taskId: string, scope: "occurrence" | "series") {
+    const res = await fetch(`/api/workflow/tasks/${taskId}${scope === "series" ? "?scope=series" : ""}`, {
+      method: "DELETE",
+    });
     if (res.ok) {
       await refreshTasks(staffId);
     } else {
       const data = await res.json().catch(() => ({}));
       window.alert(data.error ?? "Failed to delete task");
     }
+  }
+
+  // A one-off task keeps the plain confirm it always had. A recurring one
+  // needs a third option beyond confirm()'s OK/Cancel -- see
+  // DeleteTaskDialog -- since "delete" is ambiguous once other occurrences
+  // are linked to it.
+  function handleDelete(t: TaskWithDetails) {
+    if (t.recurrence === "none") {
+      if (window.confirm(`Delete "${t.title}"? This can't be undone.`)) {
+        deleteTaskRequest(t.id, "occurrence");
+      }
+      return;
+    }
+    setDeletingTask(t);
   }
 
   const today = todayIso();
@@ -519,6 +536,18 @@ export default function MyWorkPageClient({
           statuses={statuses}
           taskTypes={taskTypes}
           editTask={editingTask}
+        />
+      ) : null}
+
+      {deletingTask ? (
+        <DeleteTaskDialog
+          task={deletingTask}
+          onClose={() => setDeletingTask(null)}
+          onConfirm={(scope) => {
+            const task = deletingTask;
+            setDeletingTask(null);
+            deleteTaskRequest(task.id, scope);
+          }}
         />
       ) : null}
     </div>
