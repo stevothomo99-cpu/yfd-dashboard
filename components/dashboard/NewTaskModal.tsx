@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type {
-  JobWithCustomer,
   RecurrenceInterval,
   TaskWithDetails,
+  WorkflowCustomer,
   WorkflowStaff,
   WorkflowStatus,
   WorkflowTaskType,
@@ -13,13 +13,13 @@ import type {
 interface NewTaskModalProps {
   onClose: () => void;
   onCreated: () => void;
-  jobs: JobWithCustomer[];
+  clients: WorkflowCustomer[];
   staff: WorkflowStaff[];
   statuses: WorkflowStatus[];
   taskTypes: WorkflowTaskType[];
   // When set, the modal edits this task (PATCH) instead of creating a new
   // one (POST) -- same form, same fields, just a different submit target
-  // and starting values. jobs/staff are still expected to already be
+  // and starting values. clients/staff are still expected to already be
   // pre-scoped by the caller (the server-side permission check is the real
   // boundary either way).
   editTask?: TaskWithDetails;
@@ -39,68 +39,31 @@ function defaultStatusId(statuses: WorkflowStatus[]): string {
   return openStatus?.id ?? statuses[0]?.id ?? "";
 }
 
-interface ClientGroup {
-  customerId: string;
-  customerName: string;
-  jobs: JobWithCustomer[];
-}
-
 // Mounted/unmounted by the parent (only rendered while the modal is open),
 // so a fresh instance -- and fresh initial state below -- is all it takes to
 // reset the form each time it's opened; no reset-on-open effect needed.
-export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses, taskTypes, editTask }: NewTaskModalProps) {
+export default function NewTaskModal({ onClose, onCreated, clients, staff, statuses, taskTypes, editTask }: NewTaskModalProps) {
   const isEdit = Boolean(editTask);
 
-  // If the task being edited is on a job outside the (already-scoped) jobs
-  // list passed in -- shouldn't normally happen since canModifyTask and
-  // getJobsInScopeForStaff walk the same hierarchy, but defend against it
-  // anyway -- make sure its current job (and client) still shows up as a
+  // If the task being edited is on a client outside the (already-scoped)
+  // clients list passed in -- shouldn't normally happen since canModifyTask
+  // and getClientsInScopeForStaff walk the same hierarchy, but defend
+  // against it anyway -- make sure its current client still shows up as a
   // selectable option rather than silently rendering a blank/invalid select.
-  // The synthetic customerId is unique per task (not "") so it never
-  // collides with a real client's jobs when grouped below.
-  const jobsWithCurrent = useMemo(
+  const clientsWithCurrent = useMemo(
     () =>
-      editTask && !jobs.some((j) => j.id === editTask.jobId)
-        ? [
-            ...jobs,
-            {
-              id: editTask.jobId,
-              customerId: `__edit_${editTask.jobId}`,
-              xpmJobId: null,
-              name: editTask.jobName,
-              partnerId: null,
-              managerId: null,
-              customerName: editTask.customerName,
-            } satisfies JobWithCustomer,
-          ]
-        : jobs,
-    [jobs, editTask],
+      editTask && !clients.some((c) => c.id === editTask.customerId)
+        ? [...clients, { id: editTask.customerId, xpmClientId: null, name: editTask.customerName, partnerId: null } satisfies WorkflowCustomer]
+        : clients,
+    [clients, editTask],
   );
 
-  // Task creation is client-first in the UI (staff think in terms of "which
-  // client", not "which job") -- jobs are grouped under their client here,
-  // sourced from the same already-scoped `jobs` prop rather than an
-  // unscoped fetch, so the permission boundary that produced that list is
-  // preserved exactly. A client with only one job skips the job picker
-  // entirely; one with several still needs it to disambiguate.
-  const clientGroups: ClientGroup[] = useMemo(() => {
-    const map = new Map<string, ClientGroup>();
-    for (const j of jobsWithCurrent) {
-      if (!map.has(j.customerId)) map.set(j.customerId, { customerId: j.customerId, customerName: j.customerName, jobs: [] });
-      map.get(j.customerId)!.jobs.push(j);
-    }
-    for (const group of map.values()) {
-      group.jobs.sort((a, b) => a.name.localeCompare(b.name));
-    }
-    return Array.from(map.values()).sort((a, b) => a.customerName.localeCompare(b.customerName));
-  }, [jobsWithCurrent]);
+  const sortedClients = useMemo(
+    () => [...clientsWithCurrent].sort((a, b) => a.name.localeCompare(b.name)),
+    [clientsWithCurrent],
+  );
 
-  const initialClientId = editTask
-    ? (jobsWithCurrent.find((j) => j.id === editTask.jobId)?.customerId ?? "")
-    : "";
-
-  const [clientId, setClientId] = useState(initialClientId);
-  const [jobId, setJobId] = useState(editTask?.jobId ?? "");
+  const [clientId, setClientId] = useState(editTask?.customerId ?? "");
   const [title, setTitle] = useState(editTask?.title ?? "");
   const [typeId, setTypeId] = useState(editTask?.typeId ?? "");
   const [statusId, setStatusId] = useState(() => editTask?.statusId ?? defaultStatusId(statuses));
@@ -119,17 +82,9 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const selectedGroup = clientGroups.find((g) => g.customerId === clientId);
-
-  function handleClientChange(newClientId: string) {
-    setClientId(newClientId);
-    const group = clientGroups.find((g) => g.customerId === newClientId);
-    setJobId(group && group.jobs.length === 1 ? group.jobs[0].id : "");
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!jobId || !title.trim() || !statusId) {
+    if (!clientId || !title.trim() || !statusId) {
       setError("Client, title, and status are required.");
       return;
     }
@@ -142,7 +97,7 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
         method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          jobId,
+          customerId: clientId,
           title: title.trim(),
           statusId,
           typeId: typeId || null,
@@ -221,32 +176,17 @@ export default function NewTaskModal({ onClose, onCreated, jobs, staff, statuses
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <Field label="Client" required>
-            <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} required style={inputStyle}>
+            <select value={clientId} onChange={(e) => setClientId(e.target.value)} required style={inputStyle}>
               <option value="" disabled>
                 Select a client…
               </option>
-              {clientGroups.map((g) => (
-                <option key={g.customerId} value={g.customerId}>
-                  {g.customerName}
+              {sortedClients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </select>
           </Field>
-
-          {selectedGroup && selectedGroup.jobs.length > 1 ? (
-            <Field label="Job" required>
-              <select value={jobId} onChange={(e) => setJobId(e.target.value)} required style={inputStyle}>
-                <option value="" disabled>
-                  Select a job…
-                </option>
-                {selectedGroup.jobs.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
 
           <Field label="Title" required>
             <input

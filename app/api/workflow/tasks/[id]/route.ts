@@ -3,15 +3,15 @@ import { auth } from "@/auth";
 import {
   canModifyTask,
   deleteTask,
-  getJobsInScopeForStaff,
+  getClientsInScopeForStaff,
   getStaffByEmail,
   updateTask,
 } from "@/lib/workflow";
 import type { UpdateTaskInput } from "@/types/workflow";
 
 // Edit and delete for a single task. Admins may touch any task, reassign it
-// to any staff member, and move it to any client/job -- no restriction, same
-// as their existing create privileges. Everyone else is scoped by
+// to any staff member, and move it to any client -- no restriction, same as
+// their existing create privileges. Everyone else is scoped by
 // canModifyTask: their own tasks (assigned or temporarily-assigned) plus
 // anything on their Partner/Manager roll-up board -- see that function's
 // comment in lib/workflow.ts for why getWorkBoardForStaff is the right
@@ -41,21 +41,22 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const body = (await request.json()) as Partial<UpdateTaskInput>;
 
     // A non-admin's broader scope is still bounded to their existing
-    // Partner/Manager job scope -- moving a task to a job outside that scope
-    // is effectively the same restriction as create's client-scoping rule,
-    // so it's checked the same way rather than trusting the client.
-    if (!isAdmin && staff && body.jobId !== undefined) {
-      const scopedJobs = await getJobsInScopeForStaff(staff);
-      if (!scopedJobs.some((j) => j.id === body.jobId)) {
+    // Partner/Manager client scope -- moving a task to a client outside
+    // that scope is effectively the same restriction as create's
+    // client-scoping rule, so it's checked the same way rather than
+    // trusting the client.
+    if (!isAdmin && staff && body.customerId !== undefined) {
+      const scopedClients = await getClientsInScopeForStaff(staff);
+      if (!scopedClients.some((c) => c.id === body.customerId)) {
         return NextResponse.json(
-          { error: "You don't have permission to move this task to that job" },
+          { error: "You don't have permission to move this task to that client" },
           { status: 403 }
         );
       }
     }
 
     const patch: UpdateTaskInput = {};
-    if (body.jobId !== undefined) patch.jobId = body.jobId;
+    if (body.customerId !== undefined) patch.customerId = body.customerId;
     if (body.title !== undefined) patch.title = body.title.trim();
     if (body.assigneeId !== undefined) patch.assigneeId = body.assigneeId;
     if (body.dueDate !== undefined) patch.dueDate = body.dueDate;

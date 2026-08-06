@@ -189,10 +189,6 @@ export interface PopulateTodoItemInput {
   customerId: string;
   dueDate: string | null;
   recurrence: RecurrenceInterval;
-  // Required only when recurrence !== "none" and the client has more than
-  // one job -- the populate form resolves this the same client-first way
-  // NewTaskModal does before calling in.
-  jobId?: string;
 }
 
 export type PopulateTodoItemResult =
@@ -228,15 +224,13 @@ export async function populateTodoItem(
     return { kind: "todo", todo: mapTodoItem(data) };
   }
 
-  if (!input.jobId) return null; // caller must resolve a job first for recurring items
-
   const statuses = await listStatuses();
   const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
   const statusId = openStatus?.id ?? statuses[0]?.id;
   if (!statusId) return null;
 
   const task = await createTask({
-    jobId: input.jobId,
+    customerId: input.customerId,
     title: todoDisplayName(todo),
     statusId,
     assigneeId: todo.ownerStaffId,

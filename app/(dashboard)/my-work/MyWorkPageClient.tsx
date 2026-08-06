@@ -5,8 +5,8 @@ import PageHeader from "@/components/dashboard/PageHeader";
 import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
 import type {
-  JobWithCustomer,
   TaskWithDetails,
+  WorkflowCustomer,
   WorkflowStaff,
   WorkflowStatus,
   WorkflowTaskType,
@@ -19,7 +19,7 @@ interface MyWorkPageClientProps {
   defaultStaffId: string | null;
   defaultStaffName: string | null;
   initialTasks: TaskWithDetails[];
-  jobs: JobWithCustomer[];
+  clients: WorkflowCustomer[];
   staffOptions: WorkflowStaff[];
   statuses: WorkflowStatus[];
   taskTypes: WorkflowTaskType[];
@@ -46,7 +46,6 @@ const MASTER_VIEWS: { value: MasterView; label: string }[] = [
 type SortField =
   | "title"
   | "customerName"
-  | "jobName"
   | "typeName"
   | "statusName"
   | "ownerName"
@@ -58,7 +57,6 @@ type SortDir = "asc" | "desc";
 const COLUMNS: { field: SortField; label: string }[] = [
   { field: "title", label: "Name" },
   { field: "customerName", label: "Client" },
-  { field: "jobName", label: "Job" },
   { field: "typeName", label: "Category" },
   { field: "statusName", label: "Status" },
   { field: "ownerName", label: "Owner" },
@@ -80,7 +78,6 @@ function assignedToName(t: TaskWithDetails): string {
 const FIELD_GETTERS: Record<SortField, (t: TaskWithDetails) => string> = {
   title: (t) => t.title,
   customerName: (t) => t.customerName,
-  jobName: (t) => t.jobName,
   typeName: (t) => t.typeName ?? "",
   statusName: (t) => t.statusName,
   ownerName,
@@ -106,7 +103,7 @@ export default function MyWorkPageClient({
   defaultStaffId,
   defaultStaffName,
   initialTasks,
-  jobs,
+  clients,
   staffOptions,
   statuses,
   taskTypes,
@@ -250,10 +247,7 @@ export default function MyWorkPageClient({
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.customerName.toLowerCase().includes(q) ||
-          t.jobName.toLowerCase().includes(q)
+        (t) => t.title.toLowerCase().includes(q) || t.customerName.toLowerCase().includes(q)
       );
     }
 
@@ -357,7 +351,7 @@ export default function MyWorkPageClient({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, client, job…"
+          placeholder="Search name, client…"
           style={searchStyle}
         />
 
@@ -509,7 +503,7 @@ export default function MyWorkPageClient({
         <NewTaskModal
           onClose={() => setShowNewTask(false)}
           onCreated={() => refreshTasks(staffId)}
-          jobs={jobs}
+          clients={clients}
           staff={staffOptions}
           statuses={statuses}
           taskTypes={taskTypes}
@@ -520,7 +514,7 @@ export default function MyWorkPageClient({
         <NewTaskModal
           onClose={() => setEditingTask(null)}
           onCreated={() => refreshTasks(staffId)}
-          jobs={jobs}
+          clients={clients}
           staff={staffOptions}
           statuses={statuses}
           taskTypes={taskTypes}
@@ -562,8 +556,6 @@ function renderCell(field: SortField, t: TaskWithDetails, staffId: string): Reac
     }
     case "customerName":
       return t.customerName;
-    case "jobName":
-      return t.jobName;
     case "typeName":
       return t.typeName ? <Chip label={t.typeName} color={t.typeColor ?? "#888780"} /> : "—";
     case "statusName":

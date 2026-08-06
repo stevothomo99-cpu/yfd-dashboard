@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { getStaffByEmail, getJobsForCustomer } from "@/lib/workflow";
+import { getStaffByEmail } from "@/lib/workflow";
 import {
   getTodoItem,
   populateTodoItem,
@@ -48,7 +48,6 @@ interface PatchBody {
   customerId?: string;
   dueDate?: string | null;
   recurrence?: RecurrenceInterval;
-  jobId?: string;
 }
 
 // Three things this can do, distinguished by which fields are present:
@@ -56,10 +55,10 @@ interface PatchBody {
 // - { intent: "edit", customerId, dueDate, title? } -- change the display
 //   name / client / due date of an already-populated to-do, leaving its
 //   status alone (so editing a completed item doesn't silently reopen it).
-// - { customerId, dueDate, recurrence, jobId? } -- populate a
-//   pending_triage item, which either finalizes it as a one-off to-do or
-//   converts it into a real Task if recurrence isn't "none" (see
-//   lib/todos.ts's populateTodoItem for exactly what "converts" means).
+// - { customerId, dueDate, recurrence } -- populate a pending_triage item,
+//   which either finalizes it as a one-off to-do or converts it into a real
+//   Task if recurrence isn't "none" (see lib/todos.ts's populateTodoItem for
+//   exactly what "converts" means).
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const access = await requireOwnerOrAdmin(id);
@@ -98,24 +97,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "customerId and recurrence are required" }, { status: 400 });
   }
 
-  let jobId = body.jobId;
-  if (body.recurrence !== "none" && !jobId) {
-    const jobs = await getJobsForCustomer(body.customerId);
-    if (jobs.length === 1) {
-      jobId = jobs[0].id;
-    } else {
-      return NextResponse.json(
-        { error: jobs.length === 0 ? "This client has no jobs to attach a task to." : "This client has more than one job -- choose which one." },
-        { status: 400 },
-      );
-    }
-  }
-
   const result = await populateTodoItem(id, {
     customerId: body.customerId,
     dueDate: body.dueDate ?? null,
     recurrence: body.recurrence,
-    jobId,
   });
   if (!result) return NextResponse.json({ error: "Failed to populate to-do" }, { status: 500 });
 

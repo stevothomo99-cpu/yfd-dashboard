@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ClientJobPicker from "./ClientJobPicker";
+import ClientPicker from "./ClientPicker";
 import type { TaskTemplateSummary } from "@/types/workflow";
 
 interface ClientOption {
@@ -16,15 +16,14 @@ interface ApplyTemplateModalProps {
   onApplied: () => void;
 }
 
-// Picks a saved template and a destination client/job, then bulk-creates
-// fresh, unscheduled, unassigned tasks on that job from the template's
-// items -- see lib/workflow.ts's applyTemplateToJob.
+// Picks a saved template and a destination client, then bulk-creates fresh,
+// unscheduled, unassigned tasks on that client from the template's items --
+// see lib/workflow.ts's applyTemplateToClient.
 export default function ApplyTemplateModal({ clients, initialClientId, onClose, onApplied }: ApplyTemplateModalProps) {
   const [templates, setTemplates] = useState<TaskTemplateSummary[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templateId, setTemplateId] = useState("");
   const [clientId, setClientId] = useState(initialClientId ?? "");
-  const [jobId, setJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,8 +49,8 @@ export default function ApplyTemplateModal({ clients, initialClientId, onClose, 
       setError("Choose a template.");
       return;
     }
-    if (!jobId) {
-      setError("Choose a destination job.");
+    if (!clientId) {
+      setError("Choose a destination client.");
       return;
     }
     setSubmitting(true);
@@ -60,7 +59,7 @@ export default function ApplyTemplateModal({ clients, initialClientId, onClose, 
       const res = await fetch(`/api/workflow/templates/${templateId}/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify({ customerId: clientId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to apply template");
@@ -150,13 +149,7 @@ export default function ApplyTemplateModal({ clients, initialClientId, onClose, 
             )}
           </label>
 
-          <ClientJobPicker
-            clients={clients}
-            selectedClientId={clientId}
-            onSelectClient={setClientId}
-            selectedJobId={jobId}
-            onSelectJob={setJobId}
-          />
+          <ClientPicker clients={clients} selectedClientId={clientId} onSelectClient={setClientId} />
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>
             <button type="button" onClick={onClose} style={secondaryButtonStyle}>
@@ -164,8 +157,8 @@ export default function ApplyTemplateModal({ clients, initialClientId, onClose, 
             </button>
             <button
               type="submit"
-              disabled={submitting || !templateId || !jobId}
-              style={{ ...primaryButtonStyle, opacity: submitting || !templateId || !jobId ? 0.6 : 1 }}
+              disabled={submitting || !templateId || !clientId}
+              style={{ ...primaryButtonStyle, opacity: submitting || !templateId || !clientId ? 0.6 : 1 }}
             >
               {submitting ? "Applying…" : "Apply template"}
             </button>
