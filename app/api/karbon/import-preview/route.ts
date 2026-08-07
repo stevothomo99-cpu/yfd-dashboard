@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { fetchKarbonWorkItemsSample, isKarbonConfigured, KarbonNotConfiguredError } from "@/lib/karbon";
+import {
+  fetchKarbonWorkItemsSample,
+  fetchKarbonWorkSchedule,
+  isKarbonConfigured,
+  KarbonNotConfiguredError,
+} from "@/lib/karbon";
 import { TASKS } from "@/lib/mock";
 
 const SAMPLE_SIZE = 5;
@@ -13,9 +18,11 @@ interface ResponseBody {
 
 // Karbon's raw field names, built from the same mock tasks the rest of the
 // app falls back to when KARBON_API_KEY is unset -- so the mapping page has
-// something plausible to render even without live access.
+// something plausible to render even without live access. One row is given
+// a WorkScheduleKey + RecurrenceFrequency so the mock also demonstrates what
+// a recurring WorkItem looks like once its schedule is joined in.
 function mockRows(): Record<string, unknown>[] {
-  return TASKS.slice(0, SAMPLE_SIZE).map((t) => ({
+  return TASKS.slice(0, SAMPLE_SIZE).map((t, i) => ({
     WorkItemKey: t.id,
     Title: t.title,
     ClientKey: t.clientId,
@@ -25,7 +32,31 @@ function mockRows(): Record<string, unknown>[] {
     WorkType: t.category,
     DueDate: t.dueDate,
     PrimaryStatus: t.rawStatus,
+    WorkScheduleKey: i === 0 ? "SCHED-MOCK-1" : null,
+    ...(i === 0 ? { RecurrenceFrequency: "Monthly" } : {}),
   }));
+}
+
+// Recurrence lives on WorkSchedules, not on the WorkItem row itself -- see
+// fetchKarbonWorkSchedule's comment. A WorkItem with no WorkScheduleKey is a
+// one-off and is returned unchanged; only fields worth mapping are copied
+// over, not the whole schedule object.
+const SCHEDULE_FIELDS = ["RecurrenceFrequency", "FrequencyDescription", "CustomFrequencyUnits", "CustomFrequencyMultiple"];
+
+async function withScheduleFrequency(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+  return Promise.all(
+    rows.map(async (row) => {
+      const scheduleKey = row.WorkScheduleKey;
+      if (typeof scheduleKey !== "string" || !scheduleKey) return row;
+      const schedule = await fetchKarbonWorkSchedule(scheduleKey);
+      if (!schedule) return row;
+      const enriched = { ...row };
+      for (const field of SCHEDULE_FIELDS) {
+        if (field in schedule) enriched[field] = schedule[field];
+      }
+      return enriched;
+    }),
+  );
 }
 
 // Admin-only, same as the Karbon Import page itself -- this is a review tool
@@ -45,7 +76,7 @@ export async function GET() {
   }
 
   try {
-    const rows = await fetchKarbonWorkItemsSample(SAMPLE_SIZE);
+    const rows = await withScheduleFrequency(await fetchKarbonWorkItemsSample(SAMPLE_SIZE));
     return NextResponse.json({ mode: "live", rows } satisfies ResponseBody);
   } catch (err) {
     if (err instanceof KarbonNotConfiguredError) {

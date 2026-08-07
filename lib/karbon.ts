@@ -92,6 +92,21 @@ export async function fetchKarbonWorkItemsSample(limit: number): Promise<Record<
   return page.value;
 }
 
+// Recurrence isn't a WorkItem field -- Karbon models it on a separate
+// WorkSchedules resource (RecurrenceFrequency, FrequencyDescription,
+// CustomFrequencyUnits/Multiple). A WorkItem only carries a WorkScheduleKey,
+// null for one-off work and populated for a recurring occurrence, which is
+// what links the two. Returns null on any lookup failure (deleted/renamed
+// schedule, transient error) so one bad key doesn't fail the whole sample.
+export async function fetchKarbonWorkSchedule(scheduleKey: string): Promise<Record<string, unknown> | null> {
+  try {
+    return await karbonFetch<Record<string, unknown>>(`/WorkSchedules/${encodeURIComponent(scheduleKey)}`);
+  } catch (err) {
+    console.error("[karbon] fetchKarbonWorkSchedule failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 // /Users is confirmed to exist in Karbon's public OpenAPI spec (GET /v3/Users)
 // but the exact field names weren't resolvable from the spec file directly —
 // it's too large to fetch in full. Field lookup below tries the same naming

@@ -30,7 +30,10 @@ const GUESS_KEYWORDS: Record<string, string[]> = {
   dueDate: ["duedate"],
   startDate: ["startdate"],
   status: ["primarystatus", "status"],
-  recurrence: [],
+  // Karbon has no frequency field on the WorkItem itself -- the API route
+  // joins it in from the linked WorkSchedule (see withScheduleFrequency in
+  // app/api/karbon/import-preview/route.ts) under this same name.
+  recurrence: ["recurrencefrequency"],
 };
 
 interface PreviewResponse {
