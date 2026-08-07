@@ -69,24 +69,22 @@ interface ODataList<T> {
 // Karbon v3 has a single work-tracking resource (/WorkItems) — there is no
 // separate Tasks endpoint. Both "tasks" and "BAS work" views in this app are
 // derived from WorkItems, optionally narrowed by an OData $filter.
+//
+// Karbon's /WorkItems never sends "@odata.nextLink" (confirmed live: a page
+// only ever comes back with @odata.context/@odata.count/value), so paging
+// has to be driven by $skip -- relying on nextLink silently capped every
+// unfiltered pull at the first PAGE_SIZE rows, which for a tenant with years
+// of history meant only its oldest, already-completed WorkItems ever came
+// back.
 async function fetchAllWorkItems(filter?: string): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
-  let next: string | undefined =
-    `/WorkItems?$top=${PAGE_SIZE}` + (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
-  let page1 = true;
-  while (next) {
-    const url: string = next;
-    const page: ODataList<Record<string, unknown>> = await karbonFetch(url);
-    if (page1) {
-      // Temporary diagnostic: an unfiltered pull stopped at exactly 100 rows
-      // (one PAGE_SIZE page), which needs to be told apart from "the tenant
-      // genuinely only has 100 WorkItems" vs. "Karbon's nextLink key isn't
-      // what this code expects". Remove once confirmed.
-      console.log("[karbon] page1 keys:", Object.keys(page), "nextLink:", page["@odata.nextLink"]);
-      page1 = false;
-    }
+  const base = `/WorkItems?$top=${PAGE_SIZE}` + (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
+  let skip = 0;
+  for (;;) {
+    const page: ODataList<Record<string, unknown>> = await karbonFetch(`${base}&$skip=${skip}`);
     rows.push(...page.value);
-    next = page["@odata.nextLink"];
+    if (page.value.length < PAGE_SIZE) break;
+    skip += PAGE_SIZE;
   }
   return rows;
 }
@@ -133,13 +131,15 @@ export async function fetchKarbonWorkSchedule(scheduleKey: string): Promise<Reco
 // empty string rather than throwing — verify against real tenant data once
 // this is live.
 async function fetchAllUsers(): Promise<Record<string, unknown>[]> {
+  // Same $skip-based paging as fetchAllWorkItems -- Karbon doesn't send
+  // "@odata.nextLink" on this resource either.
   const rows: Record<string, unknown>[] = [];
-  let next: string | undefined = `/Users?$top=${PAGE_SIZE}`;
-  while (next) {
-    const url: string = next;
-    const page: ODataList<Record<string, unknown>> = await karbonFetch(url);
+  let skip = 0;
+  for (;;) {
+    const page: ODataList<Record<string, unknown>> = await karbonFetch(`/Users?$top=${PAGE_SIZE}&$skip=${skip}`);
     rows.push(...page.value);
-    next = page["@odata.nextLink"];
+    if (page.value.length < PAGE_SIZE) break;
+    skip += PAGE_SIZE;
   }
   return rows;
 }
