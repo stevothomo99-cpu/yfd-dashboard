@@ -662,10 +662,15 @@ function renderCell(field: SortField, t: TaskWithDetails, staffId: string): Reac
   }
 }
 
+// Row colour follows the same Start Date basis as the master view filters
+// (startBucketOf) rather than Due Date, so a task that's overdue to *start*
+// stands out in red even inside the cumulative "Due this week" default view
+// -- not just when the Overdue view is explicitly selected.
 function toneOf(t: TaskWithDetails, today: string, weekEnd: string): "overdue" | "week" | "normal" | "completed" {
   if (t.statusIsComplete) return "completed";
-  if (t.dueDate && t.dueDate < today) return "overdue";
-  if (t.dueDate && t.dueDate <= weekEnd) return "week";
+  const bucket = startBucketOf(t, today, weekEnd, weekEnd);
+  if (bucket === "overdue") return "overdue";
+  if (bucket === "today" || bucket === "week") return "week";
   return "normal";
 }
 
