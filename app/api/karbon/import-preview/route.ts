@@ -246,7 +246,21 @@ export async function GET() {
   }
 
   try {
-    const active = (await fetchAllKarbonWorkItemsRaw()).filter((w) => !isCompletedKarbonStatus(w.PrimaryStatus));
+    const allRaw = await fetchAllKarbonWorkItemsRaw();
+    const active = allRaw.filter((w) => !isCompletedKarbonStatus(w.PrimaryStatus));
+    // Temporary diagnostic: the completed-status filter is dropping every
+    // row in production and it isn't obvious yet whether that's because
+    // every fetched WorkItem is genuinely "Completed" or because
+    // PrimaryStatus comes back in a shape isCompletedKarbonStatus doesn't
+    // recognize. Remove once confirmed.
+    console.log(
+      "[karbon-import] fetched",
+      allRaw.length,
+      "raw, ",
+      active.length,
+      "non-completed. Sample PrimaryStatus values:",
+      JSON.stringify(Array.from(new Set(allRaw.slice(0, 50).map((w) => w.PrimaryStatus)))),
+    );
     const raw = await withScheduleFrequency(active);
     return NextResponse.json({ mode: "live", rows: buildRows(raw, ref), customers: customerOptions } satisfies ImportPreviewResponse);
   } catch (err) {
