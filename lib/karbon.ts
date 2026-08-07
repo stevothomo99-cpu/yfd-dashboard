@@ -73,9 +73,18 @@ async function fetchAllWorkItems(filter?: string): Promise<Record<string, unknow
   const rows: Record<string, unknown>[] = [];
   let next: string | undefined =
     `/WorkItems?$top=${PAGE_SIZE}` + (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
+  let page1 = true;
   while (next) {
     const url: string = next;
     const page: ODataList<Record<string, unknown>> = await karbonFetch(url);
+    if (page1) {
+      // Temporary diagnostic: an unfiltered pull stopped at exactly 100 rows
+      // (one PAGE_SIZE page), which needs to be told apart from "the tenant
+      // genuinely only has 100 WorkItems" vs. "Karbon's nextLink key isn't
+      // what this code expects". Remove once confirmed.
+      console.log("[karbon] page1 keys:", Object.keys(page), "nextLink:", page["@odata.nextLink"]);
+      page1 = false;
+    }
     rows.push(...page.value);
     next = page["@odata.nextLink"];
   }
