@@ -186,6 +186,11 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
                 </option>
               ))}
             </select>
+            {editTask?.karbonClientName ? (
+              <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
+                Karbon: {editTask.karbonClientName}
+              </div>
+            ) : null}
           </Field>
 
           <Field label="Title" required>

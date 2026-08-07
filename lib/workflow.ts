@@ -86,6 +86,7 @@ interface TaskRow {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  karbon_client_name: string | null;
 }
 
 // Just the columns getClientSummaries' tallies read -- it counts tasks
@@ -312,6 +313,7 @@ function hydrateTask(
     tempAssigneeName: tempAssignee?.name ?? null,
     isTemporarilyReassigned: Boolean(row.temp_assignee_id && row.temp_assignee_id !== row.assignee_id),
     isOverdue,
+    karbonClientName: row.karbon_client_name,
   };
 }
 
@@ -464,6 +466,7 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
       status_id: input.statusId,
       type_id: input.typeId ?? null,
       recurrence: input.recurrence ?? "none",
+      karbon_client_name: input.karbonClientName ?? null,
     })
     .select("id")
     .single<{ id: string }>();
@@ -687,6 +690,61 @@ export async function deleteTaskSeries(taskId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+// Merges sourceId into intoTaskId for cleaning up admin/import mistakes
+// (e.g. re-running Karbon Import before dedupe existed produced duplicate
+// tasks for the same WorkItem). The target's own values always win; this
+// only backfills fields the target is missing using the duplicate's values
+// -- most usefully karbon_client_name, so combining a correctly-clientd
+// duplicate with the one still carrying the original Karbon reference
+// doesn't lose that reference. The source is deleted once backfilled.
+export async function combineTasks(sourceId: string, intoTaskId: string): Promise<TaskWithDetails | null> {
+  if (sourceId === intoTaskId) return null;
+
+  const admin = getSupabaseAdmin();
+  const [{ data: source, error: sourceError }, { data: target, error: targetError }] = await Promise.all([
+    admin.from("tasks").select("*").eq("id", sourceId).maybeSingle<TaskRow>(),
+    admin.from("tasks").select("*").eq("id", intoTaskId).maybeSingle<TaskRow>(),
+  ]);
+  if (sourceError || targetError || !source || !target) {
+    console.error(
+      "[workflow] combineTasks: source or target not found",
+      sourceError?.message,
+      targetError?.message
+    );
+    return null;
+  }
+
+  const fill: Partial<Record<keyof TaskRow, unknown>> = {};
+  if (!target.assignee_id && source.assignee_id) fill.assignee_id = source.assignee_id;
+  if (!target.type_id && source.type_id) fill.type_id = source.type_id;
+  if (!target.due_date && source.due_date) fill.due_date = source.due_date;
+  if (!target.start_date && source.start_date) fill.start_date = source.start_date;
+  if (!target.karbon_client_name && source.karbon_client_name) fill.karbon_client_name = source.karbon_client_name;
+
+  if (Object.keys(fill).length > 0) {
+    const { error } = await admin.from("tasks").update(fill).eq("id", intoTaskId);
+    if (error) {
+      console.error("[workflow] combineTasks (backfill) failed:", error.message);
+      return null;
+    }
+  }
+
+  if (!(await deleteTask(sourceId))) {
+    console.error("[workflow] combineTasks: backfilled target but failed to delete source", sourceId);
+    return null;
+  }
+
+  const [{ data: refreshed, error: refreshError }, lookups] = await Promise.all([
+    admin.from("tasks").select("*").eq("id", intoTaskId).single<TaskRow>(),
+    fetchLookupMaps(),
+  ]);
+  if (refreshError || !refreshed) {
+    console.error("[workflow] combineTasks (refetch) failed:", refreshError?.message);
+    return null;
+  }
+  return hydrateTask(refreshed, lookups);
 }
 
 // Hands a task to another staff member temporarily -- the task stays on

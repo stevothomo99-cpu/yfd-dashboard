@@ -43,6 +43,11 @@ interface ImportResult {
   failed: string[];
 }
 
+// Sentinel value for the "Remove from import" option in each row's client
+// dropdown -- distinct from "" (which means "no client chosen yet") so a
+// removed row can't be confused with one that's merely unresolved.
+const REMOVE_VALUE = "__remove__";
+
 const RECURRENCE_LABEL: Record<string, string> = {
   none: "One-off",
   daily: "Daily",
@@ -63,6 +68,10 @@ export default function KarbonImportPageClient() {
   // person only ever needs to touch this dropdown for rows flagged
   // needsClient, but nothing stops fixing an auto-match that guessed wrong.
   const [clientOverrides, setClientOverrides] = useState<Record<string, string>>({});
+  // Rows explicitly dropped from the import via the "Remove from import"
+  // dropdown option -- kept separate from clientOverrides since a removed
+  // row isn't a client choice, it's an exclusion.
+  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ImportResult | null>(null);
 
   async function fetchPreview(): Promise<PreviewResponse> {
@@ -76,6 +85,7 @@ export default function KarbonImportPageClient() {
     setRows(data.rows);
     setCustomers(data.customers);
     setClientOverrides({});
+    setRemovedKeys(new Set());
     setResult(null);
   }
 
@@ -107,10 +117,15 @@ export default function KarbonImportPageClient() {
     return clientOverrides[row.workItemKey] ?? row.customerId;
   }
 
+  const visibleRows = useMemo(
+    () => rows.filter((r) => !removedKeys.has(r.workItemKey)),
+    [rows, removedKeys],
+  );
+
   const unresolvedCount = useMemo(
-    () => rows.filter((r) => !resolvedCustomerId(r)).length,
+    () => visibleRows.filter((r) => !resolvedCustomerId(r)).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, clientOverrides],
+    [visibleRows, clientOverrides],
   );
 
   async function runImport() {
@@ -118,7 +133,7 @@ export default function KarbonImportPageClient() {
     setResult(null);
     try {
       const payload = {
-        rows: rows.map((r) => ({
+        rows: visibleRows.map((r) => ({
           workItemKey: r.workItemKey,
           title: r.title,
           customerId: resolvedCustomerId(r),
@@ -128,6 +143,7 @@ export default function KarbonImportPageClient() {
           dueDate: r.dueDate,
           startDate: r.startDate,
           recurrence: r.recurrence,
+          karbonClientName: r.karbonClientName,
         })),
       };
       const res = await fetch("/api/karbon/import", {
@@ -193,9 +209,22 @@ export default function KarbonImportPageClient() {
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
             <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111" }}>
-              {rows.length} work item{rows.length === 1 ? "" : "s"}
+              {visibleRows.length} work item{visibleRows.length === 1 ? "" : "s"}
               {unresolvedCount > 0 ? (
                 <span style={{ color: "#c0392b", fontWeight: 500 }}> · {unresolvedCount} need a client selected</span>
+              ) : null}
+              {removedKeys.size > 0 ? (
+                <span style={{ color: "#888780", fontWeight: 500 }}>
+                  {" "}
+                  · {removedKeys.size} removed{" "}
+                  <button
+                    type="button"
+                    onClick={() => setRemovedKeys(new Set())}
+                    style={{ fontSize: "12px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                  >
+                    Restore
+                  </button>
+                </span>
               ) : null}
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
@@ -205,10 +234,10 @@ export default function KarbonImportPageClient() {
               <button
                 type="button"
                 onClick={runImport}
-                disabled={importing || rows.length === 0}
-                style={{ ...primaryButtonStyle, opacity: importing || rows.length === 0 ? 0.5 : 1 }}
+                disabled={importing || visibleRows.length === 0}
+                style={{ ...primaryButtonStyle, opacity: importing || visibleRows.length === 0 ? 0.5 : 1 }}
               >
-                {importing ? "Importing…" : `Import ${rows.length} work item${rows.length === 1 ? "" : "s"}`}
+                {importing ? "Importing…" : `Import ${visibleRows.length} work item${visibleRows.length === 1 ? "" : "s"}`}
               </button>
             </div>
           </div>
@@ -235,23 +264,27 @@ export default function KarbonImportPageClient() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => {
+                {visibleRows.map((row, i) => {
                   const resolved = resolvedCustomerId(row);
                   const flagged = !resolved;
                   return (
                     <tr
                       key={row.workItemKey || i}
                       style={{
-                        borderBottom: i === rows.length - 1 ? "none" : "0.5px solid #e1e0d9",
+                        borderBottom: i === visibleRows.length - 1 ? "none" : "0.5px solid #e1e0d9",
                         background: flagged ? "rgba(226, 75, 74, 0.06)" : undefined,
                       }}
                     >
                       <td style={{ padding: "8px 10px", minWidth: "220px" }}>
                         <select
                           value={resolved ?? ""}
-                          onChange={(e) =>
-                            setClientOverrides((prev) => ({ ...prev, [row.workItemKey]: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            if (e.target.value === REMOVE_VALUE) {
+                              setRemovedKeys((prev) => new Set(prev).add(row.workItemKey));
+                              return;
+                            }
+                            setClientOverrides((prev) => ({ ...prev, [row.workItemKey]: e.target.value }));
+                          }}
                           style={{
                             ...selectCellStyle,
                             border: flagged ? "1px solid #e24b4a" : "0.5px solid #e1e0d9",
@@ -263,6 +296,7 @@ export default function KarbonImportPageClient() {
                               {c.name}
                             </option>
                           ))}
+                          <option value={REMOVE_VALUE}>— Remove from import —</option>
                         </select>
                         <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
                           Karbon: {row.karbonClientName || "—"}

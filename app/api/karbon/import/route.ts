@@ -13,6 +13,7 @@ interface ImportRowInput {
   dueDate?: unknown;
   startDate?: unknown;
   recurrence?: unknown;
+  karbonClientName?: unknown;
 }
 
 const RECURRENCE_VALUES: readonly RecurrenceInterval[] = ["none", "daily", "weekly", "fortnightly", "monthly", "quarterly"];
@@ -85,6 +86,7 @@ export async function POST(req: Request) {
       statusId: str(row.statusId)!,
       typeId: str(row.typeId),
       recurrence: isRecurrenceInterval(row.recurrence) ? row.recurrence : "none",
+      karbonClientName: str(row.karbonClientName),
     });
     if (result) created++;
     else failed.push(label);

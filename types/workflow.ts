@@ -79,6 +79,11 @@ export interface WorkflowTask {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Set only when this task was created by Karbon Import -- the client name
+  // Karbon itself reported for the WorkItem, kept as a reference point for
+  // spotting a wrong client match after the fact. Null for every task
+  // created any other way.
+  karbonClientName: string | null;
 }
 
 // A task, hydrated with everything a board/list view needs to render
@@ -108,6 +113,7 @@ export interface CreateTaskInput {
   statusId: string;
   typeId?: string | null;
   recurrence?: RecurrenceInterval;
+  karbonClientName?: string | null;
 }
 
 // Same shape as CreateTaskInput but every field optional -- PATCH only

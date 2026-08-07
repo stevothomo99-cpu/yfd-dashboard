@@ -5,6 +5,8 @@ import PageHeader from "@/components/dashboard/PageHeader";
 import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
 import DeleteTaskDialog from "@/components/dashboard/DeleteTaskDialog";
+import MoveTaskModal from "@/components/dashboard/MoveTaskModal";
+import CombineTaskModal from "@/components/dashboard/CombineTaskModal";
 import type {
   TaskWithDetails,
   WorkflowCustomer,
@@ -143,6 +145,8 @@ export default function MyWorkPageClient({
   const [showNewTask, setShowNewTask] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
   const [deletingTask, setDeletingTask] = useState<TaskWithDetails | null>(null);
+  const [movingTask, setMovingTask] = useState<TaskWithDetails | null>(null);
+  const [combiningTask, setCombiningTask] = useState<TaskWithDetails | null>(null);
 
   // Defaults to "Due this week" -- everything that needs to start in the
   // next 7 days (cumulative with overdue/today) is what a person wants to
@@ -557,6 +561,12 @@ export default function MyWorkPageClient({
                             <button type="button" onClick={() => setEditingTask(t)} style={rowActionStyle}>
                               Edit
                             </button>
+                            <button type="button" onClick={() => setMovingTask(t)} style={rowActionStyle}>
+                              Move to
+                            </button>
+                            <button type="button" onClick={() => setCombiningTask(t)} style={rowActionStyle}>
+                              Combine
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDelete(t)}
@@ -608,6 +618,24 @@ export default function MyWorkPageClient({
             setDeletingTask(null);
             deleteTaskRequest(task.id, scope);
           }}
+        />
+      ) : null}
+
+      {movingTask ? (
+        <MoveTaskModal
+          task={movingTask}
+          clients={clients}
+          onClose={() => setMovingTask(null)}
+          onMoved={() => refreshTasks(staffId)}
+        />
+      ) : null}
+
+      {combiningTask ? (
+        <CombineTaskModal
+          task={combiningTask}
+          candidates={tasks.filter((t) => t.id !== combiningTask.id)}
+          onClose={() => setCombiningTask(null)}
+          onCombined={() => refreshTasks(staffId)}
         />
       ) : null}
     </div>
