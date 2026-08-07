@@ -8,7 +8,7 @@ import {
 } from "@/lib/karbon";
 import { TASKS } from "@/lib/mock";
 
-const SAMPLE_SIZE = 5;
+const SAMPLE_SIZE = 30;
 
 interface ResponseBody {
   mode: "live" | "mock";
