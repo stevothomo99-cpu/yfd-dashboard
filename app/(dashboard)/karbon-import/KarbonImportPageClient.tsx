@@ -1,124 +1,100 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 
-// The task fields this app actually has to fill in when a Karbon WorkItem
-// becomes a task (see CreateTaskInput in types/workflow.ts). Recurrence has
-// no Karbon counterpart -- Karbon doesn't model repeating work the way this
-// app does -- so it's listed but never auto-guessed.
-const TARGET_FIELDS: { key: string; label: string }[] = [
-  { key: "title", label: "Title" },
-  { key: "client", label: "Client" },
-  { key: "assignee", label: "Assignee" },
-  { key: "type", label: "Type" },
-  { key: "dueDate", label: "Due Date" },
-  { key: "startDate", label: "Start Date" },
-  { key: "status", label: "Status" },
-  { key: "recurrence", label: "Recurrence" },
-];
+interface ImportRow {
+  workItemKey: string;
+  title: string;
+  dueDate: string | null;
+  startDate: string | null;
+  karbonClientName: string;
+  karbonAssigneeName: string;
+  karbonWorkType: string;
+  karbonStatus: string;
+  karbonRecurrenceFrequency: string | null;
+  customerId: string | null;
+  needsClient: boolean;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  assigneeIsFallback: boolean;
+  statusId: string | null;
+  statusName: string | null;
+  typeId: string | null;
+  typeName: string | null;
+  recurrence: string;
+}
 
-// Listed most-specific first: a WorkItem usually carries both a "*Name" and
-// a "*Key" variant of the same thing (e.g. ClientName/ClientKey) and the
-// name is what a human reviewing this page wants to see, so it's tried
-// before the bare keyword falls back to matching the Key field instead.
-const GUESS_KEYWORDS: Record<string, string[]> = {
-  title: ["title"],
-  client: ["clientname", "client"],
-  assignee: ["assigneename", "assignee"],
-  type: ["worktype", "type"],
-  dueDate: ["duedate"],
-  startDate: ["startdate"],
-  status: ["primarystatus", "status"],
-  // Karbon has no frequency field on the WorkItem itself -- the API route
-  // joins it in from the linked WorkSchedule (see withScheduleFrequency in
-  // app/api/karbon/import-preview/route.ts) under this same name.
-  recurrence: ["recurrencefrequency"],
-};
+interface CustomerOption {
+  id: string;
+  name: string;
+}
 
 interface PreviewResponse {
   mode: "live" | "mock";
-  rows: Record<string, unknown>[];
+  rows: ImportRow[];
+  customers: CustomerOption[];
   message?: string;
 }
 
-function collectFields(rows: Record<string, unknown>[]): string[] {
-  const seen = new Set<string>();
-  const fields: string[] = [];
-  for (const row of rows) {
-    for (const key of Object.keys(row)) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        fields.push(key);
-      }
-    }
-  }
-  return fields;
+interface ImportResult {
+  created: number;
+  skipped: string[];
+  failed: string[];
 }
 
-// Best-effort starting layout so a person only has to fix the handful of
-// fields Karbon names unhelpfully, rather than dragging all eight from
-// scratch every time this page loads.
-function guessInitialMapping(fields: string[]): Record<string, string | null> {
-  const used = new Set<string>();
-  const lowerPairs = fields.map((f) => [f, f.toLowerCase()] as const);
-  const mapping: Record<string, string | null> = {};
-  for (const target of TARGET_FIELDS) {
-    let match: string | null = null;
-    for (const kw of GUESS_KEYWORDS[target.key] ?? []) {
-      const found = lowerPairs.find(([f, lower]) => !used.has(f) && lower.includes(kw));
-      if (found) {
-        match = found[0];
-        break;
-      }
-    }
-    if (match) used.add(match);
-    mapping[target.key] = match;
-  }
-  return mapping;
-}
-
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
+const RECURRENCE_LABEL: Record<string, string> = {
+  none: "One-off",
+  daily: "Daily",
+  weekly: "Weekly",
+  fortnightly: "Fortnightly",
+  monthly: "Monthly",
+  quarterly: "Quarterly",
+};
 
 export default function KarbonImportPageClient() {
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
   const [mode, setMode] = useState<"live" | "mock" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [karbonFields, setKarbonFields] = useState<string[]>([]);
-  const [mapping, setMapping] = useState<Record<string, string | null>>({});
-  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  // Only overrides the customerId this page resolved automatically -- a
+  // person only ever needs to touch this dropdown for rows flagged
+  // needsClient, but nothing stops fixing an auto-match that guessed wrong.
+  const [clientOverrides, setClientOverrides] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<ImportResult | null>(null);
 
-  async function fetchKarbonPreview(): Promise<PreviewResponse> {
+  async function fetchPreview(): Promise<PreviewResponse> {
     const res = await fetch("/api/karbon/import-preview");
     return (await res.json()) as PreviewResponse;
   }
 
   function applyPreview(data: PreviewResponse) {
-    const fields = collectFields(data.rows);
     setMode(data.mode);
     setMessage(data.message ?? null);
     setRows(data.rows);
-    setKarbonFields(fields);
-    setMapping(guessInitialMapping(fields));
+    setCustomers(data.customers);
+    setClientOverrides({});
+    setResult(null);
   }
 
   function applyPreviewError(err: unknown) {
     setMode("live");
-    setMessage(err instanceof Error ? err.message : "Failed to load Karbon sample data");
+    setMessage(err instanceof Error ? err.message : "Failed to load Karbon work items");
     setRows([]);
-    setKarbonFields([]);
-    setMapping({});
+    setCustomers([]);
+  }
+
+  function refresh() {
+    setLoading(true);
+    fetchPreview().then(applyPreview).catch(applyPreviewError).finally(() => setLoading(false));
   }
 
   useEffect(() => {
     (async () => {
       try {
-        applyPreview(await fetchKarbonPreview());
+        applyPreview(await fetchPreview());
       } catch (err) {
         applyPreviewError(err);
       } finally {
@@ -127,67 +103,54 @@ export default function KarbonImportPageClient() {
     })();
   }, []);
 
-  function refreshSample() {
-    setLoading(true);
-    fetchKarbonPreview().then(applyPreview).catch(applyPreviewError).finally(() => setLoading(false));
+  function resolvedCustomerId(row: ImportRow): string | null {
+    return clientOverrides[row.workItemKey] ?? row.customerId;
   }
 
-  // A dragged Karbon field always ends up mapped to at most one target: it's
-  // cleared from wherever it used to be (another slot, or nowhere if it came
-  // from the unassigned pool) before landing here.
-  function assignField(targetKey: string, karbonField: string) {
-    setMapping((prev) => {
-      const next: Record<string, string | null> = {};
-      for (const [k, v] of Object.entries(prev)) next[k] = v === karbonField ? null : v;
-      next[targetKey] = karbonField;
-      return next;
-    });
-  }
+  const unresolvedCount = useMemo(
+    () => rows.filter((r) => !resolvedCustomerId(r)).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, clientOverrides],
+  );
 
-  function unassignField(targetKey: string) {
-    setMapping((prev) => ({ ...prev, [targetKey]: null }));
-  }
-
-  const mappedFields = new Set(Object.values(mapping).filter((v): v is string => Boolean(v)));
-  const unassignedFields = karbonFields.filter((f) => !mappedFields.has(f));
-
-  function chipStyle(dragging: boolean): React.CSSProperties {
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "4px",
-      padding: "6px 10px",
-      borderRadius: "8px",
-      background: dragging ? "#eceae2" : "#f5f4f0",
-      border: "0.5px solid #e1e0d9",
-      fontSize: "12px",
-      fontWeight: 500,
-      color: "#111111",
-      cursor: "grab",
-      userSelect: "none",
-    };
-  }
-
-  function slotStyle(targetKey: string): React.CSSProperties {
-    const isOver = dragOverKey === targetKey;
-    return {
-      minHeight: "56px",
-      borderRadius: "10px",
-      border: isOver ? "1.5px dashed #6b6a63" : "0.5px dashed #cfcdc4",
-      background: isOver ? "#f0efe9" : "#fbfaf7",
-      padding: "8px 10px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      justifyContent: "center",
-    };
+  async function runImport() {
+    setImporting(true);
+    setResult(null);
+    try {
+      const payload = {
+        rows: rows.map((r) => ({
+          workItemKey: r.workItemKey,
+          title: r.title,
+          customerId: resolvedCustomerId(r),
+          assigneeId: r.assigneeId,
+          statusId: r.statusId,
+          typeId: r.typeId,
+          dueDate: r.dueDate,
+          startDate: r.startDate,
+          recurrence: r.recurrence,
+        })),
+      };
+      const res = await fetch("/api/karbon/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.error ?? "Import failed");
+        return;
+      }
+      setResult(data as ImportResult);
+    } finally {
+      setImporting(false);
+    }
   }
 
   return (
     <div>
       <PageHeader
         title="Karbon Import"
-        subtitle="Drag a Karbon field onto the dashboard field it should fill. The preview table below updates as you go."
+        subtitle="Every live Karbon work item, matched to your internal clients/staff/types/statuses. Fix any unmatched client below, then import."
       />
 
       {message ? (
@@ -206,145 +169,57 @@ export default function KarbonImportPageClient() {
         </div>
       ) : null}
 
+      {result ? (
+        <div
+          style={{
+            fontSize: "12px",
+            color: "#1e7e34",
+            marginBottom: "16px",
+            padding: "8px 12px",
+            borderRadius: "8px",
+            background: "#eaf6ec",
+            border: "0.5px solid #bfe6c6",
+          }}
+        >
+          Imported {result.created} work item{result.created === 1 ? "" : "s"}.
+          {result.skipped.length > 0 ? ` Skipped ${result.skipped.length} with no client assigned.` : ""}
+          {result.failed.length > 0 ? ` ${result.failed.length} failed to save -- check the server log.` : ""}
+        </div>
+      ) : null}
+
       {loading ? (
-        <div style={{ fontSize: "13px", color: "#888780" }}>Loading sample work items…</div>
+        <div style={{ fontSize: "13px", color: "#888780" }}>Loading Karbon work items…</div>
       ) : (
         <>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
-            <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111" }}>Dashboard fields</div>
-            <button
-              type="button"
-              onClick={refreshSample}
-              style={{
-                fontSize: "12px",
-                fontWeight: 500,
-                padding: "6px 12px",
-                borderRadius: "8px",
-                background: "white",
-                color: "#444441",
-                border: "0.5px solid #e1e0d9",
-                cursor: "pointer",
-              }}
-            >
-              Refresh sample
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: "10px",
-              marginBottom: "20px",
-            }}
-          >
-            {TARGET_FIELDS.map((target) => {
-              const karbonField = mapping[target.key] ?? null;
-              return (
-                <div
-                  key={target.key}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOverKey(target.key);
-                  }}
-                  onDragLeave={() => setDragOverKey((k) => (k === target.key ? null : k))}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOverKey(null);
-                    const field = e.dataTransfer.getData("text/karbon-field");
-                    if (field) assignField(target.key, field);
-                  }}
-                  style={slotStyle(target.key)}
-                >
-                  <div style={{ fontSize: "11px", color: "#888780", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                    {target.label}
-                  </div>
-                  {karbonField ? (
-                    <div
-                      draggable
-                      onDragStart={(e) => e.dataTransfer.setData("text/karbon-field", karbonField)}
-                      style={{ display: "flex", alignItems: "center", gap: "6px" }}
-                    >
-                      <span style={chipStyle(false)}>{karbonField}</span>
-                      <button
-                        type="button"
-                        onClick={() => unassignField(target.key)}
-                        title="Remove mapping"
-                        style={{
-                          border: "none",
-                          background: "none",
-                          color: "#888780",
-                          cursor: "pointer",
-                          fontSize: "13px",
-                          lineHeight: 1,
-                          padding: "2px",
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: "12px", color: "#b3b1a8" }}>Drop a Karbon field here</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const field = e.dataTransfer.getData("text/karbon-field");
-              if (!field) return;
-              setMapping((prev) => {
-                const next: Record<string, string | null> = {};
-                for (const [k, v] of Object.entries(prev)) next[k] = v === field ? null : v;
-                return next;
-              });
-            }}
-            style={{
-              border: "0.5px solid #e1e0d9",
-              borderRadius: "10px",
-              padding: "12px",
-              marginBottom: "24px",
-              background: "white",
-            }}
-          >
-            <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111", marginBottom: "8px" }}>
-              Karbon fields (unassigned)
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111" }}>
+              {rows.length} work item{rows.length === 1 ? "" : "s"}
+              {unresolvedCount > 0 ? (
+                <span style={{ color: "#c0392b", fontWeight: 500 }}> · {unresolvedCount} need a client selected</span>
+              ) : null}
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              {unassignedFields.length === 0 ? (
-                <div style={{ fontSize: "12px", color: "#b3b1a8" }}>Every Karbon field is mapped.</div>
-              ) : (
-                unassignedFields.map((field) => (
-                  <div
-                    key={field}
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData("text/karbon-field", field)}
-                    style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
-                  >
-                    <span style={chipStyle(false)}>{field}</span>
-                    <span style={{ fontSize: "10px", color: "#b3b1a8", marginTop: "2px", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {formatCell(rows[0]?.[field]) || "—"}
-                    </span>
-                  </div>
-                ))
-              )}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button type="button" onClick={refresh} style={secondaryButtonStyle}>
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={runImport}
+                disabled={importing || rows.length === 0}
+                style={{ ...primaryButtonStyle, opacity: importing || rows.length === 0 ? 0.5 : 1 }}
+              >
+                {importing ? "Importing…" : `Import ${rows.length} work item${rows.length === 1 ? "" : "s"}`}
+              </button>
             </div>
           </div>
 
-          <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111", marginBottom: "8px" }}>
-            Preview — {rows.length} sample work item{rows.length === 1 ? "" : "s"}
-          </div>
           <div style={{ overflowX: "auto", border: "0.5px solid #e1e0d9", borderRadius: "10px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
               <thead>
                 <tr style={{ background: "#f5f4f0" }}>
-                  {TARGET_FIELDS.map((target) => (
+                  {["Client", "Title", "Assignee", "Type", "Status", "Due", "Start", "Recurrence"].map((label) => (
                     <th
-                      key={target.key}
+                      key={label}
                       style={{
                         textAlign: "left",
                         padding: "8px 10px",
@@ -354,25 +229,60 @@ export default function KarbonImportPageClient() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {target.label}
+                      {label}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => (
-                  <tr key={i} style={{ borderBottom: i === rows.length - 1 ? "none" : "0.5px solid #e1e0d9" }}>
-                    {TARGET_FIELDS.map((target) => {
-                      const karbonField = mapping[target.key];
-                      const value = karbonField ? formatCell(row[karbonField]) : "";
-                      return (
-                        <td key={target.key} style={{ padding: "8px 10px", color: value ? "#111111" : "#b3b1a8", whiteSpace: "nowrap" }}>
-                          {value || "—"}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                {rows.map((row, i) => {
+                  const resolved = resolvedCustomerId(row);
+                  const flagged = !resolved;
+                  return (
+                    <tr
+                      key={row.workItemKey || i}
+                      style={{
+                        borderBottom: i === rows.length - 1 ? "none" : "0.5px solid #e1e0d9",
+                        background: flagged ? "rgba(226, 75, 74, 0.06)" : undefined,
+                      }}
+                    >
+                      <td style={{ padding: "8px 10px", minWidth: "220px" }}>
+                        <select
+                          value={resolved ?? ""}
+                          onChange={(e) =>
+                            setClientOverrides((prev) => ({ ...prev, [row.workItemKey]: e.target.value }))
+                          }
+                          style={{
+                            ...selectCellStyle,
+                            border: flagged ? "1px solid #e24b4a" : "0.5px solid #e1e0d9",
+                          }}
+                        >
+                          <option value="">— Select client —</option>
+                          {customers.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
+                          Karbon: {row.karbonClientName || "—"}
+                        </div>
+                      </td>
+                      <td style={tdStyle}>{row.title}</td>
+                      <td style={tdStyle}>
+                        {row.assigneeName ?? "Unassigned"}
+                        {row.assigneeIsFallback ? (
+                          <span style={{ marginLeft: "4px", fontSize: "10px", color: "#888780" }}>(defaulted)</span>
+                        ) : null}
+                      </td>
+                      <td style={tdStyle}>{row.typeName ?? "—"}</td>
+                      <td style={tdStyle}>{row.statusName ?? "—"}</td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{row.dueDate ?? "—"}</td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{row.startDate ?? "—"}</td>
+                      <td style={tdStyle}>{RECURRENCE_LABEL[row.recurrence] ?? row.recurrence}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -381,3 +291,40 @@ export default function KarbonImportPageClient() {
     </div>
   );
 }
+
+const tdStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  color: "#111111",
+};
+
+const selectCellStyle: React.CSSProperties = {
+  fontSize: "12px",
+  padding: "5px 8px",
+  borderRadius: "6px",
+  background: "white",
+  color: "#111111",
+  outline: "none",
+  width: "100%",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 500,
+  padding: "8px 14px",
+  borderRadius: "8px",
+  background: "white",
+  color: "#444441",
+  border: "0.5px solid #e1e0d9",
+  cursor: "pointer",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 600,
+  padding: "8px 14px",
+  borderRadius: "8px",
+  background: "#111111",
+  color: "white",
+  border: "none",
+  cursor: "pointer",
+};

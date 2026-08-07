@@ -92,6 +92,15 @@ export async function fetchKarbonWorkItemsSample(limit: number): Promise<Record<
   return page.value;
 }
 
+// The real Karbon → task import pulls every WorkItem in the tenant, not a
+// bounded sample -- deliberately no date filter, since a one-off migration
+// import is meant to bring in everything Karbon currently has, unlike
+// fetchKarbonTasks/fetchKarbonWorkItems which scope to a recent window for
+// the day-to-day dashboard views.
+export async function fetchAllKarbonWorkItemsRaw(): Promise<Record<string, unknown>[]> {
+  return fetchAllWorkItems();
+}
+
 // Recurrence isn't a WorkItem field -- Karbon models it on a separate
 // WorkSchedules resource (RecurrenceFrequency, FrequencyDescription,
 // CustomFrequencyUnits/Multiple). A WorkItem only carries a WorkScheduleKey,

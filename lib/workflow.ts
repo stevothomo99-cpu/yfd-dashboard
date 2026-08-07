@@ -1017,7 +1017,7 @@ export async function uploadCustomerFile(
 // every status is somehow marked complete). Same rule NewTaskModal.tsx
 // applies client-side for its own default; used here so copied/templated
 // tasks never inherit a source task's "Completed" status.
-async function defaultOpenStatusId(): Promise<string | null> {
+export async function defaultOpenStatusId(): Promise<string | null> {
   const statuses = await listStatuses();
   const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
   return openStatus?.id ?? statuses[0]?.id ?? null;
