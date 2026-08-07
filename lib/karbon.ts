@@ -41,8 +41,19 @@ export function isKarbonConfigured(): boolean {
   return Boolean(process.env.KARBON_API_KEY);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const MAX_RATE_LIMIT_RETRIES = 5;
+
 // Accepts either a path ("/WorkItems?...") or an absolute URL, since Karbon's
 // OData @odata.nextLink is returned as a full URL for pagination.
+//
+// A full unfiltered /WorkItems pull runs to hundreds of pages (this tenant
+// has 30k+ historical rows), which reliably trips Karbon's rate limit
+// partway through -- retry on 429 using its Retry-After header, falling
+// back to exponential backoff if that header is missing.
 async function karbonFetch<T>(pathOrUrl: string, init?: RequestInit): Promise<T> {
   if (!isKarbonConfigured()) throw new KarbonNotConfiguredError();
   const headers = new Headers(init?.headers);
@@ -53,12 +64,20 @@ async function karbonFetch<T>(pathOrUrl: string, init?: RequestInit): Promise<T>
     headers.set("AccessKey", process.env.KARBON_ACCESS_KEY);
   }
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : baseUrl() + pathOrUrl;
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Karbon ${pathOrUrl} failed: ${res.status} ${body}`);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { ...init, headers });
+    if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+      const retryAfter = Number(res.headers.get("Retry-After"));
+      await res.text().catch(() => "");
+      await sleep((Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2 ** attempt) * 1000);
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Karbon ${pathOrUrl} failed: ${res.status} ${body}`);
+    }
+    return (await res.json()) as T;
   }
-  return (await res.json()) as T;
 }
 
 interface ODataList<T> {

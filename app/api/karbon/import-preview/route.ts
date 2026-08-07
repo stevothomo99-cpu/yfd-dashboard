@@ -18,6 +18,12 @@ import {
 import type { RecurrenceInterval, WorkflowCustomer, WorkflowStaff, WorkflowStatus, WorkflowTaskType } from "@/types/workflow";
 import { TASKS } from "@/lib/mock";
 
+// An unfiltered /WorkItems pull runs to hundreds of paginated requests
+// (30k+ historical rows for this tenant) and can also burn time backing off
+// on Karbon's rate limit -- the platform's un-configured default is nowhere
+// near enough.
+export const maxDuration = 300;
+
 interface ImportRow {
   workItemKey: string;
   title: string;
