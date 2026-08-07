@@ -101,6 +101,18 @@ function dateOnly(value: unknown): string | null {
   return value.slice(0, 10);
 }
 
+// Pulling every WorkItem with no date bound (see fetchAllKarbonWorkItemsRaw)
+// means years of Karbon's closed-out history comes back alongside current
+// work -- completed items dominate that history and aren't what a one-off
+// import into a live task board is for, whether they were a one-off job or
+// a past occurrence of a recurring one. Matched purely on Karbon's own
+// PrimaryStatus string, not on the internal status match, so this still
+// works even for a tenant whose "Completed"-equivalent status is named
+// differently internally.
+function isCompletedKarbonStatus(raw: unknown): boolean {
+  return typeof raw === "string" && raw.toLowerCase().replace(/\s+/g, "") === "completed";
+}
+
 // Loose enough to survive Karbon vs. internal spelling differences ("In
 // Progress" vs "InProgress") without over-matching unrelated names.
 function normalize(s: string): string {
@@ -227,20 +239,21 @@ export async function GET() {
   if (!isKarbonConfigured()) {
     return NextResponse.json({
       mode: "mock",
-      rows: buildRows(mockRawRows(), ref),
+      rows: buildRows(mockRawRows().filter((w) => !isCompletedKarbonStatus(w.PrimaryStatus)), ref),
       customers: customerOptions,
       message: "Showing mock data because KARBON_API_KEY is not set.",
     } satisfies ImportPreviewResponse);
   }
 
   try {
-    const raw = await withScheduleFrequency(await fetchAllKarbonWorkItemsRaw());
+    const active = (await fetchAllKarbonWorkItemsRaw()).filter((w) => !isCompletedKarbonStatus(w.PrimaryStatus));
+    const raw = await withScheduleFrequency(active);
     return NextResponse.json({ mode: "live", rows: buildRows(raw, ref), customers: customerOptions } satisfies ImportPreviewResponse);
   } catch (err) {
     if (err instanceof KarbonNotConfiguredError) {
       return NextResponse.json({
         mode: "mock",
-        rows: buildRows(mockRawRows(), ref),
+        rows: buildRows(mockRawRows().filter((w) => !isCompletedKarbonStatus(w.PrimaryStatus)), ref),
         customers: customerOptions,
         message: err.message,
       } satisfies ImportPreviewResponse);

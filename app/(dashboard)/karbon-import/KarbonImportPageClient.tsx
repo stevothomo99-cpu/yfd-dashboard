@@ -150,7 +150,7 @@ export default function KarbonImportPageClient() {
     <div>
       <PageHeader
         title="Karbon Import"
-        subtitle="Every live Karbon work item, matched to your internal clients/staff/types/statuses. Fix any unmatched client below, then import."
+        subtitle="Every non-completed live Karbon work item, matched to your internal clients/staff/types/statuses. Fix any unmatched client below, then import."
       />
 
       {message ? (
