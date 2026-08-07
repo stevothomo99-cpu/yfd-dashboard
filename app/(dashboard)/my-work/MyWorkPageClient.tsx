@@ -35,12 +35,15 @@ const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
   quarterly: "Quarterly",
 };
 
-type MasterView = "all" | "overdue" | "week" | "completed";
+type MasterView = "all" | "overdue" | "today" | "week" | "month" | "other" | "completed";
 
 const MASTER_VIEWS: { value: MasterView; label: string }[] = [
   { value: "all", label: "All Work" },
   { value: "overdue", label: "Overdue" },
+  { value: "today", label: "Due today" },
   { value: "week", label: "Due this week" },
+  { value: "month", label: "Due this month" },
+  { value: "other", label: "Other" },
   { value: "completed", label: "Completed" },
 ];
 
@@ -97,6 +100,31 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function endOfMonth(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + 1, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+// Buckets are cumulative by Start Date, same convention the old due-this-week
+// view used (it already folded overdue in) -- so "this week" and "this
+// month" surface everything that needs attention by that point, not just the
+// items landing exactly in that slice.
+function startBucketOf(
+  t: TaskWithDetails,
+  today: string,
+  weekEnd: string,
+  monthEnd: string
+): "overdue" | "today" | "week" | "month" | "other" {
+  const start = t.startDate;
+  if (!start) return "other";
+  if (start < today) return "overdue";
+  if (start === today) return "today";
+  if (start <= weekEnd) return "week";
+  if (start <= monthEnd) return "month";
+  return "other";
+}
+
 export default function MyWorkPageClient({
   allStaff,
   isAdmin,
@@ -116,10 +144,14 @@ export default function MyWorkPageClient({
   const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
   const [deletingTask, setDeletingTask] = useState<TaskWithDetails | null>(null);
 
-  const [view, setView] = useState<MasterView>("all");
+  // Defaults to "Due this week" -- everything that needs to start in the
+  // next 7 days (cumulative with overdue/today) is what a person wants to
+  // see the moment they land here; "All Work" is one click away.
+  const [view, setView] = useState<MasterView>("week");
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(true);
   const [clientFilter, setClientFilter] = useState<string>("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
   // Defaults to excluding whatever status(es) are marked complete, so a
   // completed backlog doesn't clutter the default view -- computed from the
   // actual data rather than hardcoding "Completed" as a literal.
@@ -222,10 +254,15 @@ export default function MyWorkPageClient({
   }
 
   const today = todayIso();
-  const weekEnd = addDays(today, 7);
+  const weekEnd = addDays(today, 6);
+  const monthEnd = endOfMonth(today);
 
   const clientOptions = useMemo(
     () => Array.from(new Set(tasks.map((t) => t.customerName))).sort(),
+    [tasks]
+  );
+  const typeOptions = useMemo(
+    () => Array.from(new Set(tasks.map((t) => t.typeName).filter((n): n is string => Boolean(n)))).sort(),
     [tasks]
   );
   const statusOptions = useMemo(
@@ -241,11 +278,22 @@ export default function MyWorkPageClient({
   const filtered = useMemo(() => {
     let rows = tasks;
 
-    if (view === "overdue") rows = rows.filter((t) => toneOf(t, today, weekEnd) === "overdue");
-    else if (view === "week") rows = rows.filter((t) => toneOf(t, today, weekEnd) === "overdue" || toneOf(t, today, weekEnd) === "week");
-    else if (view === "completed") rows = rows.filter((t) => t.statusIsComplete);
+    if (view === "completed") {
+      rows = rows.filter((t) => t.statusIsComplete);
+    } else if (view !== "all") {
+      const targets: Record<Exclude<MasterView, "all" | "completed">, ("overdue" | "today" | "week" | "month" | "other")[]> = {
+        overdue: ["overdue"],
+        today: ["today"],
+        week: ["overdue", "today", "week"],
+        month: ["overdue", "today", "week", "month"],
+        other: ["other"],
+      };
+      const wanted = targets[view];
+      rows = rows.filter((t) => wanted.includes(startBucketOf(t, today, weekEnd, monthEnd)));
+    }
 
     if (clientFilter) rows = rows.filter((t) => t.customerName === clientFilter);
+    if (typeFilter) rows = rows.filter((t) => t.typeName === typeFilter);
     if (ownerFilter) rows = rows.filter((t) => ownerName(t) === ownerFilter);
     if (assignedToFilter) rows = rows.filter((t) => assignedToName(t) === assignedToFilter);
     if (startFrom) rows = rows.filter((t) => t.startDate && t.startDate >= startFrom);
@@ -275,6 +323,7 @@ export default function MyWorkPageClient({
     tasks,
     view,
     clientFilter,
+    typeFilter,
     statusFilter,
     ownerFilter,
     assignedToFilter,
@@ -285,6 +334,7 @@ export default function MyWorkPageClient({
     sortDir,
     today,
     weekEnd,
+    monthEnd,
   ]);
 
   function handleSort(field: SortField) {
@@ -387,6 +437,15 @@ export default function MyWorkPageClient({
               </option>
             ))}
           </select>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={selectStyle}>
+            <option value="">All types</option>
+            {typeOptions.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+
           <StatusFilter options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
 
           <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} style={selectStyle}>
@@ -414,11 +473,12 @@ export default function MyWorkPageClient({
             <input type="date" value={startTo} onChange={(e) => setStartTo(e.target.value)} style={dateInputStyle} />
           </label>
 
-          {ownerFilter || assignedToFilter || startFrom || startTo || clientFilter || statusFilter.selected.length > 0 ? (
+          {ownerFilter || assignedToFilter || startFrom || startTo || clientFilter || typeFilter || statusFilter.selected.length > 0 ? (
             <button
               type="button"
               onClick={() => {
                 setClientFilter("");
+                setTypeFilter("");
                 setOwnerFilter("");
                 setAssignedToFilter("");
                 setStartFrom("");
