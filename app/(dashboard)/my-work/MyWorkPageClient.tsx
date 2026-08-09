@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
-import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
+import StatusFilter, { type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
 import DeleteTaskDialog from "@/components/dashboard/DeleteTaskDialog";
 import MoveTaskModal from "@/components/dashboard/MoveTaskModal";
@@ -126,6 +126,18 @@ function startBucketOf(
   if (start <= monthEnd) return "month";
   return "other";
 }
+
+// "Overdue" isn't a real row in the statuses table -- it's this same
+// date-derived bucket surfaced as a selectable option inside the Status
+// filter (in addition to the existing standalone "Overdue" master view).
+// Kept in lock-step with toneOf()/startBucketOf() below rather than
+// re-deriving the "is this late" rule a second time.
+function isOverdueTask(t: TaskWithDetails, today: string): boolean {
+  if (t.statusIsComplete) return false;
+  return startBucketOf(t, today, today, today) === "overdue";
+}
+
+const OVERDUE_OPTION = "Overdue";
 
 export default function MyWorkPageClient({
   allStaff,
@@ -270,7 +282,7 @@ export default function MyWorkPageClient({
     [tasks]
   );
   const statusOptions = useMemo(
-    () => Array.from(new Set(tasks.map((t) => t.statusName))).sort(),
+    () => Array.from(new Set([...tasks.map((t) => t.statusName), OVERDUE_OPTION])).sort(),
     [tasks]
   );
   const ownerOptions = useMemo(
@@ -306,11 +318,21 @@ export default function MyWorkPageClient({
     // The master "Completed" view is an explicit request to see completed
     // items -- don't let the default exclude-completed status filter fight
     // it and produce an empty list.
-    if (view !== "completed") {
-      rows = applyStatusFilter(
-        rows.map((t) => ({ ...t, rawStatus: t.statusName })),
-        statusFilter
-      );
+    //
+    // "Overdue" isn't a real rawStatus, so this can't just delegate to
+    // applyStatusFilter's single-string contract (still used unchanged by
+    // Tasks/BAS). Instead each task carries the *set* of status labels it
+    // matches -- its real status, plus "Overdue" when isOverdueTask() says
+    // so -- and membership is OR'd across that set, same include/exclude
+    // semantics as applyStatusFilter: "Show only: Overdue, Open" matches a
+    // task if either tag is selected; "Hide: Overdue" drops it regardless of
+    // its real status.
+    if (view !== "completed" && statusFilter.selected.length > 0) {
+      rows = rows.filter((t) => {
+        const tags = isOverdueTask(t, today) ? [t.statusName, OVERDUE_OPTION] : [t.statusName];
+        const inSet = statusFilter.selected.some((s) => tags.includes(s));
+        return statusFilter.mode === "include" ? inSet : !inSet;
+      });
     }
 
     if (search.trim()) {
@@ -541,7 +563,11 @@ export default function MyWorkPageClient({
                   const textColor = tone === "completed" ? "#a8a69f" : "#111111";
                   const cell: React.CSSProperties = { ...tdStyle, color: textColor };
                   return (
-                    <tr key={t.id} style={rowStyle(tone)}>
+                    <tr
+                      key={t.id}
+                      style={{ ...rowStyle(tone), cursor: canModifyTasks ? "pointer" : "default" }}
+                      onClick={canModifyTasks ? () => setEditingTask(t) : undefined}
+                    >
                       {orderedColumns.map((col) => {
                         const extra: React.CSSProperties =
                           col.field === "title"
@@ -556,7 +582,7 @@ export default function MyWorkPageClient({
                         );
                       })}
                       {canModifyTasks ? (
-                        <td style={{ ...cell, whiteSpace: "nowrap" }}>
+                        <td style={{ ...cell, whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
                           <div style={{ display: "flex", gap: "4px" }}>
                             <button type="button" onClick={() => setEditingTask(t)} style={rowActionStyle}>
                               Edit

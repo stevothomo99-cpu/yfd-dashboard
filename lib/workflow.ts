@@ -87,6 +87,7 @@ interface TaskRow {
   created_at: string;
   updated_at: string;
   karbon_client_name: string | null;
+  details: string | null;
 }
 
 // Just the columns getClientSummaries' tallies read -- it counts tasks
@@ -314,6 +315,7 @@ function hydrateTask(
     isTemporarilyReassigned: Boolean(row.temp_assignee_id && row.temp_assignee_id !== row.assignee_id),
     isOverdue,
     karbonClientName: row.karbon_client_name,
+    details: row.details,
   };
 }
 
@@ -467,6 +469,7 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
       type_id: input.typeId ?? null,
       recurrence: input.recurrence ?? "none",
       karbon_client_name: input.karbonClientName ?? null,
+      details: input.details ?? null,
     })
     .select("id")
     .single<{ id: string }>();
@@ -605,6 +608,7 @@ export async function updateTask(
   if (patch.statusId !== undefined) update.status_id = patch.statusId;
   if (patch.typeId !== undefined) update.type_id = patch.typeId;
   if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
+  if (patch.details !== undefined) update.details = patch.details;
 
   const { data, error } = await admin
     .from("tasks")

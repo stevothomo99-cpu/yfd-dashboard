@@ -65,6 +65,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (body.statusId !== undefined) patch.statusId = body.statusId;
     if (body.typeId !== undefined) patch.typeId = body.typeId;
     if (body.recurrence !== undefined) patch.recurrence = body.recurrence;
+    if (body.details !== undefined) patch.details = body.details?.trim() ? body.details.trim() : null;
 
     if (patch.title !== undefined && !patch.title) {
       return NextResponse.json({ error: "Title cannot be empty" }, { status: 400 });
