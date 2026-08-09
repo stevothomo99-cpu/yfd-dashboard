@@ -6,7 +6,7 @@ import KpiCard from "@/components/dashboard/KpiCard";
 import TaskRow from "@/components/dashboard/TaskRow";
 import StaffSlicer from "@/components/layout/StaffSlicer";
 import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
-import { staffFromAssignees } from "@/lib/utils";
+import { formatDate, staffFromAssignees } from "@/lib/utils";
 import type { KarbonTask, KarbonUser } from "@/types/karbon";
 import type { TasksSnapshot } from "./page";
 
@@ -170,7 +170,7 @@ function addDays(iso: string, days: number): string {
 }
 
 function formatShort(iso: string): string {
-  return new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(iso);
 }
 
 function TaskColumn({

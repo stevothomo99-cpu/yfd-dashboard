@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import PageHeader from "@/components/dashboard/PageHeader";
+import { formatDate } from "@/lib/utils";
 
 interface User {
   id: string;
@@ -318,7 +319,7 @@ export default function UsersPage() {
                       </span>
                     </td>
                     <td className="px-6 py-3 text-sm">
-                      {new Date(user.created_at).toLocaleDateString()}
+                      {formatDate(user.created_at)}
                     </td>
                     <td className="px-6 py-3 text-sm whitespace-nowrap">
                       {user.last_login_at ? (

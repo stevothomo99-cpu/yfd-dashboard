@@ -889,6 +889,25 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
   });
 });
 
+// Every task in the system, hydrated -- feeds the Monday Report's firm-wide
+// aggregation (lib/mondayReport.ts), which needs every open task's due date
+// regardless of who (if anyone) currently owns it, not scoped to any one
+// staff/manager/partner board the way getTasksForStaff/Manager/Partner are.
+export async function getAllTasks(): Promise<TaskWithDetails[]> {
+  const admin = getSupabaseAdmin();
+  const [{ data, error }, lookups] = await Promise.all([
+    admin.from("tasks").select("*").returns<TaskRow[]>(),
+    fetchLookupMaps(),
+  ]);
+
+  if (error) {
+    console.error("[workflow] getAllTasks failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => hydrateTask(row, lookups));
+}
+
 interface CustomerNoteRow {
   id: string;
   customer_id: string;

@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/utils";
 import type { TaskWithDetails } from "@/types/workflow";
 
 interface Props {
@@ -50,7 +51,7 @@ export default function WorkItemMiniTable({ tasks, today, emptyLabel, maxRows = 
                   flexShrink: 0,
                 }}
               >
-                {t.dueDate ?? "No due date"}
+                {t.dueDate ? formatDate(t.dueDate) : "No due date"}
               </div>
             </div>
           );

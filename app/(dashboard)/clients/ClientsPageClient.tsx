@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import ClientTile, { statusOf, type TileStatus } from "@/components/dashboard/ClientTile";
 import TileDrawer from "@/components/dashboard/TileDrawer";
+import { formatDate } from "@/lib/utils";
 import {
   computeHoursByClient,
   UTILISATION_PERIODS,
@@ -381,7 +382,7 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 }
 
 function fmtShortDate(iso: string): string {
-  return new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(iso);
 }
 
 const dateInputStyle: React.CSSProperties = {

@@ -7,7 +7,7 @@ import BasStatusBadge from "@/components/dashboard/BasStatusBadge";
 import StaffAvatar from "@/components/dashboard/StaffAvatar";
 import StaffSlicer from "@/components/layout/StaffSlicer";
 import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
-import { initialsOf, staffFromAssignees } from "@/lib/utils";
+import { formatDate, initialsOf, staffFromAssignees } from "@/lib/utils";
 import type { BasStatus } from "@/types/dashboard";
 import type { KarbonUser, KarbonWorkStatus } from "@/types/karbon";
 import type { BasSnapshot } from "./page";
@@ -25,12 +25,7 @@ const WORK_STATUS_TO_BAS: Record<KarbonWorkStatus, BasStatus> = {
 };
 
 function formatDue(d: string) {
-  if (!d) return "—";
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDate(d);
 }
 
 export default function BasPageClient({

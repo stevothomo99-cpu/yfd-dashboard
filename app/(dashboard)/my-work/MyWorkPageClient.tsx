@@ -7,6 +7,7 @@ import NewTaskModal from "@/components/dashboard/NewTaskModal";
 import DeleteTaskDialog from "@/components/dashboard/DeleteTaskDialog";
 import MoveTaskModal from "@/components/dashboard/MoveTaskModal";
 import CombineTaskModal from "@/components/dashboard/CombineTaskModal";
+import { formatDate } from "@/lib/utils";
 import type {
   TaskWithDetails,
   WorkflowCustomer,
@@ -708,9 +709,9 @@ function renderCell(field: SortField, t: TaskWithDetails, staffId: string): Reac
     case "assignedToName":
       return assignedToName(t);
     case "startDate":
-      return t.startDate ?? "—";
+      return formatDate(t.startDate);
     case "dueDate":
-      return t.dueDate ?? "—";
+      return formatDate(t.dueDate);
     default:
       return null;
   }

@@ -5,7 +5,7 @@ import StaffAvatar from "./StaffAvatar";
 import CopyTaskModal from "./CopyTaskModal";
 import SaveTemplateModal from "./SaveTemplateModal";
 import ApplyTemplateModal from "./ApplyTemplateModal";
-import { initialsOf } from "@/lib/utils";
+import { formatDate, initialsOf } from "@/lib/utils";
 import type { ClientSummary, CustomerFile, CustomerNote, JobWithManager, TaskWithDetails } from "@/types/workflow";
 
 interface Props {
@@ -415,7 +415,7 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: "13px", color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.fileName}</div>
                     <div style={{ fontSize: "11px", color: "#888780", marginTop: "4px" }}>
-                      {fmtBytes(f.sizeBytes)} · {f.uploadedByName ?? "Unknown"} · {new Date(f.createdAt).toLocaleDateString("en-AU")}
+                      {fmtBytes(f.sizeBytes)} · {f.uploadedByName ?? "Unknown"} · {formatDate(f.createdAt)}
                     </div>
                   </div>
                   {f.downloadUrl ? (
@@ -477,7 +477,7 @@ function WorkItemRow({
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginTop: "4px" }}>
           {task.typeName ? `${task.typeName} · ` : ""}
-          {task.assigneeName ?? "Unassigned"} · Due {task.dueDate ?? "—"}
+          {task.assigneeName ?? "Unassigned"} · Due {formatDate(task.dueDate)}
         </div>
       </div>
       <button
