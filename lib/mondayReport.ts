@@ -240,12 +240,79 @@ export interface TimesheetSummaryRow {
   fytdHours: number;
 }
 
+export interface TopOverdueClient {
+  customerName: string;
+  count: number;
+  oldestDueDate: string;
+  // The staff member currently holding the most of this client's overdue
+  // tasks -- an acceptable simplification over listing every holder, per
+  // CLAUDE.md's brief for this section (a partner routing work needs a name
+  // to call, not a full breakdown). Null if every one of the client's
+  // overdue tasks is unassigned.
+  topStaffName: string | null;
+}
+
 export interface CombinedReportData {
   window: ReportWindow;
   firmTotals: FirmTotals;
   staffSummaries: StaffMiniSummary[];
+  topOverdueClients: TopOverdueClient[];
   timesheetSummaries: TimesheetSummaryRow[];
   timesheetsAvailable: boolean;
+}
+
+// How many clients the firm-wide "Top overdue clients" section on the
+// combined/Partner report shows -- deliberately small since this is a
+// partner-facing summary of where risk is concentrated, not a worklist.
+export const TOP_OVERDUE_CLIENTS_LIMIT = 10;
+
+// Firm-wide overdue tasks grouped by client (across every staff member,
+// deduplicated the same way computeFirmTotals is -- straight off allTasks,
+// not summed from per-staff groups, so a temporarily reassigned task isn't
+// double-counted). Returns the top N clients by overdue count, along with
+// whichever staff member currently holds the most of that client's overdue
+// tasks.
+function computeTopOverdueClients(
+  allTasks: TaskWithDetails[],
+  window: ReportWindow,
+  staffById: Map<string, string>,
+): TopOverdueClient[] {
+  const byCustomer = new Map<string, { dueDates: string[]; staffCounts: Map<string, number> }>();
+
+  for (const task of allTasks) {
+    if (classify(task, window) !== "overdue") continue;
+    let entry = byCustomer.get(task.customerName);
+    if (!entry) {
+      entry = { dueDates: [], staffCounts: new Map() };
+      byCustomer.set(task.customerName, entry);
+    }
+    entry.dueDates.push(task.dueDate as string);
+    const effectiveAssigneeId = task.tempAssigneeId ?? task.assigneeId;
+    if (effectiveAssigneeId) {
+      entry.staffCounts.set(effectiveAssigneeId, (entry.staffCounts.get(effectiveAssigneeId) ?? 0) + 1);
+    }
+  }
+
+  const clients: TopOverdueClient[] = Array.from(byCustomer.entries()).map(([customerName, entry]) => {
+    let topStaffId: string | null = null;
+    let topStaffCount = 0;
+    for (const [staffId, count] of entry.staffCounts) {
+      if (count > topStaffCount) {
+        topStaffId = staffId;
+        topStaffCount = count;
+      }
+    }
+    return {
+      customerName,
+      count: entry.dueDates.length,
+      oldestDueDate: entry.dueDates.reduce((oldest, d) => (d < oldest ? d : oldest)),
+      topStaffName: topStaffId ? staffById.get(topStaffId) ?? null : null,
+    };
+  });
+
+  return clients
+    .sort((a, b) => b.count - a.count || a.oldestDueDate.localeCompare(b.oldestDueDate))
+    .slice(0, TOP_OVERDUE_CLIENTS_LIMIT);
 }
 
 // Total hours actually logged (client + leave + other-internal + idle -- see
@@ -340,9 +407,11 @@ export async function buildCombinedReportData(
   });
 
   const firmTotals = computeFirmTotals(allTasks, window);
+  const staffNameById = new Map(staffList.map((s) => [s.id, s.name]));
+  const topOverdueClients = computeTopOverdueClients(allTasks, window, staffNameById);
   const { rows: timesheetSummaries, available: timesheetsAvailable } = await buildTimesheetSummaries(staffList, window);
 
-  return { window, firmTotals, staffSummaries, timesheetSummaries, timesheetsAvailable };
+  return { window, firmTotals, staffSummaries, topOverdueClients, timesheetSummaries, timesheetsAvailable };
 }
 
 // Recipients, per CLAUDE.md's brief: individual reports go to every included
