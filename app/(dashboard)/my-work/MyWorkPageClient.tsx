@@ -2,8 +2,11 @@
 
 import { useCallback, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
-import StatusFilter, { applyStatusFilter, type StatusFilterValue } from "@/components/layout/StatusFilter";
+import StatusFilter, { type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
+import DeleteTaskDialog from "@/components/dashboard/DeleteTaskDialog";
+import MoveTaskModal from "@/components/dashboard/MoveTaskModal";
+import CombineTaskModal from "@/components/dashboard/CombineTaskModal";
 import type {
   TaskWithDetails,
   WorkflowCustomer,
@@ -34,12 +37,15 @@ const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
   quarterly: "Quarterly",
 };
 
-type MasterView = "all" | "overdue" | "week" | "completed";
+type MasterView = "all" | "overdue" | "today" | "week" | "month" | "other" | "completed";
 
 const MASTER_VIEWS: { value: MasterView; label: string }[] = [
   { value: "all", label: "All Work" },
   { value: "overdue", label: "Overdue" },
+  { value: "today", label: "Due today" },
   { value: "week", label: "Due this week" },
+  { value: "month", label: "Due this month" },
+  { value: "other", label: "Other" },
   { value: "completed", label: "Completed" },
 ];
 
@@ -96,6 +102,43 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function endOfMonth(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + 1, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+// Buckets are cumulative by Start Date, same convention the old due-this-week
+// view used (it already folded overdue in) -- so "this week" and "this
+// month" surface everything that needs attention by that point, not just the
+// items landing exactly in that slice.
+function startBucketOf(
+  t: TaskWithDetails,
+  today: string,
+  weekEnd: string,
+  monthEnd: string
+): "overdue" | "today" | "week" | "month" | "other" {
+  const start = t.startDate;
+  if (!start) return "other";
+  if (start < today) return "overdue";
+  if (start === today) return "today";
+  if (start <= weekEnd) return "week";
+  if (start <= monthEnd) return "month";
+  return "other";
+}
+
+// "Overdue" isn't a real row in the statuses table -- it's this same
+// date-derived bucket surfaced as a selectable option inside the Status
+// filter (in addition to the existing standalone "Overdue" master view).
+// Kept in lock-step with toneOf()/startBucketOf() below rather than
+// re-deriving the "is this late" rule a second time.
+function isOverdueTask(t: TaskWithDetails, today: string): boolean {
+  if (t.statusIsComplete) return false;
+  return startBucketOf(t, today, today, today) === "overdue";
+}
+
+const OVERDUE_OPTION = "Overdue";
+
 export default function MyWorkPageClient({
   allStaff,
   isAdmin,
@@ -113,11 +156,18 @@ export default function MyWorkPageClient({
   const [loading, setLoading] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
+  const [deletingTask, setDeletingTask] = useState<TaskWithDetails | null>(null);
+  const [movingTask, setMovingTask] = useState<TaskWithDetails | null>(null);
+  const [combiningTask, setCombiningTask] = useState<TaskWithDetails | null>(null);
 
-  const [view, setView] = useState<MasterView>("all");
+  // Defaults to "Due this week" -- everything that needs to start in the
+  // next 7 days (cumulative with overdue/today) is what a person wants to
+  // see the moment they land here; "All Work" is one click away.
+  const [view, setView] = useState<MasterView>("week");
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(true);
   const [clientFilter, setClientFilter] = useState<string>("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
   // Defaults to excluding whatever status(es) are marked complete, so a
   // completed backlog doesn't clutter the default view -- computed from the
   // actual data rather than hardcoding "Completed" as a literal.
@@ -193,9 +243,10 @@ export default function MyWorkPageClient({
   // boundary.
   const canModifyTasks = isAdmin || Boolean(defaultStaffId);
 
-  async function handleDelete(t: TaskWithDetails) {
-    if (!window.confirm(`Delete "${t.title}"? This can't be undone.`)) return;
-    const res = await fetch(`/api/workflow/tasks/${t.id}`, { method: "DELETE" });
+  async function deleteTaskRequest(taskId: string, scope: "occurrence" | "series") {
+    const res = await fetch(`/api/workflow/tasks/${taskId}${scope === "series" ? "?scope=series" : ""}`, {
+      method: "DELETE",
+    });
     if (res.ok) {
       await refreshTasks(staffId);
     } else {
@@ -204,15 +255,34 @@ export default function MyWorkPageClient({
     }
   }
 
+  // A one-off task keeps the plain confirm it always had. A recurring one
+  // needs a third option beyond confirm()'s OK/Cancel -- see
+  // DeleteTaskDialog -- since "delete" is ambiguous once other occurrences
+  // are linked to it.
+  function handleDelete(t: TaskWithDetails) {
+    if (t.recurrence === "none") {
+      if (window.confirm(`Delete "${t.title}"? This can't be undone.`)) {
+        deleteTaskRequest(t.id, "occurrence");
+      }
+      return;
+    }
+    setDeletingTask(t);
+  }
+
   const today = todayIso();
-  const weekEnd = addDays(today, 7);
+  const weekEnd = addDays(today, 6);
+  const monthEnd = endOfMonth(today);
 
   const clientOptions = useMemo(
     () => Array.from(new Set(tasks.map((t) => t.customerName))).sort(),
     [tasks]
   );
+  const typeOptions = useMemo(
+    () => Array.from(new Set(tasks.map((t) => t.typeName).filter((n): n is string => Boolean(n)))).sort(),
+    [tasks]
+  );
   const statusOptions = useMemo(
-    () => Array.from(new Set(tasks.map((t) => t.statusName))).sort(),
+    () => Array.from(new Set([...tasks.map((t) => t.statusName), OVERDUE_OPTION])).sort(),
     [tasks]
   );
   const ownerOptions = useMemo(
@@ -224,11 +294,22 @@ export default function MyWorkPageClient({
   const filtered = useMemo(() => {
     let rows = tasks;
 
-    if (view === "overdue") rows = rows.filter((t) => toneOf(t, today, weekEnd) === "overdue");
-    else if (view === "week") rows = rows.filter((t) => toneOf(t, today, weekEnd) === "overdue" || toneOf(t, today, weekEnd) === "week");
-    else if (view === "completed") rows = rows.filter((t) => t.statusIsComplete);
+    if (view === "completed") {
+      rows = rows.filter((t) => t.statusIsComplete);
+    } else if (view !== "all") {
+      const targets: Record<Exclude<MasterView, "all" | "completed">, ("overdue" | "today" | "week" | "month" | "other")[]> = {
+        overdue: ["overdue"],
+        today: ["today"],
+        week: ["overdue", "today", "week"],
+        month: ["overdue", "today", "week", "month"],
+        other: ["other"],
+      };
+      const wanted = targets[view];
+      rows = rows.filter((t) => wanted.includes(startBucketOf(t, today, weekEnd, monthEnd)));
+    }
 
     if (clientFilter) rows = rows.filter((t) => t.customerName === clientFilter);
+    if (typeFilter) rows = rows.filter((t) => t.typeName === typeFilter);
     if (ownerFilter) rows = rows.filter((t) => ownerName(t) === ownerFilter);
     if (assignedToFilter) rows = rows.filter((t) => assignedToName(t) === assignedToFilter);
     if (startFrom) rows = rows.filter((t) => t.startDate && t.startDate >= startFrom);
@@ -237,11 +318,21 @@ export default function MyWorkPageClient({
     // The master "Completed" view is an explicit request to see completed
     // items -- don't let the default exclude-completed status filter fight
     // it and produce an empty list.
-    if (view !== "completed") {
-      rows = applyStatusFilter(
-        rows.map((t) => ({ ...t, rawStatus: t.statusName })),
-        statusFilter
-      );
+    //
+    // "Overdue" isn't a real rawStatus, so this can't just delegate to
+    // applyStatusFilter's single-string contract (still used unchanged by
+    // Tasks/BAS). Instead each task carries the *set* of status labels it
+    // matches -- its real status, plus "Overdue" when isOverdueTask() says
+    // so -- and membership is OR'd across that set, same include/exclude
+    // semantics as applyStatusFilter: "Show only: Overdue, Open" matches a
+    // task if either tag is selected; "Hide: Overdue" drops it regardless of
+    // its real status.
+    if (view !== "completed" && statusFilter.selected.length > 0) {
+      rows = rows.filter((t) => {
+        const tags = isOverdueTask(t, today) ? [t.statusName, OVERDUE_OPTION] : [t.statusName];
+        const inSet = statusFilter.selected.some((s) => tags.includes(s));
+        return statusFilter.mode === "include" ? inSet : !inSet;
+      });
     }
 
     if (search.trim()) {
@@ -258,6 +349,7 @@ export default function MyWorkPageClient({
     tasks,
     view,
     clientFilter,
+    typeFilter,
     statusFilter,
     ownerFilter,
     assignedToFilter,
@@ -268,6 +360,7 @@ export default function MyWorkPageClient({
     sortDir,
     today,
     weekEnd,
+    monthEnd,
   ]);
 
   function handleSort(field: SortField) {
@@ -295,7 +388,7 @@ export default function MyWorkPageClient({
   }
 
   return (
-    <div>
+    <div style={pageWideStyle}>
       <PageHeader
         title="My Work"
         subtitle={
@@ -370,6 +463,15 @@ export default function MyWorkPageClient({
               </option>
             ))}
           </select>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={selectStyle}>
+            <option value="">All categories</option>
+            {typeOptions.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+
           <StatusFilter options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
 
           <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} style={selectStyle}>
@@ -397,11 +499,12 @@ export default function MyWorkPageClient({
             <input type="date" value={startTo} onChange={(e) => setStartTo(e.target.value)} style={dateInputStyle} />
           </label>
 
-          {ownerFilter || assignedToFilter || startFrom || startTo || clientFilter || statusFilter.selected.length > 0 ? (
+          {ownerFilter || assignedToFilter || startFrom || startTo || clientFilter || typeFilter || statusFilter.selected.length > 0 ? (
             <button
               type="button"
               onClick={() => {
                 setClientFilter("");
+                setTypeFilter("");
                 setOwnerFilter("");
                 setAssignedToFilter("");
                 setStartFrom("");
@@ -422,7 +525,7 @@ export default function MyWorkPageClient({
         <EmptyState message="No work items match the current filters." />
       ) : (
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", overflow: "hidden", marginTop: "12px" }}>
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 260px)", overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1080px" }}>
               <thead>
                 <tr style={{ background: "#f5f4f0", borderBottom: "0.5px solid #e1e0d9" }}>
@@ -460,7 +563,11 @@ export default function MyWorkPageClient({
                   const textColor = tone === "completed" ? "#a8a69f" : "#111111";
                   const cell: React.CSSProperties = { ...tdStyle, color: textColor };
                   return (
-                    <tr key={t.id} style={rowStyle(tone)}>
+                    <tr
+                      key={t.id}
+                      style={{ ...rowStyle(tone), cursor: canModifyTasks ? "pointer" : "default" }}
+                      onClick={canModifyTasks ? () => setEditingTask(t) : undefined}
+                    >
                       {orderedColumns.map((col) => {
                         const extra: React.CSSProperties =
                           col.field === "title"
@@ -475,10 +582,16 @@ export default function MyWorkPageClient({
                         );
                       })}
                       {canModifyTasks ? (
-                        <td style={{ ...cell, whiteSpace: "nowrap" }}>
+                        <td style={{ ...cell, whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
                           <div style={{ display: "flex", gap: "4px" }}>
                             <button type="button" onClick={() => setEditingTask(t)} style={rowActionStyle}>
                               Edit
+                            </button>
+                            <button type="button" onClick={() => setMovingTask(t)} style={rowActionStyle}>
+                              Move to
+                            </button>
+                            <button type="button" onClick={() => setCombiningTask(t)} style={rowActionStyle}>
+                              Combine
                             </button>
                             <button
                               type="button"
@@ -519,6 +632,36 @@ export default function MyWorkPageClient({
           statuses={statuses}
           taskTypes={taskTypes}
           editTask={editingTask}
+        />
+      ) : null}
+
+      {deletingTask ? (
+        <DeleteTaskDialog
+          task={deletingTask}
+          onClose={() => setDeletingTask(null)}
+          onConfirm={(scope) => {
+            const task = deletingTask;
+            setDeletingTask(null);
+            deleteTaskRequest(task.id, scope);
+          }}
+        />
+      ) : null}
+
+      {movingTask ? (
+        <MoveTaskModal
+          task={movingTask}
+          clients={clients}
+          onClose={() => setMovingTask(null)}
+          onMoved={() => refreshTasks(staffId)}
+        />
+      ) : null}
+
+      {combiningTask ? (
+        <CombineTaskModal
+          task={combiningTask}
+          candidates={tasks.filter((t) => t.id !== combiningTask.id)}
+          onClose={() => setCombiningTask(null)}
+          onCombined={() => refreshTasks(staffId)}
         />
       ) : null}
     </div>
@@ -573,10 +716,15 @@ function renderCell(field: SortField, t: TaskWithDetails, staffId: string): Reac
   }
 }
 
+// Row colour follows the same Start Date basis as the master view filters
+// (startBucketOf) rather than Due Date, so a task that's overdue to *start*
+// stands out in red even inside the cumulative "Due this week" default view
+// -- not just when the Overdue view is explicitly selected.
 function toneOf(t: TaskWithDetails, today: string, weekEnd: string): "overdue" | "week" | "normal" | "completed" {
   if (t.statusIsComplete) return "completed";
-  if (t.dueDate && t.dueDate < today) return "overdue";
-  if (t.dueDate && t.dueDate <= weekEnd) return "week";
+  const bucket = startBucketOf(t, today, weekEnd, weekEnd);
+  if (bucket === "overdue") return "overdue";
+  if (bucket === "today" || bucket === "week") return "week";
   return "normal";
 }
 
@@ -624,6 +772,18 @@ function EmptyState({ message }: { message: string }) {
     </div>
   );
 }
+
+// Breaks out of the shared dashboard layout's centered 1400px column (see
+// app/(dashboard)/layout.tsx) just for this page -- My Work's table is data-
+// dense with 9 columns and can have hundreds of rows, so it benefits from
+// most of the viewport width. Other dashboard pages aren't this wide/dense,
+// so the shared layout itself is left alone.
+const pageWideStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: "calc(100vw - 2rem)",
+  marginLeft: "calc(50% - 50vw + 1rem)",
+  marginRight: "calc(50% - 50vw + 1rem)",
+};
 
 const selectStyle: React.CSSProperties = {
   fontSize: "12px",
@@ -698,6 +858,15 @@ const thStyle: React.CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: "0.03em",
   whiteSpace: "nowrap",
+  // Pinned to the top of the table's own scroll container (see the
+  // overflowY:"auto" wrapper around <table>) so headers stay visible while
+  // scrolling through hundreds of rows. Needs its own opaque background --
+  // th doesn't inherit the <tr>'s background once it's the element being
+  // stuck -- and a z-index above the row cells it scrolls over.
+  position: "sticky",
+  top: 0,
+  background: "#f5f4f0",
+  zIndex: 2,
 };
 
 const tdStyle: React.CSSProperties = {

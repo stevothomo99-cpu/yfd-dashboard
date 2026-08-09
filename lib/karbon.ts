@@ -41,8 +41,19 @@ export function isKarbonConfigured(): boolean {
   return Boolean(process.env.KARBON_API_KEY);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const MAX_RATE_LIMIT_RETRIES = 5;
+
 // Accepts either a path ("/WorkItems?...") or an absolute URL, since Karbon's
 // OData @odata.nextLink is returned as a full URL for pagination.
+//
+// A full unfiltered /WorkItems pull runs to hundreds of pages (this tenant
+// has 30k+ historical rows), which reliably trips Karbon's rate limit
+// partway through -- retry on 429 using its Retry-After header, falling
+// back to exponential backoff if that header is missing.
 async function karbonFetch<T>(pathOrUrl: string, init?: RequestInit): Promise<T> {
   if (!isKarbonConfigured()) throw new KarbonNotConfiguredError();
   const headers = new Headers(init?.headers);
@@ -53,12 +64,20 @@ async function karbonFetch<T>(pathOrUrl: string, init?: RequestInit): Promise<T>
     headers.set("AccessKey", process.env.KARBON_ACCESS_KEY);
   }
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : baseUrl() + pathOrUrl;
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Karbon ${pathOrUrl} failed: ${res.status} ${body}`);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { ...init, headers });
+    if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+      const retryAfter = Number(res.headers.get("Retry-After"));
+      await res.text().catch(() => "");
+      await sleep((Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2 ** attempt) * 1000);
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Karbon ${pathOrUrl} failed: ${res.status} ${body}`);
+    }
+    return (await res.json()) as T;
   }
-  return (await res.json()) as T;
 }
 
 interface ODataList<T> {
@@ -69,17 +88,58 @@ interface ODataList<T> {
 // Karbon v3 has a single work-tracking resource (/WorkItems) — there is no
 // separate Tasks endpoint. Both "tasks" and "BAS work" views in this app are
 // derived from WorkItems, optionally narrowed by an OData $filter.
+//
+// Karbon's /WorkItems never sends "@odata.nextLink" (confirmed live: a page
+// only ever comes back with @odata.context/@odata.count/value), so paging
+// has to be driven by $skip -- relying on nextLink silently capped every
+// unfiltered pull at the first PAGE_SIZE rows, which for a tenant with years
+// of history meant only its oldest, already-completed WorkItems ever came
+// back.
 async function fetchAllWorkItems(filter?: string): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
-  let next: string | undefined =
-    `/WorkItems?$top=${PAGE_SIZE}` + (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
-  while (next) {
-    const url: string = next;
-    const page: ODataList<Record<string, unknown>> = await karbonFetch(url);
+  const base = `/WorkItems?$top=${PAGE_SIZE}` + (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
+  let skip = 0;
+  for (;;) {
+    const page: ODataList<Record<string, unknown>> = await karbonFetch(`${base}&$skip=${skip}`);
     rows.push(...page.value);
-    next = page["@odata.nextLink"];
+    if (page.value.length < PAGE_SIZE) break;
+    skip += PAGE_SIZE;
   }
   return rows;
+}
+
+// Raw, unmapped WorkItem rows -- unlike fetchKarbonTasks/fetchKarbonWorkItems,
+// nothing here is picked out into a fixed shape. The Karbon Import mapping
+// page needs the tenant's actual field names (whatever Karbon calls them) so
+// a person can drag them onto this app's task fields, not the narrow subset
+// those two functions already commit to.
+export async function fetchKarbonWorkItemsSample(limit: number): Promise<Record<string, unknown>[]> {
+  const page: ODataList<Record<string, unknown>> = await karbonFetch(`/WorkItems?$top=${limit}`);
+  return page.value;
+}
+
+// The real Karbon → task import pulls every WorkItem in the tenant, not a
+// bounded sample -- deliberately no date filter, since a one-off migration
+// import is meant to bring in everything Karbon currently has, unlike
+// fetchKarbonTasks/fetchKarbonWorkItems which scope to a recent window for
+// the day-to-day dashboard views.
+export async function fetchAllKarbonWorkItemsRaw(): Promise<Record<string, unknown>[]> {
+  return fetchAllWorkItems();
+}
+
+// Recurrence isn't a WorkItem field -- Karbon models it on a separate
+// WorkSchedules resource (RecurrenceFrequency, FrequencyDescription,
+// CustomFrequencyUnits/Multiple). A WorkItem only carries a WorkScheduleKey,
+// null for one-off work and populated for a recurring occurrence, which is
+// what links the two. Returns null on any lookup failure (deleted/renamed
+// schedule, transient error) so one bad key doesn't fail the whole sample.
+export async function fetchKarbonWorkSchedule(scheduleKey: string): Promise<Record<string, unknown> | null> {
+  try {
+    return await karbonFetch<Record<string, unknown>>(`/WorkSchedules/${encodeURIComponent(scheduleKey)}`);
+  } catch (err) {
+    console.error("[karbon] fetchKarbonWorkSchedule failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 // /Users is confirmed to exist in Karbon's public OpenAPI spec (GET /v3/Users)
@@ -90,13 +150,15 @@ async function fetchAllWorkItems(filter?: string): Promise<Record<string, unknow
 // empty string rather than throwing — verify against real tenant data once
 // this is live.
 async function fetchAllUsers(): Promise<Record<string, unknown>[]> {
+  // Same $skip-based paging as fetchAllWorkItems -- Karbon doesn't send
+  // "@odata.nextLink" on this resource either.
   const rows: Record<string, unknown>[] = [];
-  let next: string | undefined = `/Users?$top=${PAGE_SIZE}`;
-  while (next) {
-    const url: string = next;
-    const page: ODataList<Record<string, unknown>> = await karbonFetch(url);
+  let skip = 0;
+  for (;;) {
+    const page: ODataList<Record<string, unknown>> = await karbonFetch(`/Users?$top=${PAGE_SIZE}&$skip=${skip}`);
     rows.push(...page.value);
-    next = page["@odata.nextLink"];
+    if (page.value.length < PAGE_SIZE) break;
+    skip += PAGE_SIZE;
   }
   return rows;
 }

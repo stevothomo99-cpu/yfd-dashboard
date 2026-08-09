@@ -120,28 +120,36 @@ export default function StatusFilter({ options, value, onChange }: StatusFilterP
               overflowY: "auto",
             }}
           >
-            {options.map((status) => (
-              <label
-                key={status}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "12px",
-                  color: "#111111",
-                  padding: "5px 6px",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={value.selected.includes(status)}
-                  onChange={() => toggleStatus(status)}
-                />
-                {status}
-              </label>
-            ))}
+            {options.map((status) => {
+              // "Overdue" is date-derived rather than a real DB status (see
+              // My Work's isOverdueTask) -- kept visually distinct here using
+              // the same red convention as overdue rows elsewhere, wherever
+              // a page chooses to offer it as an option.
+              const isOverdueOption = status === "Overdue";
+              return (
+                <label
+                  key={status}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "12px",
+                    color: isOverdueOption ? "#c0392b" : "#111111",
+                    fontWeight: isOverdueOption ? 600 : 400,
+                    padding: "5px 6px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={value.selected.includes(status)}
+                    onChange={() => toggleStatus(status)}
+                  />
+                  {status}
+                </label>
+              );
+            })}
           </div>
 
           {value.selected.length > 0 ? (

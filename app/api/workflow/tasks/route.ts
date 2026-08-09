@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
       statusId,
       typeId: body.typeId ?? null,
       recurrence: body.recurrence ?? "none",
+      details: body.details?.trim() ? body.details.trim() : null,
     });
 
     if (!task) {

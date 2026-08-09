@@ -86,6 +86,8 @@ interface TaskRow {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  karbon_client_name: string | null;
+  details: string | null;
 }
 
 // Just the columns getClientSummaries' tallies read -- it counts tasks
@@ -312,6 +314,8 @@ function hydrateTask(
     tempAssigneeName: tempAssignee?.name ?? null,
     isTemporarilyReassigned: Boolean(row.temp_assignee_id && row.temp_assignee_id !== row.assignee_id),
     isOverdue,
+    karbonClientName: row.karbon_client_name,
+    details: row.details,
   };
 }
 
@@ -464,6 +468,8 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
       status_id: input.statusId,
       type_id: input.typeId ?? null,
       recurrence: input.recurrence ?? "none",
+      karbon_client_name: input.karbonClientName ?? null,
+      details: input.details ?? null,
     })
     .select("id")
     .single<{ id: string }>();
@@ -475,10 +481,119 @@ export async function createTask(input: CreateTaskInput): Promise<{ id: string }
   return data;
 }
 
+// A recurring series is a flat star, not a chain: the first task ever
+// created for it is the "root" (recurrence_parent_id null); every occurrence
+// generated after that points directly at the root, never at the previous
+// occurrence. That keeps "who else is in this series" a single query
+// regardless of how many occurrences have accumulated.
+function seriesRootIdOf(task: Pick<TaskRow, "id" | "recurrence_parent_id">): string {
+  return task.recurrence_parent_id ?? task.id;
+}
+
+// Every task in the same series as seriesRootId, root included.
+async function getSeriesMembers(seriesRootId: string): Promise<TaskRow[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("tasks")
+    .select("*")
+    .or(`id.eq.${seriesRootId},recurrence_parent_id.eq.${seriesRootId}`)
+    .returns<TaskRow[]>();
+  if (error) {
+    console.error("[workflow] getSeriesMembers failed:", error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+// Picks out the fields that describe the recurring item itself rather than
+// one occurrence of it -- customer/title/assignee/category/recurrence. This
+// is what "linked" means. due_date/start_date/status/completion are
+// deliberately excluded: each occurrence has its own schedule and its own
+// progress, and propagating a due-date edit would move every other
+// occurrence's deadline along with it.
+function sharedFieldUpdate(patch: UpdateTaskInput): Record<string, unknown> | null {
+  const update: Record<string, unknown> = {};
+  if (patch.customerId !== undefined) update.customer_id = patch.customerId;
+  if (patch.title !== undefined) update.title = patch.title;
+  if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
+  if (patch.typeId !== undefined) update.type_id = patch.typeId;
+  if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
+  return Object.keys(update).length > 0 ? update : null;
+}
+
+function advanceDueDate(dueDateIso: string, recurrence: RecurrenceInterval): string {
+  const d = new Date(dueDateIso + "T00:00:00Z");
+  switch (recurrence) {
+    case "daily":
+      d.setUTCDate(d.getUTCDate() + 1);
+      break;
+    case "weekly":
+      d.setUTCDate(d.getUTCDate() + 7);
+      break;
+    case "fortnightly":
+      d.setUTCDate(d.getUTCDate() + 14);
+      break;
+    case "monthly":
+      d.setUTCMonth(d.getUTCMonth() + 1);
+      break;
+    case "quarterly":
+      d.setUTCMonth(d.getUTCMonth() + 3);
+      break;
+    case "none":
+      break;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+// Completing an occurrence of a recurring task rolls the series forward --
+// due date advanced by the interval, everything else (client/title/
+// assignee/category) copied from the task as it stands right now, so an
+// edit made before completing it carries into the next occurrence. Guarded
+// against double-generation: if the series already has an open member
+// (e.g. someone completed the same occurrence twice, or a sibling was
+// already generated), nothing new is created.
+async function generateNextOccurrence(completed: TaskRow, lookups: Awaited<ReturnType<typeof fetchLookupMaps>>): Promise<void> {
+  if (completed.recurrence === "none") return;
+
+  const seriesRootId = seriesRootIdOf(completed);
+  const members = await getSeriesMembers(seriesRootId);
+  const hasOpenMember = members.some((m) => !(lookups.statusesById.get(m.status_id)?.is_complete ?? false));
+  if (hasOpenMember) return;
+
+  const statusId = await defaultOpenStatusId();
+  if (!statusId) {
+    console.error("[workflow] generateNextOccurrence: no statuses configured");
+    return;
+  }
+
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("tasks").insert({
+    customer_id: completed.customer_id,
+    title: completed.title,
+    assignee_id: completed.assignee_id,
+    type_id: completed.type_id,
+    recurrence: completed.recurrence,
+    due_date: advanceDueDate(completed.due_date ?? new Date().toISOString().slice(0, 10), completed.recurrence),
+    start_date: null,
+    status_id: statusId,
+    recurrence_parent_id: seriesRootId,
+  });
+  if (error) console.error("[workflow] generateNextOccurrence (insert) failed:", error.message);
+}
+
 // Edits an existing task -- only fields present on patch are touched (see
 // UpdateTaskInput's comment), so e.g. reassigning just the assignee doesn't
 // require re-sending the client/title/etc. Returns the freshly-hydrated task
 // so the caller can drop it straight into its board state without a refetch.
+//
+// Two side effects beyond the row itself, both confirmed directly:
+//  - Editing a shared field (client/title/assignee/category/recurrence)
+//    propagates to every other NOT-completed member of the same series --
+//    that's what "linked" means. Attempted unconditionally when a shared
+//    field changes; if this task has no siblings the update just matches
+//    zero rows.
+//  - Marking an occurrence complete rolls the series forward -- see
+//    generateNextOccurrence.
 export async function updateTask(
   taskId: string,
   patch: UpdateTaskInput
@@ -493,6 +608,7 @@ export async function updateTask(
   if (patch.statusId !== undefined) update.status_id = patch.statusId;
   if (patch.typeId !== undefined) update.type_id = patch.typeId;
   if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
+  if (patch.details !== undefined) update.details = patch.details;
 
   const { data, error } = await admin
     .from("tasks")
@@ -505,10 +621,33 @@ export async function updateTask(
     console.error("[workflow] updateTask failed:", error.message);
     return null;
   }
+
   const lookups = await fetchLookupMaps();
+
+  const shared = sharedFieldUpdate(patch);
+  if (shared) {
+    const seriesRootId = seriesRootIdOf(data);
+    const siblingIds = (await getSeriesMembers(seriesRootId))
+      .filter((m) => m.id !== data.id && !(lookups.statusesById.get(m.status_id)?.is_complete ?? false))
+      .map((m) => m.id);
+    if (siblingIds.length > 0) {
+      const { error: propagateError } = await admin.from("tasks").update(shared).in("id", siblingIds);
+      if (propagateError) {
+        console.error("[workflow] updateTask (series propagation) failed:", propagateError.message);
+      }
+    }
+  }
+
+  if (lookups.statusesById.get(data.status_id)?.is_complete) {
+    await generateNextOccurrence(data, lookups);
+  }
+
   return hydrateTask(data, lookups);
 }
 
+// Deletes just this one occurrence -- the rest of its series, if any, is
+// untouched. This is the default; see deleteTaskSeries for "remove the
+// whole thing".
 export async function deleteTask(taskId: string): Promise<boolean> {
   const admin = getSupabaseAdmin();
   const { error } = await admin.from("tasks").delete().eq("id", taskId);
@@ -518,6 +657,98 @@ export async function deleteTask(taskId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+// Removes the whole series: taskId itself plus every other NOT-completed
+// member. Completed occurrences are left alone as a record of work actually
+// done -- confirmed directly. If the deleted set includes the series root,
+// any surviving completed member's recurrence_parent_id is nulled out by
+// the column's ON DELETE SET NULL rather than the row itself being
+// destroyed, so its own history (title/due date/completion) stays intact,
+// just no longer linked to a series that no longer exists.
+export async function deleteTaskSeries(taskId: string): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  const { data: anchor, error: fetchError } = await admin
+    .from("tasks")
+    .select("id, recurrence_parent_id")
+    .eq("id", taskId)
+    .single<Pick<TaskRow, "id" | "recurrence_parent_id">>();
+
+  if (fetchError || !anchor) {
+    console.error("[workflow] deleteTaskSeries (fetch anchor) failed:", fetchError?.message);
+    return false;
+  }
+
+  const [members, lookups] = await Promise.all([
+    getSeriesMembers(seriesRootIdOf(anchor)),
+    fetchLookupMaps(),
+  ]);
+  const openIds = members
+    .filter((m) => !(lookups.statusesById.get(m.status_id)?.is_complete ?? false))
+    .map((m) => m.id);
+  if (openIds.length === 0) return true;
+
+  const { error } = await admin.from("tasks").delete().in("id", openIds);
+  if (error) {
+    console.error("[workflow] deleteTaskSeries failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+// Merges sourceId into intoTaskId for cleaning up admin/import mistakes
+// (e.g. re-running Karbon Import before dedupe existed produced duplicate
+// tasks for the same WorkItem). The target's own values always win; this
+// only backfills fields the target is missing using the duplicate's values
+// -- most usefully karbon_client_name, so combining a correctly-clientd
+// duplicate with the one still carrying the original Karbon reference
+// doesn't lose that reference. The source is deleted once backfilled.
+export async function combineTasks(sourceId: string, intoTaskId: string): Promise<TaskWithDetails | null> {
+  if (sourceId === intoTaskId) return null;
+
+  const admin = getSupabaseAdmin();
+  const [{ data: source, error: sourceError }, { data: target, error: targetError }] = await Promise.all([
+    admin.from("tasks").select("*").eq("id", sourceId).maybeSingle<TaskRow>(),
+    admin.from("tasks").select("*").eq("id", intoTaskId).maybeSingle<TaskRow>(),
+  ]);
+  if (sourceError || targetError || !source || !target) {
+    console.error(
+      "[workflow] combineTasks: source or target not found",
+      sourceError?.message,
+      targetError?.message
+    );
+    return null;
+  }
+
+  const fill: Partial<Record<keyof TaskRow, unknown>> = {};
+  if (!target.assignee_id && source.assignee_id) fill.assignee_id = source.assignee_id;
+  if (!target.type_id && source.type_id) fill.type_id = source.type_id;
+  if (!target.due_date && source.due_date) fill.due_date = source.due_date;
+  if (!target.start_date && source.start_date) fill.start_date = source.start_date;
+  if (!target.karbon_client_name && source.karbon_client_name) fill.karbon_client_name = source.karbon_client_name;
+
+  if (Object.keys(fill).length > 0) {
+    const { error } = await admin.from("tasks").update(fill).eq("id", intoTaskId);
+    if (error) {
+      console.error("[workflow] combineTasks (backfill) failed:", error.message);
+      return null;
+    }
+  }
+
+  if (!(await deleteTask(sourceId))) {
+    console.error("[workflow] combineTasks: backfilled target but failed to delete source", sourceId);
+    return null;
+  }
+
+  const [{ data: refreshed, error: refreshError }, lookups] = await Promise.all([
+    admin.from("tasks").select("*").eq("id", intoTaskId).single<TaskRow>(),
+    fetchLookupMaps(),
+  ]);
+  if (refreshError || !refreshed) {
+    console.error("[workflow] combineTasks (refetch) failed:", refreshError?.message);
+    return null;
+  }
+  return hydrateTask(refreshed, lookups);
 }
 
 // Hands a task to another staff member temporarily -- the task stays on
@@ -848,7 +1079,7 @@ export async function uploadCustomerFile(
 // every status is somehow marked complete). Same rule NewTaskModal.tsx
 // applies client-side for its own default; used here so copied/templated
 // tasks never inherit a source task's "Completed" status.
-async function defaultOpenStatusId(): Promise<string | null> {
+export async function defaultOpenStatusId(): Promise<string | null> {
   const statuses = await listStatuses();
   const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
   return openStatus?.id ?? statuses[0]?.id ?? null;

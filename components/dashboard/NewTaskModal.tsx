@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type {
+  CustomerFile,
+  CustomerNote,
   RecurrenceInterval,
   TaskWithDetails,
   WorkflowCustomer,
@@ -71,8 +73,18 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
   const [dueDate, setDueDate] = useState(editTask?.dueDate ?? "");
   const [startDate, setStartDate] = useState(editTask?.startDate ?? "");
   const [recurrence, setRecurrence] = useState<RecurrenceInterval>(editTask?.recurrence ?? "none");
+  const [details, setDetails] = useState(editTask?.details ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Read-only reference list of the selected client's existing notes/files
+  // (see app/api/workflow/customers/[id]/notes and .../files, the same
+  // endpoints TileDrawer.tsx already uses on the Clients page) -- there's
+  // no per-task note/file relationship in the schema, so this is just
+  // context, refetched whenever the chosen client changes.
+  const [clientNotes, setClientNotes] = useState<CustomerNote[]>([]);
+  const [clientFiles, setClientFiles] = useState<CustomerFile[]>([]);
+  const [loadingClientRefs, setLoadingClientRefs] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -81,6 +93,37 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!clientId) {
+      setClientNotes([]);
+      setClientFiles([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingClientRefs(true);
+    Promise.all([
+      fetch(`/api/workflow/customers/${clientId}/notes`).then((r) => r.json()),
+      fetch(`/api/workflow/customers/${clientId}/files`).then((r) => r.json()),
+    ])
+      .then(([noteData, fileData]) => {
+        if (cancelled) return;
+        setClientNotes(noteData.notes ?? []);
+        setClientFiles(fileData.files ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setClientNotes([]);
+          setClientFiles([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingClientRefs(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -105,6 +148,7 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
           dueDate: dueDate || null,
           startDate: startDate || null,
           recurrence,
+          details: details.trim() || null,
         }),
       });
       const data = await res.json();
@@ -186,6 +230,11 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
                 </option>
               ))}
             </select>
+            {editTask?.karbonClientName ? (
+              <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
+                Karbon: {editTask.karbonClientName}
+              </div>
+            ) : null}
           </Field>
 
           <Field label="Title" required>
@@ -256,6 +305,20 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
             </select>
           </Field>
 
+          <Field label="Details">
+            <textarea
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+              placeholder="Notes or context for this task…"
+              rows={3}
+              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+            />
+          </Field>
+
+          {clientId ? (
+            <ClientReferenceSection notes={clientNotes} files={clientFiles} loading={loadingClientRefs} />
+          ) : null}
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>
             <button type="button" onClick={onClose} style={secondaryButtonStyle}>
               Cancel
@@ -266,6 +329,83 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+function fmtBytes(bytes: number | null): string {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Read-only reference list of the selected client's existing notes/files --
+// the same data and download links shown in the Clients page drawer (see
+// TileDrawer.tsx), just compacted for this modal. There's no per-task
+// note/file relationship in the schema; this is context only, not a way to
+// attach a file to this task specifically.
+function ClientReferenceSection({
+  notes,
+  files,
+  loading,
+}: {
+  notes: CustomerNote[];
+  files: CustomerFile[];
+  loading: boolean;
+}) {
+  return (
+    <div>
+      <div style={{ fontSize: "11px", fontWeight: 500, color: "#888780", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
+        Client notes & files
+      </div>
+      {loading ? (
+        <div style={{ fontSize: "12px", color: "#888780" }}>Loading…</div>
+      ) : notes.length === 0 && files.length === 0 ? (
+        <div style={{ fontSize: "12px", color: "#888780" }}>Nothing on file for this client yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "160px", overflow: "auto" }}>
+          {notes.map((n) => (
+            <div key={`note-${n.id}`} style={{ background: "#fafaf8", borderRadius: "8px", padding: "8px 10px" }}>
+              {n.title ? (
+                <div style={{ fontSize: "12px", fontWeight: 600, color: "#111111" }}>{n.title}</div>
+              ) : null}
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#444441",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {n.body}
+              </div>
+            </div>
+          ))}
+          {files.map((f) => (
+            <div
+              key={`file-${f.id}`}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafaf8", borderRadius: "8px", padding: "8px 10px" }}
+            >
+              <span style={{ fontSize: "12px", color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {f.fileName}
+                {f.sizeBytes != null ? ` · ${fmtBytes(f.sizeBytes)}` : ""}
+              </span>
+              {f.downloadUrl ? (
+                <a
+                  href={f.downloadUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: "11px", color: "#2a78d6", fontWeight: 500, flexShrink: 0, marginLeft: "8px" }}
+                >
+                  Open
+                </a>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -79,6 +79,14 @@ export interface WorkflowTask {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Set only when this task was created by Karbon Import -- the client name
+  // Karbon itself reported for the WorkItem, kept as a reference point for
+  // spotting a wrong client match after the fact. Null for every task
+  // created any other way.
+  karbonClientName: string | null;
+  // Free-text notes/description on the task, set from the create/edit
+  // modal's "Details" field. Null for most tasks -- see migration 020.
+  details: string | null;
 }
 
 // A task, hydrated with everything a board/list view needs to render
@@ -108,6 +116,8 @@ export interface CreateTaskInput {
   statusId: string;
   typeId?: string | null;
   recurrence?: RecurrenceInterval;
+  karbonClientName?: string | null;
+  details?: string | null;
 }
 
 // Same shape as CreateTaskInput but every field optional -- PATCH only
@@ -122,6 +132,7 @@ export interface UpdateTaskInput {
   statusId?: string;
   typeId?: string | null;
   recurrence?: RecurrenceInterval;
+  details?: string | null;
 }
 
 // Summary card data for the /clients tile grid, built from customers/jobs/
