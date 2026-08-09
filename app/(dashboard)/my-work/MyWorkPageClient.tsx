@@ -442,7 +442,7 @@ export default function MyWorkPageClient({
             ))}
           </select>
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={selectStyle}>
-            <option value="">All types</option>
+            <option value="">All categories</option>
             {typeOptions.map((t) => (
               <option key={t} value={t}>
                 {t}
