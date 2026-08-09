@@ -1,0 +1,360 @@
+import { getAllTasks, getTasksForStaff, listStaff } from "./workflow";
+import { getSettings } from "./settings";
+import { getXpmTimesheets, isXpmConfigured } from "./xpm";
+import { computeWagesUtilisation, periodBounds, BAS_TYPE_NAME } from "./workOverview";
+import { fyRange, fyYearFor } from "./utils";
+import type { TaskWithDetails, WorkflowStaff } from "@/types/workflow";
+import type { XpmTimesheet } from "@/types/xpm";
+
+// Pure(ish) data computation for the weekly "Monday Report" email -- see
+// lib/emailTemplates/mondayReport.ts for how this is rendered, and
+// app/api/reports/monday-report/route.ts for the cron entry point that ties
+// data + templates + sending together.
+//
+// Deliberately due-date driven throughout, unlike the My Work page's own
+// "Overdue" tile (start-date based) -- this report is about deadlines, not
+// about what work has started. Don't conflate the two conventions.
+
+const PAYROLL_TYPE_NAME = "Payroll";
+
+// The cron fires at 06:00 UTC+10 (see vercel.json), but a Vercel Cron
+// function itself runs in UTC -- "today"/"this week" must be computed
+// against Brisbane's wall clock, not the server's. QLD does not observe
+// daylight saving, so this is a fixed +10h offset year-round (confirmed
+// against the client names in this codebase, e.g. "IWC Caloundra" / "IWC
+// Brisbane" -- a QLD-based practice).
+const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
+
+export function aestNow(): Date {
+  return new Date(Date.now() + AEST_OFFSET_MS);
+}
+
+// yyyy-mm-dd for "today" in AEST, read off a UTC-shifted Date so the
+// existing UTC-based date helpers (periodBounds/fyRange/getUTCDay etc.) see
+// the right wall-clock day without needing their own timezone awareness.
+export function aestTodayIso(): string {
+  return aestNow().toISOString().slice(0, 10);
+}
+
+export interface ReportWindow {
+  todayIso: string;
+  weekStartIso: string; // Monday
+  weekEndIso: string; // Sunday
+  generatedAtIso: string; // full timestamp, for the masthead
+}
+
+export function buildReportWindow(todayIso: string = aestTodayIso()): ReportWindow {
+  const today = new Date(todayIso + "T00:00:00Z");
+  const { start, end } = periodBounds("week", today);
+  return {
+    todayIso,
+    weekStartIso: start.toISOString().slice(0, 10),
+    weekEndIso: end.toISOString().slice(0, 10),
+    generatedAtIso: new Date().toISOString(),
+  };
+}
+
+export interface TaskLine {
+  id: string;
+  title: string;
+  customerName: string;
+  typeName: string | null;
+  dueDate: string; // always set -- every line here is filtered to tasks with a due date
+}
+
+export interface OverdueTaskLine extends TaskLine {
+  daysOverdue: number;
+}
+
+export interface ClientOverdueGroup {
+  customerName: string;
+  count: number;
+  oldestDueDate: string;
+  tasks: OverdueTaskLine[];
+}
+
+export interface StaffReportData {
+  staff: WorkflowStaff;
+  window: ReportWindow;
+  overdueCount: number;
+  dueThisWeekCount: number;
+  dueLaterCount: number;
+  basDueCount: number;
+  payrollDueCount: number;
+  dueThisWeekTasks: TaskLine[];
+  overdueByClient: ClientOverdueGroup[];
+}
+
+function daysOverdue(dueDate: string, todayIso: string): number {
+  const due = new Date(dueDate + "T00:00:00Z").getTime();
+  const today = new Date(todayIso + "T00:00:00Z").getTime();
+  return Math.max(1, Math.round((today - due) / (24 * 60 * 60 * 1000)));
+}
+
+type Bucket = "overdue" | "dueThisWeek" | "dueLater" | null;
+
+function classify(task: TaskWithDetails, window: ReportWindow): Bucket {
+  if (task.statusIsComplete || !task.dueDate) return null;
+  if (task.dueDate < window.todayIso) return "overdue";
+  if (task.dueDate <= window.weekEndIso) return "dueThisWeek";
+  return "dueLater";
+}
+
+// Builds one staff member's report from the open tasks currently on their
+// board (getTasksForStaff -- owned + temporarily reassigned, same set the
+// My Work page shows). Exported separately from the Supabase-fetching
+// wrapper below so the combined report can reuse it against a
+// pre-aggregated task list without a second fetch per staff member.
+export function computeStaffReport(
+  staff: WorkflowStaff,
+  tasks: TaskWithDetails[],
+  window: ReportWindow,
+): StaffReportData {
+  let overdueCount = 0;
+  let dueThisWeekCount = 0;
+  let dueLaterCount = 0;
+  let basDueCount = 0;
+  let payrollDueCount = 0;
+  const dueThisWeekTasks: TaskLine[] = [];
+  const overdueByCustomer = new Map<string, OverdueTaskLine[]>();
+
+  for (const task of tasks) {
+    const bucket = classify(task, window);
+    if (!bucket) continue;
+
+    const isTimeSensitive = bucket === "overdue" || bucket === "dueThisWeek";
+    if (isTimeSensitive && task.typeName === BAS_TYPE_NAME) basDueCount += 1;
+    if (isTimeSensitive && task.typeName === PAYROLL_TYPE_NAME) payrollDueCount += 1;
+
+    if (bucket === "overdue") {
+      overdueCount += 1;
+      const line: OverdueTaskLine = {
+        id: task.id,
+        title: task.title,
+        customerName: task.customerName,
+        typeName: task.typeName,
+        dueDate: task.dueDate as string,
+        daysOverdue: daysOverdue(task.dueDate as string, window.todayIso),
+      };
+      const existing = overdueByCustomer.get(task.customerName);
+      if (existing) existing.push(line);
+      else overdueByCustomer.set(task.customerName, [line]);
+    } else if (bucket === "dueThisWeek") {
+      dueThisWeekCount += 1;
+      dueThisWeekTasks.push({
+        id: task.id,
+        title: task.title,
+        customerName: task.customerName,
+        typeName: task.typeName,
+        dueDate: task.dueDate as string,
+      });
+    } else {
+      dueLaterCount += 1;
+    }
+  }
+
+  const overdueByClient: ClientOverdueGroup[] = Array.from(overdueByCustomer.entries())
+    .map(([customerName, taskLines]) => {
+      const sorted = [...taskLines].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      return {
+        customerName,
+        count: sorted.length,
+        oldestDueDate: sorted[0].dueDate,
+        tasks: sorted,
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.oldestDueDate.localeCompare(b.oldestDueDate));
+
+  dueThisWeekTasks.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+  return {
+    staff,
+    window,
+    overdueCount,
+    dueThisWeekCount,
+    dueLaterCount,
+    basDueCount,
+    payrollDueCount,
+    dueThisWeekTasks,
+    overdueByClient,
+  };
+}
+
+// Fetches staff's own board and builds their report -- the per-staff email
+// route's entry point.
+export async function buildStaffReportData(
+  staff: WorkflowStaff,
+  window: ReportWindow = buildReportWindow(),
+): Promise<StaffReportData> {
+  const tasks = await getTasksForStaff(staff.id);
+  return computeStaffReport(staff, tasks, window);
+}
+
+export interface FirmTotals {
+  overdueCount: number;
+  dueThisWeekCount: number;
+  dueLaterCount: number;
+  basDueCount: number;
+  payrollDueCount: number;
+}
+
+// Firm-wide totals, deduplicated by task id -- computed straight off every
+// task in the system rather than summed from per-staff mini-summaries, so a
+// task temporarily reassigned (which appears on two staff boards) isn't
+// double-counted, and an unassigned task is still represented.
+function computeFirmTotals(allTasks: TaskWithDetails[], window: ReportWindow): FirmTotals {
+  const totals: FirmTotals = {
+    overdueCount: 0,
+    dueThisWeekCount: 0,
+    dueLaterCount: 0,
+    basDueCount: 0,
+    payrollDueCount: 0,
+  };
+  for (const task of allTasks) {
+    const bucket = classify(task, window);
+    if (!bucket) continue;
+    if (bucket === "overdue") totals.overdueCount += 1;
+    else if (bucket === "dueThisWeek") totals.dueThisWeekCount += 1;
+    else totals.dueLaterCount += 1;
+
+    const isTimeSensitive = bucket === "overdue" || bucket === "dueThisWeek";
+    if (isTimeSensitive && task.typeName === BAS_TYPE_NAME) totals.basDueCount += 1;
+    if (isTimeSensitive && task.typeName === PAYROLL_TYPE_NAME) totals.payrollDueCount += 1;
+  }
+  return totals;
+}
+
+export interface StaffMiniSummary {
+  staffId: string;
+  staffName: string;
+  overdueCount: number;
+  dueThisWeekCount: number;
+  basDueCount: number;
+  payrollDueCount: number;
+}
+
+export interface TimesheetSummaryRow {
+  staffId: string;
+  staffName: string;
+  priorWeekHours: number;
+  fytdHours: number;
+}
+
+export interface CombinedReportData {
+  window: ReportWindow;
+  firmTotals: FirmTotals;
+  staffSummaries: StaffMiniSummary[];
+  timesheetSummaries: TimesheetSummaryRow[];
+  timesheetsAvailable: boolean;
+}
+
+// Total hours actually logged (client + leave + other-internal + idle -- see
+// computeWagesUtilisation's own comment on the three-way split), not just
+// billable hours -- a partner reading "who worked how much" wants the whole
+// week's logged time, not only the billable slice of it.
+function loggedHoursFor(
+  timesheets: XpmTimesheet[],
+  xpmStaffId: string | null,
+  selection: Parameters<typeof computeWagesUtilisation>[2],
+  todayIso: string,
+): number {
+  if (!xpmStaffId) return 0;
+  return computeWagesUtilisation(timesheets, [xpmStaffId], selection, todayIso).loggedHours;
+}
+
+async function buildTimesheetSummaries(
+  staffList: WorkflowStaff[],
+  window: ReportWindow,
+): Promise<{ rows: TimesheetSummaryRow[]; available: boolean }> {
+  if (!isXpmConfigured()) return { rows: [], available: false };
+
+  const settings = await getSettings();
+  if (!settings.partnerName) return { rows: [], available: false };
+
+  let timesheets: XpmTimesheet[];
+  try {
+    timesheets = await getXpmTimesheets(settings.partnerName);
+  } catch (err) {
+    console.error("[mondayReport] getXpmTimesheets failed -- timesheet summary omitted:", err instanceof Error ? err.message : err);
+    return { rows: [], available: false };
+  }
+
+  const today = new Date(window.todayIso + "T00:00:00Z");
+  // The calendar week immediately before this one -- i.e. the working week
+  // that just finished, which is what a Monday-morning report should be
+  // summarising (this week has barely started).
+  const priorWeekEnd = new Date(window.weekStartIso + "T00:00:00Z");
+  priorWeekEnd.setUTCDate(priorWeekEnd.getUTCDate() - 1);
+  const priorWeekStart = new Date(priorWeekEnd);
+  priorWeekStart.setUTCDate(priorWeekStart.getUTCDate() - 6);
+  const priorWeekRange = {
+    start: priorWeekStart.toISOString().slice(0, 10),
+    end: priorWeekEnd.toISOString().slice(0, 10),
+  };
+
+  const { start: fyStart } = fyRange(fyYearFor(today));
+  const fytdRange = { start: fyStart.toISOString().slice(0, 10), end: window.todayIso };
+
+  const rows = staffList.map((staff) => ({
+    staffId: staff.id,
+    staffName: staff.name,
+    priorWeekHours: loggedHoursFor(timesheets, staff.xpmStaffId, priorWeekRange, window.todayIso),
+    fytdHours: loggedHoursFor(timesheets, staff.xpmStaffId, fytdRange, window.todayIso),
+  }));
+
+  return { rows, available: true };
+}
+
+// The firm-wide report sent to Partners: totals across every staff member,
+// a per-staff mini-summary table, and an XPM-sourced timesheet summary.
+export async function buildCombinedReportData(
+  window: ReportWindow = buildReportWindow(),
+): Promise<CombinedReportData> {
+  const staffList = (await listStaff()).filter((s) => s.included);
+  const allTasks = await getAllTasks();
+
+  // Group every task by whoever currently holds it -- the temporary
+  // assignee if it's been handed off, otherwise its permanent owner --
+  // rather than reusing getTasksForStaff per staff member (which would
+  // re-fetch the whole table once per person and double-count temporarily
+  // reassigned tasks across two people's mini-summaries).
+  const tasksByEffectiveAssignee = new Map<string, TaskWithDetails[]>();
+  for (const task of allTasks) {
+    const effectiveAssigneeId = task.tempAssigneeId ?? task.assigneeId;
+    if (!effectiveAssigneeId) continue;
+    const list = tasksByEffectiveAssignee.get(effectiveAssigneeId);
+    if (list) list.push(task);
+    else tasksByEffectiveAssignee.set(effectiveAssigneeId, [task]);
+  }
+
+  const staffSummaries: StaffMiniSummary[] = staffList.map((staff) => {
+    const report = computeStaffReport(staff, tasksByEffectiveAssignee.get(staff.id) ?? [], window);
+    return {
+      staffId: staff.id,
+      staffName: staff.name,
+      overdueCount: report.overdueCount,
+      dueThisWeekCount: report.dueThisWeekCount,
+      basDueCount: report.basDueCount,
+      payrollDueCount: report.payrollDueCount,
+    };
+  });
+
+  const firmTotals = computeFirmTotals(allTasks, window);
+  const { rows: timesheetSummaries, available: timesheetsAvailable } = await buildTimesheetSummaries(staffList, window);
+
+  return { window, firmTotals, staffSummaries, timesheetSummaries, timesheetsAvailable };
+}
+
+// Recipients, per CLAUDE.md's brief: individual reports go to every included
+// staff member with an email set; the combined report goes to every
+// included Partner. Both read from the staff table (not a hardcoded list)
+// so a roster change doesn't need a code change.
+export async function getIndividualReportRecipients(): Promise<WorkflowStaff[]> {
+  const staffList = await listStaff();
+  return staffList.filter((s) => s.included && s.email);
+}
+
+export async function getCombinedReportRecipients(): Promise<WorkflowStaff[]> {
+  const staffList = await listStaff("Partner");
+  return staffList.filter((s) => s.included && s.email);
+}
