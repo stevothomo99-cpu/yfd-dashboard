@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StatusFilter, { type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
@@ -62,14 +62,14 @@ type SortField =
 type SortDir = "asc" | "desc";
 
 const COLUMNS: { field: SortField; label: string }[] = [
-  { field: "title", label: "Name" },
+  { field: "assignedToName", label: "Assigned to" },
   { field: "customerName", label: "Client" },
+  { field: "startDate", label: "Start" },
+  { field: "title", label: "Name" },
   { field: "typeName", label: "Category" },
   { field: "statusName", label: "Status" },
-  { field: "ownerName", label: "Owner" },
-  { field: "assignedToName", label: "Assigned to" },
-  { field: "startDate", label: "Start" },
   { field: "dueDate", label: "Due" },
+  { field: "ownerName", label: "Owner" },
 ];
 
 // Owner is the permanent assignee (tasks.assignee_id); Assigned To is
@@ -584,24 +584,12 @@ export default function MyWorkPageClient({
                       })}
                       {canModifyTasks ? (
                         <td style={{ ...cell, whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            <button type="button" onClick={() => setEditingTask(t)} style={rowActionStyle}>
-                              Edit
-                            </button>
-                            <button type="button" onClick={() => setMovingTask(t)} style={rowActionStyle}>
-                              Move to
-                            </button>
-                            <button type="button" onClick={() => setCombiningTask(t)} style={rowActionStyle}>
-                              Combine
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(t)}
-                              style={{ ...rowActionStyle, color: "#c0392b" }}
-                            >
-                              Delete
-                            </button>
-                          </div>
+                          <RowActionsMenu
+                            onEdit={() => setEditingTask(t)}
+                            onMove={() => setMovingTask(t)}
+                            onCombine={() => setCombiningTask(t)}
+                            onDelete={() => handleDelete(t)}
+                          />
                         </td>
                       ) : null}
                     </tr>
@@ -876,13 +864,111 @@ const tdStyle: React.CSSProperties = {
   color: "#111111",
 };
 
-const rowActionStyle: React.CSSProperties = {
+interface RowActionsMenuProps {
+  onEdit: () => void;
+  onMove: () => void;
+  onCombine: () => void;
+  onDelete: () => void;
+}
+
+function RowActionsMenu({ onEdit, onMove, onCombine, onDelete }: RowActionsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  function choose(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Row actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          fontSize: "16px",
+          lineHeight: 1,
+          fontWeight: 700,
+          color: "#444441",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: "4px 8px",
+          borderRadius: "6px",
+        }}
+      >
+        &#8942;
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            zIndex: 20,
+            background: "white",
+            border: "0.5px solid #e1e0d9",
+            borderRadius: "8px",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+            padding: "4px",
+            minWidth: "130px",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <button type="button" role="menuitem" onClick={() => choose(onEdit)} style={menuItemStyle}>
+            Edit
+          </button>
+          <button type="button" role="menuitem" onClick={() => choose(onMove)} style={menuItemStyle}>
+            Move to
+          </button>
+          <button type="button" role="menuitem" onClick={() => choose(onCombine)} style={menuItemStyle}>
+            Combine
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => choose(onDelete)}
+            style={{ ...menuItemStyle, color: "#c0392b" }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const menuItemStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 500,
   color: "#444441",
   background: "none",
   border: "none",
   cursor: "pointer",
-  padding: "2px 6px",
-  textDecoration: "underline",
+  padding: "6px 10px",
+  textAlign: "left",
+  borderRadius: "5px",
+  whiteSpace: "nowrap",
 };

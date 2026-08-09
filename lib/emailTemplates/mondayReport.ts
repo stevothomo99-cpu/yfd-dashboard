@@ -3,6 +3,7 @@ import type {
   CombinedReportData,
   StaffReportData,
   TaskLine,
+  TopOverdueClient,
 } from "@/lib/mondayReport";
 
 // Email-client-safe HTML for the weekly Monday Report -- table-based layout,
@@ -17,6 +18,15 @@ export interface EmailContent {
   html: string;
   text: string;
 }
+
+// The per-staff "Overdue, by client" section deliberately shows every
+// overdue task for every client, uncapped -- per Steve: nobody should have
+// this many items overdue, so the full, uncomfortable size of the list is
+// meant to be seen, not hidden behind a "+N more". One consequence: a large
+// backlog (one real example: 360 overdue tasks across 20 clients) can push
+// past Gmail's ~102KB clip threshold, which just adds a "view entire
+// message" link in Gmail specifically -- not a failure, just one extra
+// click there.
 
 const COLORS = {
   bg: "#f4f3f0",
@@ -157,11 +167,16 @@ function taskListTable(tasks: TaskLine[], emptyText: string): string {
   </table>`;
 }
 
+// Deliberately shows every overdue task for every client, no cap -- the
+// full, uncomfortable length of this section *is* the point (per Steve: "no
+// one should have that many items overdue" -- the visible size of the
+// backlog is meant to prompt action, not be hidden behind a "+N more").
 function overdueByClientTable(groups: ClientOverdueGroup[]): string {
   if (groups.length === 0) {
     return `<div style="font-size:13px;color:${COLORS.muted};">No overdue work — nice.</div>`;
   }
-  const blocks = groups
+
+  return groups
     .map((group) => {
       const taskRows = group.tasks
         .map(
@@ -187,7 +202,32 @@ function overdueByClientTable(groups: ClientOverdueGroup[]): string {
       </table>`;
     })
     .join("");
-  return blocks;
+}
+
+function topOverdueClientsTable(clients: TopOverdueClient[]): string {
+  if (clients.length === 0) {
+    return `<div style="font-size:13px;color:${COLORS.muted};">No overdue work firm-wide — nice.</div>`;
+  }
+  const rows = clients
+    .map(
+      (c) => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.text};">${escapeHtml(c.customerName)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.red};">${c.count}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;color:${COLORS.text};">${fmtDate(c.oldestDueDate)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.muted};">${escapeHtml(c.topStaffName ?? "Unassigned")}</td>
+    </tr>`,
+    )
+    .join("");
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Client</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Overdue</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Oldest due</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Held by</td>
+    </tr>
+    ${rows}
+  </table>`;
 }
 
 // ── Per-staff report ────────────────────────────────────────────────────
@@ -321,6 +361,7 @@ export function renderCombinedReportEmail(data: CombinedReportData): EmailConten
       <tr><td style="padding:18px 24px 6px 24px;">${mainTiles}</td></tr>
       <tr><td style="padding:6px 24px 18px 24px;">${deadlineTiles}</td></tr>
     </table>
+    ${sectionCard("Top overdue clients (firm-wide)", topOverdueClientsTable(data.topOverdueClients))}
     ${sectionCard("Per-staff summary", staffMiniTable(data))}
     ${sectionCard("Timesheets — prior week &amp; FYTD hours", timesheetTable(data))}
   `;
@@ -335,6 +376,12 @@ export function renderCombinedReportEmail(data: CombinedReportData): EmailConten
   textLines.push(`Due later: ${data.firmTotals.dueLaterCount}`);
   textLines.push(`BAS/IAS due: ${data.firmTotals.basDueCount}`);
   textLines.push(`Payroll due: ${data.firmTotals.payrollDueCount}`);
+  textLines.push("");
+  textLines.push("TOP OVERDUE CLIENTS (firm-wide)");
+  if (data.topOverdueClients.length === 0) textLines.push("  (no overdue work firm-wide)");
+  for (const c of data.topOverdueClients) {
+    textLines.push(`  ${c.customerName} — ${c.count} overdue, oldest due ${fmtDate(c.oldestDueDate)}, held by ${c.topStaffName ?? "Unassigned"}`);
+  }
   textLines.push("");
   textLines.push("PER-STAFF SUMMARY (overdue / due this week / BAS / payroll)");
   for (const s of data.staffSummaries) {
