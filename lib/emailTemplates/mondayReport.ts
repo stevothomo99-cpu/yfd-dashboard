@@ -19,16 +19,14 @@ export interface EmailContent {
   text: string;
 }
 
-// Render-time caps for the per-staff "Overdue, by client" section -- the
-// data layer (lib/mondayReport.ts) deliberately keeps every overdue task per
-// client group so it stays a complete, honest picture for any other
-// consumer; only the email template truncates what it prints, since a
-// single staff member's backlog can run to hundreds of tasks across dozens
-// of clients (one real example: 360 overdue tasks across 20 clients) and
-// Gmail clips messages over ~102KB. Whatever's cut is called out with an
-// explicit count rather than silently dropped.
-const OVERDUE_TASKS_PER_CLIENT_CAP = 5;
-const OVERDUE_CLIENT_GROUPS_CAP = 10;
+// The per-staff "Overdue, by client" section deliberately shows every
+// overdue task for every client, uncapped -- per Steve: nobody should have
+// this many items overdue, so the full, uncomfortable size of the list is
+// meant to be seen, not hidden behind a "+N more". One consequence: a large
+// backlog (one real example: 360 overdue tasks across 20 clients) can push
+// past Gmail's ~102KB clip threshold, which just adds a "view entire
+// message" link in Gmail specifically -- not a failure, just one extra
+// click there.
 
 const COLORS = {
   bg: "#f4f3f0",
@@ -169,19 +167,18 @@ function taskListTable(tasks: TaskLine[], emptyText: string): string {
   </table>`;
 }
 
+// Deliberately shows every overdue task for every client, no cap -- the
+// full, uncomfortable length of this section *is* the point (per Steve: "no
+// one should have that many items overdue" -- the visible size of the
+// backlog is meant to prompt action, not be hidden behind a "+N more").
 function overdueByClientTable(groups: ClientOverdueGroup[]): string {
   if (groups.length === 0) {
     return `<div style="font-size:13px;color:${COLORS.muted};">No overdue work — nice.</div>`;
   }
 
-  const shownGroups = groups.slice(0, OVERDUE_CLIENT_GROUPS_CAP);
-  const hiddenGroups = groups.slice(OVERDUE_CLIENT_GROUPS_CAP);
-
-  const blocks = shownGroups
+  return groups
     .map((group) => {
-      const shownTasks = group.tasks.slice(0, OVERDUE_TASKS_PER_CLIENT_CAP);
-      const hiddenTaskCount = group.tasks.length - shownTasks.length;
-      const taskRows = shownTasks
+      const taskRows = group.tasks
         .map(
           (t) => `
       <tr>
@@ -192,13 +189,6 @@ function overdueByClientTable(groups: ClientOverdueGroup[]): string {
       </tr>`,
         )
         .join("");
-      const moreRow =
-        hiddenTaskCount > 0
-          ? `
-      <tr>
-        <td colspan="4" style="padding:5px 8px 5px 20px;border-bottom:1px solid ${COLORS.border};font-size:12px;font-style:italic;color:${COLORS.muted};">+${hiddenTaskCount} more overdue for this client</td>
-      </tr>`
-          : "";
       return `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
         <tr>
@@ -208,16 +198,10 @@ function overdueByClientTable(groups: ClientOverdueGroup[]): string {
             <span style="color:${COLORS.muted};font-weight:400;">&nbsp;·&nbsp;oldest due ${fmtDate(group.oldestDueDate)}</span>
           </td>
         </tr>
-        ${taskRows}${moreRow}
+        ${taskRows}
       </table>`;
     })
     .join("");
-
-  if (hiddenGroups.length === 0) return blocks;
-
-  const hiddenTaskTotal = hiddenGroups.reduce((sum, g) => sum + g.count, 0);
-  const summary = `<div style="font-size:12px;font-style:italic;color:${COLORS.muted};margin-top:4px;">+${hiddenGroups.length} more client${hiddenGroups.length === 1 ? "" : "s"}, ${hiddenTaskTotal} more overdue task${hiddenTaskTotal === 1 ? "" : "s"} not shown.</div>`;
-  return blocks + summary;
 }
 
 function topOverdueClientsTable(clients: TopOverdueClient[]): string {
@@ -294,20 +278,11 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
   textLines.push("");
   textLines.push("OVERDUE, BY CLIENT");
   if (data.overdueByClient.length === 0) textLines.push("  (no overdue work)");
-  const shownGroups = data.overdueByClient.slice(0, OVERDUE_CLIENT_GROUPS_CAP);
-  const hiddenGroups = data.overdueByClient.slice(OVERDUE_CLIENT_GROUPS_CAP);
-  for (const group of shownGroups) {
+  for (const group of data.overdueByClient) {
     textLines.push(`  ${group.customerName} — ${group.count} overdue, oldest due ${fmtDate(group.oldestDueDate)}`);
-    const shownTasks = group.tasks.slice(0, OVERDUE_TASKS_PER_CLIENT_CAP);
-    for (const t of shownTasks) {
+    for (const t of group.tasks) {
       textLines.push(`    - ${t.title} (${t.typeName ?? "—"}) — due ${fmtDate(t.dueDate)}, ${t.daysOverdue}d overdue`);
     }
-    const hiddenTaskCount = group.tasks.length - shownTasks.length;
-    if (hiddenTaskCount > 0) textLines.push(`    ... +${hiddenTaskCount} more overdue for this client`);
-  }
-  if (hiddenGroups.length > 0) {
-    const hiddenTaskTotal = hiddenGroups.reduce((sum, g) => sum + g.count, 0);
-    textLines.push(`  ... +${hiddenGroups.length} more client${hiddenGroups.length === 1 ? "" : "s"}, ${hiddenTaskTotal} more overdue task${hiddenTaskTotal === 1 ? "" : "s"} not shown`);
   }
   textLines.push("");
   textLines.push(`Generated ${fmtGeneratedAt(data.window.generatedAtIso)}`);
