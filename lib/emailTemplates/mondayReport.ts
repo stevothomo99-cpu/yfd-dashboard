@@ -3,6 +3,7 @@ import type {
   CombinedReportData,
   StaffReportData,
   TaskLine,
+  TopOverdueClient,
 } from "@/lib/mondayReport";
 
 // Email-client-safe HTML for the weekly Monday Report -- table-based layout,
@@ -17,6 +18,17 @@ export interface EmailContent {
   html: string;
   text: string;
 }
+
+// Render-time caps for the per-staff "Overdue, by client" section -- the
+// data layer (lib/mondayReport.ts) deliberately keeps every overdue task per
+// client group so it stays a complete, honest picture for any other
+// consumer; only the email template truncates what it prints, since a
+// single staff member's backlog can run to hundreds of tasks across dozens
+// of clients (one real example: 360 overdue tasks across 20 clients) and
+// Gmail clips messages over ~102KB. Whatever's cut is called out with an
+// explicit count rather than silently dropped.
+const OVERDUE_TASKS_PER_CLIENT_CAP = 5;
+const OVERDUE_CLIENT_GROUPS_CAP = 10;
 
 const COLORS = {
   bg: "#f4f3f0",
@@ -161,9 +173,15 @@ function overdueByClientTable(groups: ClientOverdueGroup[]): string {
   if (groups.length === 0) {
     return `<div style="font-size:13px;color:${COLORS.muted};">No overdue work — nice.</div>`;
   }
-  const blocks = groups
+
+  const shownGroups = groups.slice(0, OVERDUE_CLIENT_GROUPS_CAP);
+  const hiddenGroups = groups.slice(OVERDUE_CLIENT_GROUPS_CAP);
+
+  const blocks = shownGroups
     .map((group) => {
-      const taskRows = group.tasks
+      const shownTasks = group.tasks.slice(0, OVERDUE_TASKS_PER_CLIENT_CAP);
+      const hiddenTaskCount = group.tasks.length - shownTasks.length;
+      const taskRows = shownTasks
         .map(
           (t) => `
       <tr>
@@ -174,6 +192,13 @@ function overdueByClientTable(groups: ClientOverdueGroup[]): string {
       </tr>`,
         )
         .join("");
+      const moreRow =
+        hiddenTaskCount > 0
+          ? `
+      <tr>
+        <td colspan="4" style="padding:5px 8px 5px 20px;border-bottom:1px solid ${COLORS.border};font-size:12px;font-style:italic;color:${COLORS.muted};">+${hiddenTaskCount} more overdue for this client</td>
+      </tr>`
+          : "";
       return `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
         <tr>
@@ -183,11 +208,42 @@ function overdueByClientTable(groups: ClientOverdueGroup[]): string {
             <span style="color:${COLORS.muted};font-weight:400;">&nbsp;·&nbsp;oldest due ${fmtDate(group.oldestDueDate)}</span>
           </td>
         </tr>
-        ${taskRows}
+        ${taskRows}${moreRow}
       </table>`;
     })
     .join("");
-  return blocks;
+
+  if (hiddenGroups.length === 0) return blocks;
+
+  const hiddenTaskTotal = hiddenGroups.reduce((sum, g) => sum + g.count, 0);
+  const summary = `<div style="font-size:12px;font-style:italic;color:${COLORS.muted};margin-top:4px;">+${hiddenGroups.length} more client${hiddenGroups.length === 1 ? "" : "s"}, ${hiddenTaskTotal} more overdue task${hiddenTaskTotal === 1 ? "" : "s"} not shown.</div>`;
+  return blocks + summary;
+}
+
+function topOverdueClientsTable(clients: TopOverdueClient[]): string {
+  if (clients.length === 0) {
+    return `<div style="font-size:13px;color:${COLORS.muted};">No overdue work firm-wide — nice.</div>`;
+  }
+  const rows = clients
+    .map(
+      (c) => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.text};">${escapeHtml(c.customerName)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.red};">${c.count}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;color:${COLORS.text};">${fmtDate(c.oldestDueDate)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.muted};">${escapeHtml(c.topStaffName ?? "Unassigned")}</td>
+    </tr>`,
+    )
+    .join("");
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Client</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Overdue</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Oldest due</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Held by</td>
+    </tr>
+    ${rows}
+  </table>`;
 }
 
 // ── Per-staff report ────────────────────────────────────────────────────
@@ -238,11 +294,20 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
   textLines.push("");
   textLines.push("OVERDUE, BY CLIENT");
   if (data.overdueByClient.length === 0) textLines.push("  (no overdue work)");
-  for (const group of data.overdueByClient) {
+  const shownGroups = data.overdueByClient.slice(0, OVERDUE_CLIENT_GROUPS_CAP);
+  const hiddenGroups = data.overdueByClient.slice(OVERDUE_CLIENT_GROUPS_CAP);
+  for (const group of shownGroups) {
     textLines.push(`  ${group.customerName} — ${group.count} overdue, oldest due ${fmtDate(group.oldestDueDate)}`);
-    for (const t of group.tasks) {
+    const shownTasks = group.tasks.slice(0, OVERDUE_TASKS_PER_CLIENT_CAP);
+    for (const t of shownTasks) {
       textLines.push(`    - ${t.title} (${t.typeName ?? "—"}) — due ${fmtDate(t.dueDate)}, ${t.daysOverdue}d overdue`);
     }
+    const hiddenTaskCount = group.tasks.length - shownTasks.length;
+    if (hiddenTaskCount > 0) textLines.push(`    ... +${hiddenTaskCount} more overdue for this client`);
+  }
+  if (hiddenGroups.length > 0) {
+    const hiddenTaskTotal = hiddenGroups.reduce((sum, g) => sum + g.count, 0);
+    textLines.push(`  ... +${hiddenGroups.length} more client${hiddenGroups.length === 1 ? "" : "s"}, ${hiddenTaskTotal} more overdue task${hiddenTaskTotal === 1 ? "" : "s"} not shown`);
   }
   textLines.push("");
   textLines.push(`Generated ${fmtGeneratedAt(data.window.generatedAtIso)}`);
@@ -321,6 +386,7 @@ export function renderCombinedReportEmail(data: CombinedReportData): EmailConten
       <tr><td style="padding:18px 24px 6px 24px;">${mainTiles}</td></tr>
       <tr><td style="padding:6px 24px 18px 24px;">${deadlineTiles}</td></tr>
     </table>
+    ${sectionCard("Top overdue clients (firm-wide)", topOverdueClientsTable(data.topOverdueClients))}
     ${sectionCard("Per-staff summary", staffMiniTable(data))}
     ${sectionCard("Timesheets — prior week &amp; FYTD hours", timesheetTable(data))}
   `;
@@ -335,6 +401,12 @@ export function renderCombinedReportEmail(data: CombinedReportData): EmailConten
   textLines.push(`Due later: ${data.firmTotals.dueLaterCount}`);
   textLines.push(`BAS/IAS due: ${data.firmTotals.basDueCount}`);
   textLines.push(`Payroll due: ${data.firmTotals.payrollDueCount}`);
+  textLines.push("");
+  textLines.push("TOP OVERDUE CLIENTS (firm-wide)");
+  if (data.topOverdueClients.length === 0) textLines.push("  (no overdue work firm-wide)");
+  for (const c of data.topOverdueClients) {
+    textLines.push(`  ${c.customerName} — ${c.count} overdue, oldest due ${fmtDate(c.oldestDueDate)}, held by ${c.topStaffName ?? "Unassigned"}`);
+  }
   textLines.push("");
   textLines.push("PER-STAFF SUMMARY (overdue / due this week / BAS / payroll)");
   for (const s of data.staffSummaries) {
