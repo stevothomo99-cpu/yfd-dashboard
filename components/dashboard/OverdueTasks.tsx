@@ -1,8 +1,8 @@
+import { formatDate } from "@/lib/utils";
 import type { KarbonTask } from "@/types/karbon";
 
 function formatDue(d: string): string {
-  if (!d) return "—";
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(d);
 }
 
 export default function OverdueTasks({ tasks }: { tasks: KarbonTask[] }) {

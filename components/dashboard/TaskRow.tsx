@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/utils";
 import type { KarbonTask } from "@/types/karbon";
 
 interface TaskRowProps {
@@ -15,8 +16,7 @@ const dotColor: Record<string, string> = {
 };
 
 function formatDue(d: string) {
-  const date = new Date(d + "T00:00:00Z");
-  return date.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(d);
 }
 
 export default function TaskRow({ task, showAssignee = true, showClient = true, accent = "week" }: TaskRowProps) {

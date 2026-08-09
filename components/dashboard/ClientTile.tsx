@@ -1,5 +1,5 @@
 import StaffAvatar from "./StaffAvatar";
-import { initialsOf } from "@/lib/utils";
+import { formatDate, initialsOf } from "@/lib/utils";
 import type { ClientSummary } from "@/types/workflow";
 
 export type TileStatus = "overdue" | "in-progress" | "all-clear";
@@ -28,7 +28,7 @@ interface Props {
 }
 
 function fmtDate(d: string): string {
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(d);
 }
 
 function fmtCurrency(value: number): string {

@@ -104,6 +104,30 @@ export function staffFromAssignees<T extends { assigneeId: string; assigneeName:
   return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+const SHORT_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// Renders a YYYY-MM-DD date (or an ISO timestamp carrying one) as
+// DD-MMM-YYYY, e.g. "09-Aug-2026". Parses the calendar date directly out of
+// the string instead of going through `new Date(...)`, so a plain
+// YYYY-MM-DD value is never shifted a day by the viewer's timezone the way
+// `new Date("2026-08-09").toLocaleDateString()` can be in negative-UTC-offset
+// zones. Returns "—" (matching the "no value" convention used elsewhere in
+// the dashboard) for null/undefined/empty/unparseable input rather than
+// throwing.
+export function formatDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return "—";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "—";
+  return `${String(day).padStart(2, "0")}-${SHORT_MONTHS[month - 1]}-${year}`;
+}
+
 // A to-do's display name: the owner's rename if they've set one, otherwise
 // the forwarded email's Subject header. Every surface that shows a to-do --
 // including the Task created when one is converted -- goes through here, so

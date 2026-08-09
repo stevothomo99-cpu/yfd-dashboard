@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import PopulateTodoModal from "./PopulateTodoModal";
-import { todoDisplayName } from "@/lib/utils";
+import { formatDate, todoDisplayName } from "@/lib/utils";
 import type { TodoItem } from "@/types/workflow";
 
 interface ClientOption {
@@ -58,11 +58,11 @@ function addDays(iso: string, days: number): string {
 }
 
 function fmtDate(d: string): string {
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(d);
 }
 
 function fmtReceived(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(iso);
 }
 
 // "self" when the person who forwarded the email is also the owner reading

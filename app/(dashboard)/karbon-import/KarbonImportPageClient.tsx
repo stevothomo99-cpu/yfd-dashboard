@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
+import { formatDate } from "@/lib/utils";
 
 interface ImportRow {
   workItemKey: string;
@@ -311,8 +312,8 @@ export default function KarbonImportPageClient() {
                       </td>
                       <td style={tdStyle}>{row.typeName ?? "—"}</td>
                       <td style={tdStyle}>{row.statusName ?? "—"}</td>
-                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{row.dueDate ?? "—"}</td>
-                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{row.startDate ?? "—"}</td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDate(row.dueDate)}</td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDate(row.startDate)}</td>
                       <td style={tdStyle}>{RECURRENCE_LABEL[row.recurrence] ?? row.recurrence}</td>
                     </tr>
                   );

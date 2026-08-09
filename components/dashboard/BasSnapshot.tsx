@@ -1,4 +1,5 @@
 import BasStatusBadge from "@/components/dashboard/BasStatusBadge";
+import { formatDate } from "@/lib/utils";
 import type { BasStatus } from "@/types/dashboard";
 import type { KarbonWorkItem, KarbonWorkStatus } from "@/types/karbon";
 
@@ -9,8 +10,7 @@ const WORK_STATUS_TO_BAS: Record<KarbonWorkStatus, BasStatus> = {
 };
 
 function formatDue(d: string): string {
-  if (!d) return "—";
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return formatDate(d);
 }
 
 export default function BasSnapshot({ workItems }: { workItems: KarbonWorkItem[] }) {

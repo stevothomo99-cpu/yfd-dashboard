@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import KpiCard from "@/components/dashboard/KpiCard";
+import { formatDate } from "@/lib/utils";
 import {
   computeHoursByClient,
   computeWagesUtilisation,
@@ -535,13 +536,7 @@ function PeriodButton({
 }
 
 function fmtRange(range: DateRange): string {
-  const fmt = (iso: string) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  return `${fmt(range.start)} – ${fmt(range.end)}`;
+  return `${formatDate(range.start)} – ${formatDate(range.end)}`;
 }
 
 const dateInputStyle: React.CSSProperties = {
