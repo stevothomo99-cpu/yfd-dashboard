@@ -366,7 +366,7 @@ export default function MyWorkPageClient({
   }
 
   return (
-    <div>
+    <div style={pageWideStyle}>
       <PageHeader
         title="My Work"
         subtitle={
@@ -503,7 +503,7 @@ export default function MyWorkPageClient({
         <EmptyState message="No work items match the current filters." />
       ) : (
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", overflow: "hidden", marginTop: "12px" }}>
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 260px)", overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1080px" }}>
               <thead>
                 <tr style={{ background: "#f5f4f0", borderBottom: "0.5px solid #e1e0d9" }}>
@@ -747,6 +747,18 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
+// Breaks out of the shared dashboard layout's centered 1400px column (see
+// app/(dashboard)/layout.tsx) just for this page -- My Work's table is data-
+// dense with 9 columns and can have hundreds of rows, so it benefits from
+// most of the viewport width. Other dashboard pages aren't this wide/dense,
+// so the shared layout itself is left alone.
+const pageWideStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: "calc(100vw - 2rem)",
+  marginLeft: "calc(50% - 50vw + 1rem)",
+  marginRight: "calc(50% - 50vw + 1rem)",
+};
+
 const selectStyle: React.CSSProperties = {
   fontSize: "12px",
   fontWeight: 500,
@@ -820,6 +832,15 @@ const thStyle: React.CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: "0.03em",
   whiteSpace: "nowrap",
+  // Pinned to the top of the table's own scroll container (see the
+  // overflowY:"auto" wrapper around <table>) so headers stay visible while
+  // scrolling through hundreds of rows. Needs its own opaque background --
+  // th doesn't inherit the <tr>'s background once it's the element being
+  // stuck -- and a z-index above the row cells it scrolls over.
+  position: "sticky",
+  top: 0,
+  background: "#f5f4f0",
+  zIndex: 2,
 };
 
 const tdStyle: React.CSSProperties = {
