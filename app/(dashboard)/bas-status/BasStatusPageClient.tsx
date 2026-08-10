@@ -79,6 +79,19 @@ function stageOf(t: TaskWithDetails): Stage {
   return t.basStage ?? "pending";
 }
 
+// The return period a BAS/IAS task covers is the month immediately BEFORE
+// its start date, not the start date's own month -- e.g. a task starting
+// 1 Jul 2026 is the "JUN26" return (the June period, worked on/lodged once
+// July begins). Formatted MMMYY, uppercase, no separator.
+function periodLabel(startDateIso: string | null): string | null {
+  if (!startDateIso) return null;
+  const d = new Date(startDateIso + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  const month = d.toLocaleDateString("en-AU", { month: "short", timeZone: "UTC" }).toUpperCase();
+  const year = String(d.getUTCFullYear()).slice(-2);
+  return `${month}${year}`;
+}
+
 function formatChangedAt(iso: string): string {
   const d = new Date(iso);
   const time = d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
@@ -344,6 +357,7 @@ function TaskCard({
   // startBucketOf/toneOf are built on. Red for overdue, a neutral/green tone
   // otherwise -- a per-card signal, distinct from the column's own accent.
   const dueColor = task.isOverdue ? "#c0392b" : "#3a7d44";
+  const period = periodLabel(task.startDate);
 
   return (
     <div
@@ -368,12 +382,7 @@ function TaskCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: "13.5px", fontWeight: 700, color: STAGE_NAME_COLOR[stage] }}>{task.customerName}</div>
           <div style={{ fontSize: "11px", color: "#444441", marginTop: "1px" }}>{task.title}</div>
-          {task.startDate ? (
-            <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
-              Period {formatDate(task.startDate)}
-            </div>
-          ) : null}
-          <div style={{ fontSize: "10.5px", fontWeight: 600, color: dueColor, marginTop: "1px" }}>
+          <div style={{ fontSize: "10.5px", fontWeight: 600, color: dueColor, marginTop: "3px" }}>
             Due {formatDate(task.dueDate)}
           </div>
           <div style={{ fontSize: "10.5px", color: "#888780", marginTop: "1px" }}>{assignedToName(task)}</div>
@@ -385,6 +394,9 @@ function TaskCard({
           onClick={(e) => e.stopPropagation()}
           style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}
         >
+          {period ? (
+            <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#444441" }}>{period} BAS</span>
+          ) : null}
           <div style={{ display: "flex", gap: "4px" }}>
             {canGoBack ? (
               <button type="button" disabled={busy} onClick={onBack} style={stageButtonStyle}>
