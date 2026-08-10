@@ -5,19 +5,17 @@ import type {
   TaskLine,
   TopOverdueClient,
 } from "@/lib/mondayReport";
+import { COLORS, escapeHtml, fmtDate, fmtDateRange, fmtGeneratedAt, htmlShell, masthead, sectionCard, tilesRow } from "./shared";
+import type { EmailContent } from "./shared";
 
-// Email-client-safe HTML for the weekly Monday Report -- table-based layout,
-// inline styles only, system font stack, no CSS grid/flexbox/@font-face.
-// Outlook (desktop, still Word-rendered) and a lot of mobile mail clients
-// strip anything fancier, so this deliberately reproduces the approved
-// prototype's tile/list language with plain tables rather than its original
-// CSS.
+// Email-client-safe HTML for the weekly Monday Report -- shared primitives
+// (masthead/tiles/section cards/htmlShell) live in ./shared, now that the
+// timesheet reminder emails need the exact same building blocks. What's left
+// here is Monday-Report-specific content: task lists, the overdue-by-client
+// breakdown, and the firm-wide/timesheet tables.
 
-export interface EmailContent {
-  subject: string;
-  html: string;
-  text: string;
-}
+const FOOTER_TEXT =
+  "YFD Dashboard — automated Monday Report. Generated from live workflow data; if a number looks off, check the dashboard directly before assuming the email is stale.";
 
 // The per-staff "Overdue, by client" section deliberately shows every
 // overdue task for every client, uncapped -- per Steve: nobody should have
@@ -27,119 +25,6 @@ export interface EmailContent {
 // past Gmail's ~102KB clip threshold, which just adds a "view entire
 // message" link in Gmail specifically -- not a failure, just one extra
 // click there.
-
-const COLORS = {
-  bg: "#f4f3f0",
-  card: "#ffffff",
-  border: "#e3e1db",
-  text: "#26241f",
-  muted: "#6b6860",
-  red: "#b3271e",
-  redBg: "#fbeae9",
-  amber: "#a3620a",
-  amberBg: "#fdf2e1",
-  accent: "#1f5c4c",
-};
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z");
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "UTC" });
-}
-
-function fmtDateRange(startIso: string, endIso: string): string {
-  return `${fmtDate(startIso)} – ${fmtDate(endIso)}`;
-}
-
-function fmtGeneratedAt(iso: string): string {
-  return (
-    new Date(iso).toLocaleString("en-AU", {
-      timeZone: "Australia/Brisbane",
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }) + " AEST"
-  );
-}
-
-function htmlShell(preheader: string, bodyHtml: string): string {
-  return `<!--[if mso]><style>table {border-collapse: collapse;}</style><![endif]-->
-<body style="margin:0;padding:0;background-color:${COLORS.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(preheader)}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLORS.bg};">
-    <tr>
-      <td align="center" style="padding:24px 12px;">
-        <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:100%;">
-          <tr><td>${bodyHtml}</td></tr>
-          <tr>
-            <td style="padding:16px 8px;color:${COLORS.muted};font-size:12px;line-height:1.5;">
-              YFD Dashboard — automated Monday Report. Generated from live workflow data; if a
-              number looks off, check the dashboard directly before assuming the email is stale.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>`;
-}
-
-function masthead(title: string, subtitle: string, generatedAtIso: string): string {
-  return `
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLORS.accent};border-radius:8px 8px 0 0;">
-    <tr>
-      <td style="padding:20px 24px;">
-        <div style="color:#ffffff;font-size:20px;font-weight:700;">${escapeHtml(title)}</div>
-        <div style="color:#d9ece5;font-size:13px;margin-top:4px;">${escapeHtml(subtitle)}</div>
-        <div style="color:#a9d2c4;font-size:11px;margin-top:8px;">Generated ${escapeHtml(fmtGeneratedAt(generatedAtIso))}</div>
-      </td>
-    </tr>
-  </table>`;
-}
-
-interface Tile {
-  label: string;
-  value: number;
-  tone?: "default" | "red" | "amber";
-}
-
-function tilesRow(tiles: Tile[]): string {
-  const cellWidth = Math.floor(100 / tiles.length);
-  const cells = tiles
-    .map((tile) => {
-      const bg = tile.tone === "red" ? COLORS.redBg : tile.tone === "amber" ? COLORS.amberBg : COLORS.card;
-      const valueColor = tile.tone === "red" ? COLORS.red : tile.tone === "amber" ? COLORS.amber : COLORS.text;
-      return `<td width="${cellWidth}%" style="padding:4px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${bg};border:1px solid ${COLORS.border};border-radius:6px;">
-          <tr><td style="padding:14px 10px;text-align:center;">
-            <div style="font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;color:${valueColor};">${tile.value}</div>
-            <div style="font-size:11px;color:${COLORS.muted};margin-top:2px;text-transform:uppercase;letter-spacing:0.03em;">${escapeHtml(tile.label)}</div>
-          </tr></td>
-        </table>
-      </td>`;
-    })
-    .join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${cells}</tr></table>`;
-}
-
-function sectionCard(titleHtml: string, innerHtml: string): string {
-  return `
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLORS.card};border:1px solid ${COLORS.border};border-top:none;">
-    <tr><td style="padding:18px 24px;">
-      <div style="font-size:14px;font-weight:700;color:${COLORS.text};margin-bottom:10px;">${titleHtml}</div>
-      ${innerHtml}
-    </td></tr>
-  </table>`;
-}
 
 function taskListTable(tasks: TaskLine[], emptyText: string): string {
   if (tasks.length === 0) {
@@ -256,7 +141,7 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
     ${sectionCard("Due this week", taskListTable(data.dueThisWeekTasks, "Nothing due this week."))}
     ${sectionCard("Overdue, by client", overdueByClientTable(data.overdueByClient))}
   `;
-  const html = htmlShell(`${data.overdueCount} overdue, ${data.dueThisWeekCount} due this week`, bodyHtml);
+  const html = htmlShell(`${data.overdueCount} overdue, ${data.dueThisWeekCount} due this week`, bodyHtml, FOOTER_TEXT);
 
   const textLines: string[] = [];
   textLines.push(`MONDAY REPORT — ${data.staff.name}`);
@@ -365,7 +250,7 @@ export function renderCombinedReportEmail(data: CombinedReportData): EmailConten
     ${sectionCard("Per-staff summary", staffMiniTable(data))}
     ${sectionCard("Timesheets — prior week &amp; FYTD hours", timesheetTable(data))}
   `;
-  const html = htmlShell(`${data.firmTotals.overdueCount} overdue firm-wide`, bodyHtml);
+  const html = htmlShell(`${data.firmTotals.overdueCount} overdue firm-wide`, bodyHtml, FOOTER_TEXT);
 
   const textLines: string[] = [];
   textLines.push("MONDAY REPORT — FIRM SUMMARY");

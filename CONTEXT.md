@@ -1,11 +1,11 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 5.1
+**Version:** 5.2
 **Last updated:** 10 August 2026
 **Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
 **Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan.
 
-v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). v4.3 moves tasks/workflow off jobs and onto clients entirely (§6) — the same job-vs-client confusion already fixed once on Manager allocations, this time in the tasks table's own foreign key. v5.0 is one long session's worth of feature work on top of that foundation: a new BAS approval-pipeline page (§6.5), a weekly Monday Report email (§6.4), a task completion audit trail (§6.6), a `/my-work` and `/timesheets` round of polish, and an in-progress `/team`+`/leaderboard` merge that three earlier attempts had failed to land. **v5.0's own "Pick up here" note is closed out in v5.1**: the `/team`+`/leaderboard` merge is done — see §6.7.
+v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). v4.3 moves tasks/workflow off jobs and onto clients entirely (§6) — the same job-vs-client confusion already fixed once on Manager allocations, this time in the tasks table's own foreign key. v5.0 is one long session's worth of feature work on top of that foundation: a new BAS approval-pipeline page (§6.5), a weekly Monday Report email (§6.4), a task completion audit trail (§6.6), a `/my-work` and `/timesheets` round of polish, and an in-progress `/team`+`/leaderboard` merge that three earlier attempts had failed to land. v5.0's own "Pick up here" note was closed out in v5.1: the `/team`+`/leaderboard` merge is done — see §6.7. **v5.2 adds a weekly timesheet-submission reminder (§6.8)**, currently in review — not yet merged to `main`.
 
 ---
 
@@ -282,6 +282,22 @@ The `/team`+`/leaderboard` merge that v5.0's "Pick up here" note left mid-flight
 - Verified with `tsc --noEmit`, `eslint`, and `next build` all clean (three pre-existing lint errors noted in §10/Gotchas are unrelated and unchanged) — not yet checked against real Karbon-free production data since XPM/Supabase aren't reachable from this session's network egress.
 
 ---
+
+## 6.8 Timesheet submission reminders — `lib/timesheetReminders.ts`, `lib/emailTemplates/timesheetReminders.ts`
+
+Two cron entry points (`vercel.json`), same `CRON_SECRET`-header auth and `isResendConfigured()` degrade-gracefully pattern as the Monday Report (§6.4) — **not yet actually sending mail either**, pending the same real Resend account/domain. As with the Monday Report, "today"/"this week" are computed against Brisbane's wall clock (`aestNow`/`aestTodayIso`, reused directly from `lib/mondayReport.ts` rather than redefined) since the cron function itself runs in UTC.
+
+- **`GET /api/reports/timesheet-reminder`** — fires **Monday 07:00 AEST** (`0 21 * * 0` — an hour after the Monday Report, so the two crons don't compete for the same XPM rate-limit budget on the one morning both run). Sends every `included` staff member with an email (same recipient list as the Monday Report's individual reports, `getIndividualReportRecipients`) a plain "please submit your timesheet for last week" nudge — no hours data, just the ask.
+- **`GET /api/reports/timesheet-followup`** — fires **Monday 12:00 AEST** (`0 2 * * 1`). For the calendar week that just finished (Monday–Sunday, computed the same way the Monday Report's `buildTimesheetSummaries` finds its "prior week"):
+  - Computes each XPM-linked staff member's logged hours for that week via `computeWagesUtilisation` and compares against its own `standardHours` (38 for one person, one full week — the practice's standard week, §6.1's `STANDARD_HOURS_PER_DAY`).
+  - **Individual follow-up nudges go only to whoever's still short** — someone who's already logged a full week doesn't get a second email. Each nudge states hours logged / standard / still short.
+  - **Every included Partner always gets a summary email** (same recipients as the Monday Report's combined report, `getCombinedReportRecipients`) — sent regardless of whether anyone's short, so "everyone's logged a full week" is visible too, not just problems. Two tables:
+    - **"Last week — still incomplete"**: the same set of people who got an individual nudge, with hours logged/standard/short.
+    - **"YTD billable overview"**: every included **non-Partner** staff member's FY-to-date `billableCapacityPct` (§6.1's "one to performance-manage on" figure, the same one `lib/leaderboard.ts` weighs at 50% — §6.7) plus FYTD client hours. Partners are excluded here for the same reason they're excluded from every other billable/utilisation figure in this app: no delivery workload.
+- **`lib/emailTemplates/shared.ts`** (new) — the masthead/tile-row/section-card/`htmlShell` primitives were extracted out of `lib/emailTemplates/mondayReport.ts` into their own module once this feature needed the identical building blocks, so the two email families can't visually drift apart. `mondayReport.ts` now imports from here instead of defining its own copies; its Monday-Report-specific content (task lists, overdue-by-client, firm totals) is unchanged.
+- Verified with `tsc --noEmit`, `eslint`, and `next build` all clean. Not yet checked against real XPM/Resend data — built as a draft for review, not merged to `main` yet.
+
+---
 ## 7. Auth
 
 Single NextAuth `Credentials` provider (`auth.ts`), entirely backed by the `dashboard_users` table — **there is no separate CEO env-var login anymore** (that was v2.0; removed in favour of dashboard_users covering everyone, including the CEO).
@@ -355,22 +371,23 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 
 ## 10. Future / Not Yet Built
 
-- FocablyED Search Console + GA4 (needs domain verification + GA4 property ID) — unchanged from v2.0.
 - Full role-based read-only access — `dashboard_users.role` still only gates nav + a handful of specific checks (task permissions, To-Do visibility, user pause/remove), not a general read-only mode.
 - Mobile responsive layout — not yet tested/optimized.
 - Sync failure alerts (email an admin if a scheduled XPM/Karbon/Google sync errors silently) — no XPM dependency, not yet built.
-- **Monday Report (§6.4) and BAS Status approval emails (§6.5) are built but not yet actually sending mail** — both gated behind `isResendConfigured()`, pending a real Resend account/domain, `RESEND_API_KEY`/`RESEND_FROM_EMAIL`, and (for the Monday Report's cron) `CRON_SECRET` set in Vercel.
-- **Per-person exclusion from practice figures.** Only Partners are excluded from practice-wide *utilisation* today (§6.1) — v5.0 separately added a Settings toggle for whether Partners even show as a *row* on `/timesheets` (§6.3-adjacent), but excluding a non-Partner from the figures entirely still needs a real toggle *and* `lib/xpmSync.ts` to stop hardcoding `included: true`, which would otherwise wipe the setting on every sync.
-- **Job-level manager gaps in XPM**: ~120 of 493 jobs have no Job Manager (concentrated in a handful of clients). Doesn't affect client tiles, which read the client record, but does affect each person's work board. Fix in XPM, then resync.
+- **Monday Report (§6.4), BAS Status approval emails (§6.5), and the timesheet reminder emails (§6.8) are built but not yet actually sending mail** — all three gated behind `isResendConfigured()`, pending a real Resend account/domain, `RESEND_API_KEY`/`RESEND_FROM_EMAIL`, and (for the two crons) `CRON_SECRET` set in Vercel.
 - **Dependabot backlog**: several open PRs, of which TypeScript 5.9→7.0 and ESLint 9→10 are major versions needing a build check.
 - **Three pre-existing lint errors** remain (`settings/users/page.tsx`, `api/hubspot/deals/route.ts`, `lib/hubspot.ts`) — unrelated to v4.0 work, verified as pre-existing.
 - **The BAS Status page (§6.5) has no server-side access restriction of its own** — only its nav link is admin-gated; any authenticated user hitting `/bas-status` directly can view the whole practice-wide board (though every stage-change action still goes through the same per-task `canModifyTask` permission check as editing that task normally would). Flagged, not yet locked down further.
+
+Deliberately **not** on this list, per direct confirmation from the practice: FocablyED Search Console + GA4 (a different project's backlog, out of scope here); job-level manager gaps in XPM (moot now that work boards are entirely client-scoped, not job-scoped — see §6); per-person exclusion from practice figures beyond Partners (Partner-only exclusion is sufficient at this stage, no further toggle needed).
 
 *Closed in v4.0*: `/api/settings` PATCH and the staff routes now enforce admin server-side; `partnerName` is durably stored (§6.2); `lib/google.ts` no longer throws at import; `getClientSummaries` no longer walks the tasks table per customer.
 
 *Closed in v5.0*: weekly performance summary / overdue-task digest emails (§6.4, built but not yet sending — see above); a task's completion date/actor is finally recorded (§6.6, `completed_at` existed but was dead code before this); `/my-work`'s Status filter gains a date-derived Overdue option; `/clients` and `/bas-status` both drill into the same task edit modal `/my-work` already used.
 
 *Closed in v5.1*: the `/team`+`/leaderboard` merge (§6.7) — real Supabase/XPM data, the full 50/30/20 formula, `/leaderboard` retired.
+
+*Added in v5.2 (in review)*: weekly timesheet-submission reminder emails (§6.8) — Monday-morning nudge to everyone, midday follow-up to whoever's still short plus a Partner-facing summary.
 
 ---
 

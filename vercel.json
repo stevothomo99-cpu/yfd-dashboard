@@ -4,6 +4,14 @@
     {
       "path": "/api/reports/monday-report",
       "schedule": "0 20 * * 0"
+    },
+    {
+      "path": "/api/reports/timesheet-reminder",
+      "schedule": "0 21 * * 0"
+    },
+    {
+      "path": "/api/reports/timesheet-followup",
+      "schedule": "0 2 * * 1"
     }
   ]
 }
