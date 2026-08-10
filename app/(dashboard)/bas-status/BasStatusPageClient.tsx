@@ -45,6 +45,16 @@ const STAGE_LABEL: Record<Stage, string> = {
   waiting_on_customer: "Waiting on Customer",
 };
 
+// Client name colour by stage -- deliberately its own scheme, not the
+// column accent/stripe colour above, so it reads as a distinct signal on
+// the card itself (which stage is this client's task at, at a glance)
+// rather than duplicating the column's already-visible identity.
+const STAGE_NAME_COLOR: Record<Stage, string> = {
+  pending: "#2563b0",
+  ready_for_approval: "#b25a00",
+  waiting_on_customer: "#227a3e",
+};
+
 // Owner is the permanent assignee; Assigned To is whoever currently has it
 // (the temp assignee during Ready for Approval, otherwise the owner) --
 // same distinction My Work draws (see MyWorkPageClient.tsx).
@@ -258,7 +268,7 @@ function TaskCard({
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "6px" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "12px", fontWeight: 600, color: "#111111" }}>{task.customerName}</div>
+          <div style={{ fontSize: "13.5px", fontWeight: 700, color: STAGE_NAME_COLOR[stage] }}>{task.customerName}</div>
           <div style={{ fontSize: "11px", color: "#444441", marginTop: "1px" }}>{task.title}</div>
           <div style={{ fontSize: "10.5px", fontWeight: 600, color: dueColor, marginTop: "3px" }}>
             Due {formatDate(task.dueDate)}
