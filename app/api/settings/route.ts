@@ -32,7 +32,11 @@ export async function PATCH(request: Request) {
   const body: unknown = await request.json().catch(() => ({}));
   const input = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
 
-  const patch: { partnerName?: string; excludedStaffIds?: string[] } = {};
+  const patch: {
+    partnerName?: string;
+    excludedStaffIds?: string[];
+    showPartnersInTimesheets?: boolean;
+  } = {};
   if (typeof input.partnerName === "string") {
     patch.partnerName = input.partnerName.trim();
   }
@@ -41,6 +45,9 @@ export async function PATCH(request: Request) {
     input.excludedStaffIds.every((id): id is string => typeof id === "string")
   ) {
     patch.excludedStaffIds = input.excludedStaffIds;
+  }
+  if (typeof input.showPartnersInTimesheets === "boolean") {
+    patch.showPartnersInTimesheets = input.showPartnersInTimesheets;
   }
 
   const settings = await updateSettings(patch);

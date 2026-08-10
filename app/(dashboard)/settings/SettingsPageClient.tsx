@@ -25,6 +25,28 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
   const [workflowSyncing, setWorkflowSyncing] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowResult, setWorkflowResult] = useState<WorkflowSyncResult | null>(null);
+  const [showPartnersError, setShowPartnersError] = useState<string | null>(null);
+
+  // Optimistic like handleToggle above, for the same reason: a toggle that
+  // looks like it worked and silently didn't would only surface later, as an
+  // unexplained row appearing or disappearing from Timesheets.
+  async function handleToggleShowPartners() {
+    const next = !snapshot.showPartnersInTimesheets;
+    setSnapshot((prev) => ({ ...prev, showPartnersInTimesheets: next }));
+    setShowPartnersError(null);
+
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ showPartnersInTimesheets: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save.");
+    } catch {
+      setSnapshot((prev) => ({ ...prev, showPartnersInTimesheets: !next }));
+      setShowPartnersError("Couldn't save that change — try again.");
+    }
+  }
 
   // The row is a dashboard login, but the thing being toggled is the XPM
   // staff record matched to it by email -- that's what carries the hours.
@@ -347,11 +369,11 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
           </div>
         ) : null}
 
-        {/* The Partner, listed without a toggle. They're already out of the
-            practice-wide figures by role (see timesheets/page.tsx) and they're
-            set by the field above, so a switch here would imply a control that
-            does nothing. Omitting the row altogether just reads as a missing
-            person. */}
+        {/* The Partner, listed without the per-person Included toggle (that
+            one is set by the field above, so a switch here would imply a
+            control that does nothing) but with the separate Show Partners on
+            Timesheets toggle below, which controls whether they appear as a
+            row at all. */}
         {snapshot.partnerRoster.length > 0 ? (
           <div
             style={{
@@ -363,9 +385,63 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
             <div style={{ fontSize: "11px", color: "#888780", marginBottom: "10px" }}>
               Set by the Partner filter above, and always out of the practice-wide Timesheets
               figures — a Partner carries no delivery workload, so their 38hr week in the
-              denominator would understate everyone else. Their own hours still show in the By
-              employee table.
+              denominator would understate everyone else. Whether their own hours still show as a
+              row in the By employee table is controlled below.
             </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "10px 0",
+                marginBottom: "6px",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>
+                  Show Partners on Timesheets
+                </div>
+                <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px" }}>
+                  Partners already don&rsquo;t count toward practice utilisation — this controls
+                  whether they still show up as a row in the By employee table.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleShowPartners}
+                aria-pressed={snapshot.showPartnersInTimesheets}
+                aria-label={`${snapshot.showPartnersInTimesheets ? "Hide" : "Show"} Partners on Timesheets`}
+                style={{
+                  position: "relative",
+                  width: "40px",
+                  height: "22px",
+                  borderRadius: "999px",
+                  background: snapshot.showPartnersInTimesheets ? "#1baf7a" : "#d3d2cb",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  transition: "background 0.15s",
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "2px",
+                    left: snapshot.showPartnersInTimesheets ? "20px" : "2px",
+                    width: "18px",
+                    height: "18px",
+                    borderRadius: "50%",
+                    background: "white",
+                    transition: "left 0.15s",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                  }}
+                />
+              </button>
+            </div>
+            {showPartnersError ? <Banner tone="error">{showPartnersError}</Banner> : null}
+
             {snapshot.partnerRoster.map((r) => (
               <div key={r.userId} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <StaffAvatar initials={initialsOf(r.staffName ?? r.username)} size={32} />

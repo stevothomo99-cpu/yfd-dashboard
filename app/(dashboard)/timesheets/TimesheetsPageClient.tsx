@@ -141,12 +141,6 @@ function EmployeeRow({
     [expanded, timesheets, staffIds, selection, today, clientNamesMap],
   );
 
-  // "Non-billable" here is just meetings/admin + leave -- idle gets its own
-  // Downtime column instead of being folded in, so the two reasons someone
-  // logged non-client hours (paid internal work vs. genuinely idle) don't
-  // collapse back into one number the way the old combined figure did.
-  const nonBillable = utilisation.leaveHours + utilisation.internalOtherHours;
-
   return (
     <div style={{ borderBottom: "0.5px solid #e1e0d9" }}>
       <button
@@ -167,7 +161,8 @@ function EmployeeRow({
         <div style={{ fontSize: "11px", color: "#888780", width: "12px" }}>{expanded ? "▾" : "▸"}</div>
         <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
         <Cell>{utilisation.clientHours.toFixed(1)}</Cell>
-        <Cell dim>{nonBillable.toFixed(1)}</Cell>
+        <Cell dim>{utilisation.internalOtherHours.toFixed(1)}</Cell>
+        <Cell dim>{utilisation.leaveHours.toFixed(1)}</Cell>
         <Cell dim>{utilisation.idleHours.toFixed(1)}</Cell>
         {/* The gap this whole column exists for: hours in neither the
             billable nor the non-billable figure because they were never
@@ -259,6 +254,28 @@ export default function TimesheetsPageClient({
   );
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
+
+  // Sums the same per-row figures the By employee table actually renders
+  // (every listed staff member, not just practiceStaffIds) so the Total row
+  // matches what's visibly added up on screen -- see the comment on that
+  // row for why this doesn't just reuse `utilisation`.
+  const tableTotals = useMemo(
+    () =>
+      staffOptions.reduce(
+        (acc, s) => {
+          const u = computeWagesUtilisation(timesheets, [s.id], selection, today);
+          return {
+            clientHours: acc.clientHours + u.clientHours,
+            internalOtherHours: acc.internalOtherHours + u.internalOtherHours,
+            leaveHours: acc.leaveHours + u.leaveHours,
+            idleHours: acc.idleHours + u.idleHours,
+            unloggedHours: acc.unloggedHours + u.unloggedHours,
+          };
+        },
+        { clientHours: 0, internalOtherHours: 0, leaveHours: 0, idleHours: 0, unloggedHours: 0 },
+      ),
+    [staffOptions, timesheets, selection, today],
+  );
 
   return (
     <div>
@@ -500,7 +517,8 @@ export default function TimesheetsPageClient({
           <div style={{ width: "12px" }} />
           <div style={{ flex: 1 }}>Employee</div>
           <HeadCell>Billable</HeadCell>
-          <HeadCell>Non-billable (meetings/leave)</HeadCell>
+          <HeadCell>Admin/meetings</HeadCell>
+          <HeadCell>Leave</HeadCell>
           <HeadCell>Downtime</HeadCell>
           <HeadCell>Unlogged</HeadCell>
           <HeadCell>% of logged</HeadCell>
@@ -523,6 +541,37 @@ export default function TimesheetsPageClient({
                 onToggle={() => setExpandedStaffId((cur) => (cur === s.id ? null : s.id))}
               />
             ))}
+            {/* Totals row -- ties this table back to the KPI tiles above:
+                Billable/Admin/Leave/Downtime/Unlogged here should sum to
+                exactly Client/Admin/Leave/Idle/Unlogged hours up top (the
+                practice-wide `utilisation` computed from practiceStaffIds),
+                so anyone can cross-check the two without doing the addition
+                by hand. Deliberately re-sums the per-row values actually
+                rendered (including excluded staff like Steve) rather than
+                reusing `utilisation` directly, since that one already
+                excludes non-practice staff and would silently disagree
+                with what's visibly summed on screen. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "10px 0 0",
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "#111111",
+              }}
+            >
+              <div style={{ width: "12px" }} />
+              <div style={{ flex: 1 }}>Total</div>
+              <Cell>{tableTotals.clientHours.toFixed(1)}</Cell>
+              <Cell>{tableTotals.internalOtherHours.toFixed(1)}</Cell>
+              <Cell>{tableTotals.leaveHours.toFixed(1)}</Cell>
+              <Cell>{tableTotals.idleHours.toFixed(1)}</Cell>
+              <Cell>{fmtVariance(tableTotals.unloggedHours)}</Cell>
+              <Cell dim>—</Cell>
+              <Cell dim>—</Cell>
+            </div>
           </div>
         )}
       </div>
