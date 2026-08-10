@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Title cannot be empty" }, { status: 400 });
     }
 
-    const task = await updateTask(taskId, patch);
+    const task = await updateTask(taskId, patch, staff?.id ?? null);
     if (!task) {
       return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
     }

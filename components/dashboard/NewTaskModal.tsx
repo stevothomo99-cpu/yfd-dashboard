@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatDate } from "@/lib/utils";
 import type {
   CustomerFile,
   CustomerNote,
@@ -39,6 +40,11 @@ const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
 function defaultStatusId(statuses: WorkflowStatus[]): string {
   const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
   return openStatus?.id ?? statuses[0]?.id ?? "";
+}
+
+function formatCompletedAt(iso: string): string {
+  const time = new Date(iso).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+  return `${formatDate(iso)} ${time}`;
 }
 
 // Mounted/unmounted by the parent (only rendered while the modal is open),
@@ -270,6 +276,16 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
               </select>
             </Field>
           </div>
+
+          {/* A small audit note, not a full history log -- who completed
+              this task and when, cleared again if it's reopened (see
+              lib/workflow.ts's updateTask). */}
+          {editTask?.completedAt ? (
+            <div style={{ fontSize: "11px", color: "#888780", marginTop: "-4px" }}>
+              Completed {formatCompletedAt(editTask.completedAt)}
+              {editTask.completedByName ? ` by ${editTask.completedByName}` : ""}
+            </div>
+          ) : null}
 
           <Field label="Assignee">
             <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={inputStyle}>

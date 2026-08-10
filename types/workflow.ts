@@ -77,6 +77,10 @@ export interface WorkflowTask {
   recurrence: RecurrenceInterval;
   recurrenceParentId: string | null;
   completedAt: string | null;
+  // Who completed it, alongside completedAt -- both null again if the task
+  // is reopened. See migration 024.
+  completedByStaffId: string | null;
+  completedByName: string | null;
   createdAt: string;
   updatedAt: string;
   // Set only when this task was created by Karbon Import -- the client name
