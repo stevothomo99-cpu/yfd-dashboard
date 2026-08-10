@@ -19,6 +19,7 @@ const ADMIN_ONLY_ITEMS = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
   { label: "Leaderboard", href: "/leaderboard" },
+  { label: "BAS Status", href: "/bas-status" },
   { label: "Karbon Import", href: "/karbon-import" },
 ];
 const EVERYONE_ITEMS = [

@@ -12,6 +12,13 @@ import { fyYearFor, fyRange } from "./utils";
 // client without duplicating the string.
 export const BAS_TYPE_NAME = "BAS/IAS";
 
+// The BAS/IAS task_types row's id in the live yfd-workflow Supabase project
+// -- confirmed directly against task_types. Used (unlike BAS_TYPE_NAME
+// above) where an exact type_id match is needed rather than a display-name
+// match, e.g. /api/workflow/tasks/[id]/bas-stage gating which tasks may go
+// through the approval pipeline.
+export const BAS_TASK_TYPE_ID = "4267f72b-9f4a-4d61-93b9-74e5713b718b";
+
 // Returns the actual overdue tasks (not just a count) so the dashboard's
 // Overdue tile can show a mini table, not just a number.
 export function getOverdueTasks(board: TaskWithDetails[], today: string): TaskWithDetails[] {

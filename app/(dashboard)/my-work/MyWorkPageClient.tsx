@@ -140,6 +140,22 @@ function isOverdueTask(t: TaskWithDetails, today: string): boolean {
 
 const OVERDUE_OPTION = "Overdue";
 
+// Seeded with roughly the widths these columns render at naturally (long
+// enough for their content + sort arrow, chip columns a bit narrower than
+// free-text ones). Session-only, like columnOrder -- not persisted.
+const DEFAULT_COLUMN_WIDTHS: Record<SortField, number> = {
+  assignedToName: 140,
+  customerName: 160,
+  startDate: 110,
+  title: 260,
+  typeName: 140,
+  statusName: 140,
+  dueDate: 110,
+  ownerName: 140,
+};
+const ACTIONS_COLUMN_WIDTH = 64;
+const MIN_COLUMN_WIDTH = 72;
+
 export default function MyWorkPageClient({
   allStaff,
   isAdmin,
@@ -187,6 +203,12 @@ export default function MyWorkPageClient({
   const [columnOrder, setColumnOrder] = useState<SortField[]>(() => COLUMNS.map((c) => c.field));
   const [dragField, setDragField] = useState<SortField | null>(null);
 
+  // Independent of columnOrder -- a column keeps its width regardless of
+  // where it's dragged to, and reordering never touches this map. Session-
+  // only, same as columnOrder: resets to the defaults on page load.
+  const [columnWidths, setColumnWidths] = useState<Record<SortField, number>>(DEFAULT_COLUMN_WIDTHS);
+  const resizingRef = useRef<{ field: SortField; startX: number; startWidth: number } | null>(null);
+
   const orderedColumns = useMemo(
     () => columnOrder.map((field) => COLUMNS.find((c) => c.field === field)!),
     [columnOrder]
@@ -207,6 +229,41 @@ export default function MyWorkPageClient({
     });
     setDragField(null);
   }
+
+  const handleResizeMouseMove = useCallback((e: MouseEvent) => {
+    const r = resizingRef.current;
+    if (!r) return;
+    const delta = e.clientX - r.startX;
+    const nextWidth = Math.max(MIN_COLUMN_WIDTH, r.startWidth + delta);
+    setColumnWidths((prev) => (prev[r.field] === nextWidth ? prev : { ...prev, [r.field]: nextWidth }));
+  }, []);
+
+  const handleResizeMouseUp = useCallback(() => {
+    resizingRef.current = null;
+    document.removeEventListener("mousemove", handleResizeMouseMove);
+    document.removeEventListener("mouseup", handleResizeMouseUp);
+  }, [handleResizeMouseMove]);
+
+  const handleResizeMouseDown = useCallback(
+    (field: SortField, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resizingRef.current = { field, startX: e.clientX, startWidth: columnWidths[field] };
+      document.addEventListener("mousemove", handleResizeMouseMove);
+      document.addEventListener("mouseup", handleResizeMouseUp);
+    },
+    [columnWidths, handleResizeMouseMove, handleResizeMouseUp]
+  );
+
+  // Drag-cleanup safety net -- if the component unmounts mid-drag (e.g. the
+  // admin "viewing as" board switch re-renders it away), don't leak the
+  // document listeners.
+  useEffect(() => {
+    return () => {
+      document.removeEventListener("mousemove", handleResizeMouseMove);
+      document.removeEventListener("mouseup", handleResizeMouseUp);
+    };
+  }, [handleResizeMouseMove, handleResizeMouseUp]);
 
   // Shared re-fetch used both by the admin "viewing as" override and by the
   // New Task modal's post-create refresh. Admins pass staffId explicitly (the
@@ -527,7 +584,13 @@ export default function MyWorkPageClient({
       ) : (
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", overflow: "hidden", marginTop: "12px" }}>
           <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 260px)", overflowY: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1080px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1080px", tableLayout: "fixed" }}>
+              <colgroup>
+                {orderedColumns.map((col) => (
+                  <col key={col.field} style={{ width: `${columnWidths[col.field]}px` }} />
+                ))}
+                {canModifyTasks ? <col style={{ width: `${ACTIONS_COLUMN_WIDTH}px` }} /> : null}
+              </colgroup>
               <thead>
                 <tr style={{ background: "#f5f4f0", borderBottom: "0.5px solid #e1e0d9" }}>
                   {orderedColumns.map((col) => (
@@ -553,6 +616,13 @@ export default function MyWorkPageClient({
                       <span style={{ color: "#c7c5bc", marginRight: "4px" }}>⠿</span>
                       {col.label}
                       {sortField === col.field ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                      <span
+                        draggable={false}
+                        onMouseDown={(e) => handleResizeMouseDown(col.field, e)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Drag to resize column"
+                        style={resizeHandleStyle}
+                      />
                     </th>
                   ))}
                   {canModifyTasks ? <th style={{ ...thStyle, cursor: "default" }}>Actions</th> : null}
@@ -862,6 +932,25 @@ const tdStyle: React.CSSProperties = {
   padding: "10px 16px",
   fontSize: "13px",
   color: "#111111",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+// Sits over the right edge of a <th> (the header is position:sticky, which
+// establishes the containing block this positions against) so a click-drag
+// there resizes that column without disturbing the header's own click-to-
+// sort / drag-to-reorder handlers -- draggable={false} blocks the native
+// reorder drag from starting on this handle, and its own onClick stops the
+// sort click from bubbling up to the header.
+const resizeHandleStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 0,
+  right: 0,
+  bottom: 0,
+  width: "8px",
+  cursor: "col-resize",
+  userSelect: "none",
+  touchAction: "none",
 };
 
 interface RowActionsMenuProps {

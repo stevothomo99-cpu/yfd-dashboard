@@ -88,6 +88,7 @@ interface TaskRow {
   updated_at: string;
   karbon_client_name: string | null;
   details: string | null;
+  bas_stage: "ready_for_approval" | "waiting_on_customer" | null;
 }
 
 // Just the columns getClientSummaries' tallies read -- it counts tasks
@@ -316,6 +317,7 @@ function hydrateTask(
     isOverdue,
     karbonClientName: row.karbon_client_name,
     details: row.details,
+    basStage: row.bas_stage,
   };
 }
 
@@ -774,6 +776,44 @@ export async function reassignTaskTemporarily(
   return true;
 }
 
+// Moves a BAS/IAS task through the /bas-status approval pipeline --
+// 'ready_for_approval' temporarily hands the task to approverStaffId (Steve)
+// via reassignTaskTemporarily, the exact same temp_assignee_id mechanism My
+// Work already uses for "Assigned to", so the task keeps its original owner
+// and simply shows up on the approver's board too; 'waiting_on_customer'
+// hands it back (reassignTaskTemporarily(taskId, null)) once the approver
+// has actioned it. Callers (the bas-stage API route) are responsible for
+// confirming the task is actually BAS/IAS-typed before calling this --
+// kept generic here since bas_stage itself is a plain column, not
+// type-restricted at the DB level (see migration 022).
+export async function setBasStage(
+  taskId: string,
+  stage: "ready_for_approval" | "waiting_on_customer",
+  approverStaffId: string
+): Promise<TaskWithDetails | null> {
+  const reassigned = await reassignTaskTemporarily(
+    taskId,
+    stage === "ready_for_approval" ? approverStaffId : null
+  );
+  if (!reassigned) return null;
+
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("tasks")
+    .update({ bas_stage: stage })
+    .eq("id", taskId)
+    .select("*")
+    .single<TaskRow>();
+
+  if (error) {
+    console.error("[workflow] setBasStage failed:", error.message);
+    return null;
+  }
+
+  const lookups = await fetchLookupMaps();
+  return hydrateTask(data, lookups);
+}
+
 // Every job attached to a given customer, with its manager's name -- feeds
 // the /clients drawer's Jobs section (the standalone /jobs page was
 // retired in favour of jobs living under each client's tile).
@@ -888,6 +928,22 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
     };
   });
 });
+
+// Single task lookup, hydrated -- used by the bas-stage route to check a
+// task's type before allowing a stage transition, and to report its
+// details in the resulting email.
+export async function getTaskById(taskId: string): Promise<TaskWithDetails | null> {
+  const admin = getSupabaseAdmin();
+  const [{ data, error }, lookups] = await Promise.all([
+    admin.from("tasks").select("*").eq("id", taskId).maybeSingle<TaskRow>(),
+    fetchLookupMaps(),
+  ]);
+  if (error || !data) {
+    if (error) console.error("[workflow] getTaskById failed:", error.message);
+    return null;
+  }
+  return hydrateTask(data, lookups);
+}
 
 // Every task in the system, hydrated -- feeds the Monday Report's firm-wide
 // aggregation (lib/mondayReport.ts), which needs every open task's due date
