@@ -164,8 +164,8 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(260px, 1fr))",
-          gap: "16px",
+          gridTemplateColumns: "repeat(3, minmax(190px, 1fr))",
+          gap: "10px",
           alignItems: "start",
         }}
       >
@@ -249,36 +249,41 @@ function TaskCard({
       style={{
         background: "white",
         border: "0.5px solid #e1e0d9",
-        borderRadius: "10px",
-        padding: "8px 10px",
+        borderRadius: "8px",
+        padding: "6px 8px",
         opacity: busy ? 0.6 : 1,
         fontSize: "12px",
-        lineHeight: 1.3,
+        lineHeight: 1.25,
       }}
     >
-      <div style={{ fontSize: "12px", fontWeight: 600, color: "#111111" }}>{task.customerName}</div>
-      <div style={{ fontSize: "11px", color: "#444441", marginTop: "1px" }}>{task.title}</div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px", fontSize: "10.5px" }}>
-        <span style={{ color: dueColor, fontWeight: 600 }}>Due {formatDate(task.dueDate)}</span>
-        <span style={{ color: "#888780" }}>{assignedToName(task)}</span>
-      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "6px" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "#111111" }}>{task.customerName}</div>
+          <div style={{ fontSize: "11px", color: "#444441", marginTop: "1px" }}>{task.title}</div>
+          <div style={{ fontSize: "10.5px", fontWeight: 600, color: dueColor, marginTop: "3px" }}>
+            Due {formatDate(task.dueDate)}
+          </div>
+          <div style={{ fontSize: "10.5px", color: "#888780", marginTop: "1px" }}>{assignedToName(task)}</div>
+        </div>
 
-      <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
-        {canGoBack ? (
-          <button type="button" disabled={busy} onClick={onBack} style={stageButtonStyle}>
-            ‹ Back
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: "4px" }}>
+            {canGoBack ? (
+              <button type="button" disabled={busy} onClick={onBack} style={stageButtonStyle}>
+                ‹ Back
+              </button>
+            ) : null}
+            {canGoForward ? (
+              <button type="button" disabled={busy} onClick={onForward} style={stageButtonStyle}>
+                Forward ›
+              </button>
+            ) : null}
+          </div>
+          <button type="button" onClick={onToggleHistory} style={historyToggleStyle}>
+            {expanded ? "▾" : "▸"} History ({history.length})
           </button>
-        ) : null}
-        {canGoForward ? (
-          <button type="button" disabled={busy} onClick={onForward} style={stageButtonStyle}>
-            Forward ›
-          </button>
-        ) : null}
+        </div>
       </div>
-
-      <button type="button" onClick={onToggleHistory} style={historyToggleStyle}>
-        {expanded ? "▾" : "▸"} History ({history.length})
-      </button>
 
       {expanded ? (
         <div style={{ marginTop: "4px", borderTop: "0.5px solid #eeede7", paddingTop: "4px" }}>
@@ -343,8 +348,6 @@ const stageButtonStyle: React.CSSProperties = {
 };
 
 const historyToggleStyle: React.CSSProperties = {
-  display: "block",
-  marginTop: "5px",
   fontSize: "10px",
   fontWeight: 500,
   color: "#888780",
