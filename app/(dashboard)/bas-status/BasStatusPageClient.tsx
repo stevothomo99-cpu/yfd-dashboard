@@ -79,6 +79,14 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Each column sorts by due date independently -- a task's stage doesn't
+  // change what order its own column reads in, so there's no reason to
+  // couple the three sort directions together.
+  const [sortDir, setSortDir] = useState<Record<Stage, "asc" | "desc">>({
+    pending: "asc",
+    ready_for_approval: "asc",
+    waiting_on_customer: "asc",
+  });
 
   // The employee filter is keyed on "Assigned to" (the practical, currently-
   // holding-it person) rather than Owner -- a Ready for Approval task is
@@ -103,10 +111,15 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
     };
     for (const t of filtered) byStage[stageOf(t)].push(t);
     for (const stage of Object.keys(byStage) as Stage[]) {
-      byStage[stage].sort((a, b) => (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
+      const dir = sortDir[stage] === "desc" ? -1 : 1;
+      byStage[stage].sort((a, b) => dir * (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
     }
     return byStage;
-  }, [filtered]);
+  }, [filtered, sortDir]);
+
+  function toggleSort(stage: Stage) {
+    setSortDir((prev) => ({ ...prev, [stage]: prev[stage] === "asc" ? "desc" : "asc" }));
+  }
 
   async function transition(taskId: string, stage: Stage) {
     setPendingTaskId(taskId);
@@ -192,14 +205,24 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
               padding: "10px 10px 12px",
             }}
           >
-            <div>
-              <div style={{ fontSize: "13px", fontWeight: 600, color: tile.accent }}>
-                {tile.label}
-                <span style={{ marginLeft: "6px", fontSize: "11px", fontWeight: 500, color: "#888780" }}>
-                  ({columns[tile.stage].length})
-                </span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "6px" }}>
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: tile.accent }}>
+                  {tile.label}
+                  <span style={{ marginLeft: "6px", fontSize: "11px", fontWeight: 500, color: "#888780" }}>
+                    ({columns[tile.stage].length})
+                  </span>
+                </div>
+                <div style={{ fontSize: "10px", color: "#888780", marginTop: "1px" }}>{tile.hint}</div>
               </div>
-              <div style={{ fontSize: "10px", color: "#888780", marginTop: "1px" }}>{tile.hint}</div>
+              <button
+                type="button"
+                onClick={() => toggleSort(tile.stage)}
+                title="Sort by due date"
+                style={{ ...sortButtonStyle, color: tile.accent }}
+              >
+                Due {sortDir[tile.stage] === "desc" ? "▾" : "▴"}
+              </button>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -344,6 +367,18 @@ const selectStyle: React.CSSProperties = {
   background: "white",
   color: "#111111",
   outline: "none",
+};
+
+const sortButtonStyle: React.CSSProperties = {
+  fontSize: "10.5px",
+  fontWeight: 600,
+  padding: "2px 6px",
+  borderRadius: "6px",
+  border: "none",
+  background: "rgba(255, 255, 255, 0.6)",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  flexShrink: 0,
 };
 
 const stageButtonStyle: React.CSSProperties = {
