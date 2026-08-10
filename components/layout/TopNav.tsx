@@ -15,12 +15,15 @@ import { initialsOf } from "@/lib/utils";
 // Nav is role-gated: Business KPIs/Team/Leaderboard/Settings are
 // company-wide/admin views, only shown to admins. Dashboard/My Work/
 // Clients/Timesheets are every user's own work tools.
+// Karbon Import moved under Settings (still at /karbon-import, just no
+// longer a top-level nav item -- it's a one-off/occasional admin action,
+// not something anyone needs one click away every day) -- see the link on
+// the Settings page.
 const ADMIN_ONLY_ITEMS = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "BAS Status", href: "/bas-status" },
-  { label: "Karbon Import", href: "/karbon-import" },
 ];
 const EVERYONE_ITEMS = [
   { label: "Dashboard", href: "/dashboard" },
