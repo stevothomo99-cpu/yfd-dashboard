@@ -128,6 +128,11 @@ export default function SecuritySettingsPage() {
         <button className="px-4 py-2 bg-gray-100 text-gray-900 rounded-lg font-medium">
           My Security
         </button>
+        <Link href="/settings/karbon-import">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Karbon Import
+          </button>
+        </Link>
       </div>
 
       {message && (

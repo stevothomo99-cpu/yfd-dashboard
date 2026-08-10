@@ -178,6 +178,11 @@ export default function UsersPage() {
             My Security
           </button>
         </Link>
+        <Link href="/settings/karbon-import">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Karbon Import
+          </button>
+        </Link>
       </div>
 
       {message && (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import PageHeader from "@/components/dashboard/PageHeader";
 import { formatDate } from "@/lib/utils";
 
@@ -169,6 +170,27 @@ export default function KarbonImportPageClient() {
         title="Karbon Import"
         subtitle="Every non-completed live Karbon work item, matched to your internal clients/staff/types/statuses. Fix any unmatched client below, then import."
       />
+
+      <div className="mb-6 flex gap-4">
+        <Link href="/settings">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Staff & Sync
+          </button>
+        </Link>
+        <Link href="/settings/users">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Dashboard Users
+          </button>
+        </Link>
+        <Link href="/settings/security">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            My Security
+          </button>
+        </Link>
+        <button className="px-4 py-2 bg-gray-100 text-gray-900 rounded-lg font-medium">
+          Karbon Import
+        </button>
+      </div>
 
       {message ? (
         <div
