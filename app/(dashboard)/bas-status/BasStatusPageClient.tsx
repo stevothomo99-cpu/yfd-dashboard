@@ -125,9 +125,15 @@ export default function BasStatusPageClient({
   // through the drill-down modal would never actually show up.
   useEffect(() => setTasks(initialTasks), [initialTasks]);
   useEffect(() => setHistoryByTaskId(initialHistory), [initialHistory]);
-  // Each column sorts by due date independently -- a task's stage doesn't
-  // change what order its own column reads in, so there's no reason to
-  // couple the three sort directions together.
+  // Each column sorts independently -- a task's stage doesn't change what
+  // order its own column reads in, so there's no reason to couple the three
+  // columns' sort field/direction together. Two sortable fields: due date
+  // (the original/default) and client name (alphabetical, per Steve's ask).
+  const [sortBy, setSortBy] = useState<Record<Stage, "due" | "alpha">>({
+    pending: "due",
+    ready_for_approval: "due",
+    waiting_on_customer: "due",
+  });
   const [sortDir, setSortDir] = useState<Record<Stage, "asc" | "desc">>({
     pending: "asc",
     ready_for_approval: "asc",
@@ -165,13 +171,27 @@ export default function BasStatusPageClient({
     for (const t of filtered) byStage[stageOf(t)].push(t);
     for (const stage of Object.keys(byStage) as Stage[]) {
       const dir = sortDir[stage] === "desc" ? -1 : 1;
-      byStage[stage].sort((a, b) => dir * (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
+      if (sortBy[stage] === "alpha") {
+        byStage[stage].sort((a, b) => dir * a.customerName.localeCompare(b.customerName));
+      } else {
+        byStage[stage].sort((a, b) => dir * (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
+      }
     }
     return byStage;
-  }, [filtered, sortDir]);
+  }, [filtered, sortBy, sortDir]);
 
-  function toggleSort(stage: Stage) {
-    setSortDir((prev) => ({ ...prev, [stage]: prev[stage] === "asc" ? "desc" : "asc" }));
+  // Clicking the field already active for a column flips its direction;
+  // clicking the other field switches to it starting ascending, same
+  // convention as a typical sortable table header.
+  function toggleSort(stage: Stage, field: "due" | "alpha") {
+    setSortBy((prevBy) => {
+      if (prevBy[stage] === field) {
+        setSortDir((prevDir) => ({ ...prevDir, [stage]: prevDir[stage] === "asc" ? "desc" : "asc" }));
+        return prevBy;
+      }
+      setSortDir((prevDir) => ({ ...prevDir, [stage]: "asc" }));
+      return { ...prevBy, [stage]: field };
+    });
   }
 
   async function transition(taskId: string, stage: Stage) {
@@ -275,14 +295,34 @@ export default function BasStatusPageClient({
                 </div>
                 <div style={{ fontSize: "10px", color: "#888780", marginTop: "1px" }}>{tile.hint}</div>
               </div>
-              <button
-                type="button"
-                onClick={() => toggleSort(tile.stage)}
-                title="Sort by due date"
-                style={{ ...sortButtonStyle, color: tile.accent }}
-              >
-                Due {sortDir[tile.stage] === "desc" ? "▾" : "▴"}
-              </button>
+              <div style={{ display: "flex", gap: "3px" }}>
+                <button
+                  type="button"
+                  onClick={() => toggleSort(tile.stage, "due")}
+                  title="Sort by due date"
+                  style={{
+                    ...sortButtonStyle,
+                    color: tile.accent,
+                    fontWeight: sortBy[tile.stage] === "due" ? 700 : 500,
+                    opacity: sortBy[tile.stage] === "due" ? 1 : 0.65,
+                  }}
+                >
+                  Due {sortBy[tile.stage] === "due" ? (sortDir[tile.stage] === "desc" ? "▾" : "▴") : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleSort(tile.stage, "alpha")}
+                  title="Sort by client name"
+                  style={{
+                    ...sortButtonStyle,
+                    color: tile.accent,
+                    fontWeight: sortBy[tile.stage] === "alpha" ? 700 : 500,
+                    opacity: sortBy[tile.stage] === "alpha" ? 1 : 0.65,
+                  }}
+                >
+                  A-Z {sortBy[tile.stage] === "alpha" ? (sortDir[tile.stage] === "desc" ? "▾" : "▴") : ""}
+                </button>
+              </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
