@@ -87,6 +87,11 @@ export interface WorkflowTask {
   // Free-text notes/description on the task, set from the create/edit
   // modal's "Details" field. Null for most tasks -- see migration 020.
   details: string | null;
+  // BAS/IAS approval-pipeline stage (see migration 022 and /bas-status).
+  // null = "Pending" (unset/default); only meaningful for BAS/IAS-typed
+  // tasks, but stored as a plain generic column -- see the migration's
+  // comment.
+  basStage: "ready_for_approval" | "waiting_on_customer" | null;
 }
 
 // A task, hydrated with everything a board/list view needs to render
