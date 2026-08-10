@@ -1,15 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import PageHeader from "@/components/dashboard/PageHeader";
+import NewTaskModal from "@/components/dashboard/NewTaskModal";
 import { formatDate } from "@/lib/utils";
-import type { BasStage, BasStageHistoryEntry, TaskWithDetails, WorkflowStaff } from "@/types/workflow";
+import type {
+  BasStage,
+  BasStageHistoryEntry,
+  TaskWithDetails,
+  WorkflowCustomer,
+  WorkflowStaff,
+  WorkflowStatus,
+  WorkflowTaskType,
+} from "@/types/workflow";
 
 interface BasStatusPageClientProps {
   initialTasks: TaskWithDetails[];
   staff: WorkflowStaff[];
   isAdmin: boolean;
   initialHistory: Record<string, BasStageHistoryEntry[]>;
+  clients: WorkflowCustomer[];
+  statuses: WorkflowStatus[];
+  taskTypes: WorkflowTaskType[];
 }
 
 type Stage = BasStage;
@@ -72,13 +85,33 @@ function formatChangedAt(iso: string): string {
   return `${formatDate(iso)} ${time}`;
 }
 
-export default function BasStatusPageClient({ initialTasks, staff, initialHistory }: BasStatusPageClientProps) {
+export default function BasStatusPageClient({
+  initialTasks,
+  staff,
+  initialHistory,
+  clients,
+  statuses,
+  taskTypes,
+}: BasStatusPageClientProps) {
+  const router = useRouter();
   const [tasks, setTasks] = useState<TaskWithDetails[]>(initialTasks);
   const [historyByTaskId, setHistoryByTaskId] = useState<Record<string, BasStageHistoryEntry[]>>(initialHistory);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
+  const [clientSearch, setClientSearch] = useState<string>("");
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Drill-down: clicking a card opens the same task modal My Work uses, pre-
+  // populated -- the stage Back/Forward buttons and History toggle stop
+  // propagation so they keep working independently of this.
+  const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
+
+  // router.refresh() (used after a modal edit) re-runs the server component
+  // and hands back fresh initialTasks/initialHistory props, but useState
+  // only reads those as its *initial* value -- without this, an edit made
+  // through the drill-down modal would never actually show up.
+  useEffect(() => setTasks(initialTasks), [initialTasks]);
+  useEffect(() => setHistoryByTaskId(initialHistory), [initialHistory]);
   // Each column sorts by due date independently -- a task's stage doesn't
   // change what order its own column reads in, so there's no reason to
   // couple the three sort directions together.
@@ -99,9 +132,16 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
   );
 
   const filtered = useMemo(() => {
-    if (!employeeFilter) return tasks;
-    return tasks.filter((t) => assignedToName(t) === employeeFilter || t.assigneeName === employeeFilter);
-  }, [tasks, employeeFilter]);
+    let result = tasks;
+    if (employeeFilter) {
+      result = result.filter((t) => assignedToName(t) === employeeFilter || t.assigneeName === employeeFilter);
+    }
+    const query = clientSearch.trim().toLowerCase();
+    if (query) {
+      result = result.filter((t) => t.customerName.toLowerCase().includes(query));
+    }
+    return result;
+  }, [tasks, employeeFilter, clientSearch]);
 
   const columns = useMemo(() => {
     const byStage: Record<Stage, TaskWithDetails[]> = {
@@ -165,6 +205,13 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
             </option>
           ))}
         </select>
+        <input
+          type="text"
+          value={clientSearch}
+          onChange={(e) => setClientSearch(e.target.value)}
+          placeholder="Search by client…"
+          style={{ ...selectStyle, width: "200px" }}
+        />
         <span style={{ fontSize: "12px", color: "#888780" }}>{filtered.length} BAS/IAS task{filtered.length === 1 ? "" : "s"}</span>
       </div>
 
@@ -236,6 +283,7 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
                     busy={pendingTaskId === t.id}
                     history={historyByTaskId[t.id] ?? []}
                     expanded={expandedTaskId === t.id}
+                    onOpen={() => setEditingTask(t)}
                     onToggleHistory={() => setExpandedTaskId((prev) => (prev === t.id ? null : t.id))}
                     onBack={() => transition(t.id, (Object.keys(STAGE_ORDER) as Stage[]).find((s) => STAGE_ORDER[s] === STAGE_ORDER[stageOf(t)] - 1)!)}
                     onForward={() => transition(t.id, (Object.keys(STAGE_ORDER) as Stage[]).find((s) => STAGE_ORDER[s] === STAGE_ORDER[stageOf(t)] + 1)!)}
@@ -246,6 +294,24 @@ export default function BasStatusPageClient({ initialTasks, staff, initialHistor
           </div>
         ))}
       </div>
+
+      {editingTask ? (
+        <NewTaskModal
+          onClose={() => setEditingTask(null)}
+          // No dedicated single-task GET endpoint exists to patch just this
+          // row client-side (unlike My Work's /api/workflow/my-work) --
+          // router.refresh() re-runs the server component and gets every
+          // row (including stage/history) back in sync with what the modal
+          // just saved, at the cost of a full re-fetch rather than a
+          // one-row patch.
+          onCreated={() => router.refresh()}
+          clients={clients}
+          staff={staff}
+          statuses={statuses}
+          taskTypes={taskTypes}
+          editTask={editingTask}
+        />
+      ) : null}
     </div>
   );
 }
@@ -255,6 +321,7 @@ function TaskCard({
   busy,
   history,
   expanded,
+  onOpen,
   onToggleHistory,
   onBack,
   onForward,
@@ -263,6 +330,7 @@ function TaskCard({
   busy: boolean;
   history: BasStageHistoryEntry[];
   expanded: boolean;
+  onOpen: () => void;
   onToggleHistory: () => void;
   onBack: () => void;
   onForward: () => void;
@@ -279,6 +347,12 @@ function TaskCard({
 
   return (
     <div
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onOpen();
+      }}
       style={{
         background: "white",
         border: "0.5px solid #e1e0d9",
@@ -287,19 +361,30 @@ function TaskCard({
         opacity: busy ? 0.6 : 1,
         fontSize: "12px",
         lineHeight: 1.25,
+        cursor: "pointer",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "6px" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: "13.5px", fontWeight: 700, color: STAGE_NAME_COLOR[stage] }}>{task.customerName}</div>
           <div style={{ fontSize: "11px", color: "#444441", marginTop: "1px" }}>{task.title}</div>
-          <div style={{ fontSize: "10.5px", fontWeight: 600, color: dueColor, marginTop: "3px" }}>
+          {task.startDate ? (
+            <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
+              Period {formatDate(task.startDate)}
+            </div>
+          ) : null}
+          <div style={{ fontSize: "10.5px", fontWeight: 600, color: dueColor, marginTop: "1px" }}>
             Due {formatDate(task.dueDate)}
           </div>
           <div style={{ fontSize: "10.5px", color: "#888780", marginTop: "1px" }}>{assignedToName(task)}</div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}>
+        {/* stopPropagation everywhere in this cluster -- these are actions
+            on the card, not the drill-down click the card itself opens. */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}
+        >
           <div style={{ display: "flex", gap: "4px" }}>
             {canGoBack ? (
               <button type="button" disabled={busy} onClick={onBack} style={stageButtonStyle}>
@@ -319,7 +404,10 @@ function TaskCard({
       </div>
 
       {expanded ? (
-        <div style={{ marginTop: "4px", borderTop: "0.5px solid #eeede7", paddingTop: "4px" }}>
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ marginTop: "4px", borderTop: "0.5px solid #eeede7", paddingTop: "4px" }}
+        >
           {history.length === 0 ? (
             <div style={{ fontSize: "10px", color: "#c7c5bc" }}>No transitions recorded yet.</div>
           ) : (
