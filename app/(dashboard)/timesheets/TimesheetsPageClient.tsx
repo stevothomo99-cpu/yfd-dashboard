@@ -257,6 +257,38 @@ export default function TimesheetsPageClient({
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
 
+  // Internal (YFD) -- per employee, hours that are internal YFD work
+  // (leave/idle/admin, all coded to the internal client) rather than
+  // billable client work. Reuses computeWagesUtilisation's own
+  // classification (lib/workOverview.ts: clientId === INTERNAL_CLIENT_XPM_ID,
+  // then split by taskName via isIdleTask/LEAVE_TASK_NAME) instead of
+  // re-deriving it here, so this tile can't drift from the By employee
+  // figures or the KPI cards above.
+  //
+  // The "or if not registered" half of the brief -- time logged against a
+  // job XPM couldn't match to a real client -- isn't representable from
+  // this array: fetchXpmTimesheetsForPartner (lib/xpm.ts) already drops
+  // those entries before they become an XpmTimesheet (clientId is
+  // non-nullable there), so there's no null/unmatched clientId to test for
+  // by the time data reaches this page. Surfacing that half would mean
+  // changing what that fetch keeps, which affects every consumer of
+  // getXpmTimesheets (dashboard, business KPIs), not just this tile.
+  const internalByStaff = useMemo(
+    () =>
+      staffOptions
+        .map((s) => {
+          const u = computeWagesUtilisation(timesheets, [s.id], selection, today);
+          return {
+            staff: s,
+            internalHours: u.leaveHours + u.internalOtherHours + u.idleHours,
+            loggedHours: u.loggedHours,
+          };
+        })
+        .sort((a, b) => b.internalHours - a.internalHours),
+    [staffOptions, timesheets, selection, today],
+  );
+  const totalInternalHours = internalByStaff.reduce((acc, r) => acc + r.internalHours, 0);
+
   return (
     <div>
       <PageHeader
@@ -515,6 +547,67 @@ export default function TimesheetsPageClient({
                 onToggle={() => setExpandedStaffId((cur) => (cur === s.id ? null : s.id))}
               />
             ))}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          background: "white",
+          border: "0.5px solid #e1e0d9",
+          borderRadius: "14px",
+          padding: "1.1rem 1.2rem",
+          marginTop: "14px",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Internal (YFD)</div>
+          <div style={{ fontSize: "11px", color: "#888780" }}>
+            {totalInternalHours.toFixed(1)} hrs total · leave, idle &amp; admin
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "12px",
+            padding: "0 0 6px",
+            borderBottom: "0.5px solid #e1e0d9",
+            fontSize: "10px",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            color: "#888780",
+          }}
+        >
+          <div style={{ flex: 1 }}>Employee</div>
+          <HeadCell>Internal</HeadCell>
+          <HeadCell>% logged</HeadCell>
+        </div>
+
+        {internalByStaff.length === 0 ? (
+          <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>No staff to show.</div>
+        ) : (
+          <div>
+            {internalByStaff.map(({ staff, internalHours, loggedHours }) => {
+              const pctOfLogged = loggedHours > 0 ? Math.round((internalHours / loggedHours) * 100) : null;
+              return (
+                <div
+                  key={staff.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "12px",
+                    padding: "10px 0",
+                    borderBottom: "0.5px solid #e1e0d9",
+                  }}
+                >
+                  <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
+                  <Cell>{internalHours.toFixed(1)}</Cell>
+                  <Cell dim>{pctOfLogged !== null ? `${pctOfLogged}%` : "—"}</Cell>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
