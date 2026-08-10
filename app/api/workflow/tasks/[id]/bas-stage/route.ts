@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { canModifyTask, getAllTasks, getStaffByEmail, getTaskById, setBasStage } from "@/lib/workflow";
 import { BAS_TASK_TYPE_ID } from "@/lib/workOverview";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
+import type { BasStage } from "@/types/workflow";
 
 // The Partner/admin who approves BAS/IAS work on /bas-status -- confirmed
 // directly (staff.id for Steve Thomas). Fixed rather than configurable:
@@ -10,8 +11,16 @@ import { isResendConfigured, sendEmail } from "@/lib/resend";
 const APPROVER_STAFF_ID = "777f9f6f-f2f9-421f-b903-d8f2549a6078";
 const APPROVER_EMAIL = "steve@yourfinancedept.com.au";
 
-type BasStage = "ready_for_approval" | "waiting_on_customer";
-const VALID_STAGES: BasStage[] = ["ready_for_approval", "waiting_on_customer"];
+const VALID_STAGES: BasStage[] = ["pending", "ready_for_approval", "waiting_on_customer"];
+
+// Pipeline order -- a transition is only valid if it moves exactly one step
+// either direction (no skipping straight from Pending to Waiting on
+// Customer or back).
+const STAGE_ORDER: Record<BasStage, number> = {
+  pending: 0,
+  ready_for_approval: 1,
+  waiting_on_customer: 2,
+};
 
 function formatDue(dueDate: string | null): string {
   if (!dueDate) return "No due date";
@@ -22,8 +31,9 @@ function formatDue(dueDate: string | null): string {
   });
 }
 
-// Moves a single BAS/IAS task between the /bas-status board's tiles --
-// see lib/workflow.ts's setBasStage for the reassignment side effect this
+// Moves a single BAS/IAS task between the /bas-status board's tiles, one
+// adjacent stage at a time in either direction -- see lib/workflow.ts's
+// setBasStage for the reassignment side effect and history row this
 // triggers. Same permission model as the general task PATCH route: admins
 // may action any task, everyone else only their own board (own/temp-
 // assigned, or their Partner/Manager roll-up).
@@ -52,7 +62,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const body = (await request.json()) as { stage?: string };
     if (!body.stage || !VALID_STAGES.includes(body.stage as BasStage)) {
-      return NextResponse.json({ error: "stage must be 'ready_for_approval' or 'waiting_on_customer'" }, { status: 400 });
+      return NextResponse.json(
+        { error: "stage must be 'pending', 'ready_for_approval', or 'waiting_on_customer'" },
+        { status: 400 }
+      );
     }
     stage = body.stage as BasStage;
   } catch {
@@ -72,18 +85,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Only BAS/IAS tasks can move through this pipeline" }, { status: 400 });
   }
 
-  const updated = await setBasStage(taskId, stage, APPROVER_STAFF_ID);
-  if (!updated) {
+  const currentStage: BasStage = task.basStage ?? "pending";
+  if (Math.abs(STAGE_ORDER[stage] - STAGE_ORDER[currentStage]) !== 1) {
+    return NextResponse.json(
+      { error: "A task can only move to an adjacent stage, one step at a time" },
+      { status: 400 }
+    );
+  }
+
+  const result = await setBasStage(taskId, stage, APPROVER_STAFF_ID, staff?.id ?? null);
+  if (!result) {
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
   }
+  const { task: updated, historyEntry } = result;
 
   if (stage === "ready_for_approval") {
     // A live snapshot of the whole queue as it stands right after this
     // update, not a stored digest -- every other BAS/IAS task also sitting
-    // in "Ready for Approval", soonest due date first.
+    // in "Ready for Approval", soonest due date first. Fires regardless of
+    // which direction the task arrived from (Pending forward, or Waiting on
+    // Customer back).
     const allTasks = await getAllTasks();
     const queue = allTasks
-      .filter((t) => t.typeId === BAS_TASK_TYPE_ID && t.basStage === "ready_for_approval")
+      .filter((t) => t.typeId === BAS_TASK_TYPE_ID && (t.basStage ?? "pending") === "ready_for_approval")
       .sort((a, b) => (a.dueDate ?? "9999-99-99").localeCompare(b.dueDate ?? "9999-99-99"));
 
     if (!isResendConfigured()) {
@@ -116,7 +140,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
-  return NextResponse.json({ task: updated });
+  return NextResponse.json({ task: updated, historyEntry });
 }
 
 function escapeHtml(value: string): string {

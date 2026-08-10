@@ -2,6 +2,8 @@ import { cache } from "react";
 import { getSupabaseAdmin } from "./supabase";
 import { BAS_TYPE_NAME } from "./workOverview";
 import type {
+  BasStage,
+  BasStageHistoryEntry,
   ClientSummary,
   CreateTaskInput,
   CustomerFile,
@@ -88,7 +90,16 @@ interface TaskRow {
   updated_at: string;
   karbon_client_name: string | null;
   details: string | null;
-  bas_stage: "ready_for_approval" | "waiting_on_customer" | null;
+  bas_stage: BasStage | null;
+}
+
+interface BasStageHistoryRow {
+  id: string;
+  task_id: string;
+  from_stage: BasStage | null;
+  to_stage: BasStage;
+  changed_by_staff_id: string | null;
+  changed_at: string;
 }
 
 // Just the columns getClientSummaries' tallies read -- it counts tasks
@@ -776,28 +787,50 @@ export async function reassignTaskTemporarily(
   return true;
 }
 
-// Moves a BAS/IAS task through the /bas-status approval pipeline --
+// Moves a BAS/IAS task through the /bas-status approval pipeline, in either
+// direction -- Pending <-> Ready for Approval <-> Waiting on Customer (the
+// bas-stage API route enforces that a move only ever crosses one adjacent
+// stage boundary; this function itself doesn't care which direction it's
+// called from). The assignee side effect depends only on the TARGET stage:
 // 'ready_for_approval' temporarily hands the task to approverStaffId (Steve)
 // via reassignTaskTemporarily, the exact same temp_assignee_id mechanism My
-// Work already uses for "Assigned to", so the task keeps its original owner
-// and simply shows up on the approver's board too; 'waiting_on_customer'
-// hands it back (reassignTaskTemporarily(taskId, null)) once the approver
-// has actioned it. Callers (the bas-stage API route) are responsible for
-// confirming the task is actually BAS/IAS-typed before calling this --
-// kept generic here since bas_stage itself is a plain column, not
-// type-restricted at the DB level (see migration 022).
+// Work already uses for "Assigned to"; landing on 'pending' or
+// 'waiting_on_customer' reverts to the original owner
+// (reassignTaskTemporarily(taskId, null)) exactly like today's forward
+// "Sent to Client" transition did. Every call also records a
+// bas_stage_history row (migration 023) -- fromStage read off the task as it
+// stood right before this update, changedByStaffId the acting user if the
+// bas-stage route could resolve one (null otherwise, e.g. an admin login
+// with no linked staff record -- no new auth plumbing invented for this).
+// Callers (the bas-stage API route) are responsible for confirming the task
+// is actually BAS/IAS-typed before calling this -- kept generic here since
+// bas_stage itself is a plain column, not type-restricted at the DB level
+// (see migration 022).
 export async function setBasStage(
   taskId: string,
-  stage: "ready_for_approval" | "waiting_on_customer",
-  approverStaffId: string
-): Promise<TaskWithDetails | null> {
+  stage: BasStage,
+  approverStaffId: string,
+  actorStaffId: string | null
+): Promise<{ task: TaskWithDetails; historyEntry: BasStageHistoryEntry } | null> {
+  const admin = getSupabaseAdmin();
+
+  const { data: before, error: beforeError } = await admin
+    .from("tasks")
+    .select("bas_stage")
+    .eq("id", taskId)
+    .single<Pick<TaskRow, "bas_stage">>();
+  if (beforeError || !before) {
+    console.error("[workflow] setBasStage (read current stage) failed:", beforeError?.message);
+    return null;
+  }
+  const fromStage: BasStage = before.bas_stage ?? "pending";
+
   const reassigned = await reassignTaskTemporarily(
     taskId,
     stage === "ready_for_approval" ? approverStaffId : null
   );
   if (!reassigned) return null;
 
-  const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("tasks")
     .update({ bas_stage: stage })
@@ -810,8 +843,79 @@ export async function setBasStage(
     return null;
   }
 
+  const { data: historyRow, error: historyError } = await admin
+    .from("bas_stage_history")
+    .insert({
+      task_id: taskId,
+      from_stage: fromStage,
+      to_stage: stage,
+      changed_by_staff_id: actorStaffId,
+    })
+    .select("*")
+    .single<BasStageHistoryRow>();
+  if (historyError || !historyRow) {
+    console.error("[workflow] setBasStage (history insert) failed:", historyError?.message);
+    return null;
+  }
+
   const lookups = await fetchLookupMaps();
-  return hydrateTask(data, lookups);
+  return {
+    task: hydrateTask(data, lookups),
+    historyEntry: {
+      id: historyRow.id,
+      taskId: historyRow.task_id,
+      fromStage: historyRow.from_stage,
+      toStage: historyRow.to_stage,
+      changedByStaffId: historyRow.changed_by_staff_id,
+      changedByName: actorStaffId ? lookups.staffById.get(actorStaffId)?.name ?? null : null,
+      changedAt: historyRow.changed_at,
+    },
+  };
+}
+
+// Every bas_stage_history row for the given tasks, grouped by task_id and
+// sorted oldest-first within each group -- feeds /bas-status's per-card
+// "History (n)" expandable section. Fetched in one batch for the whole
+// board rather than per-card, same reasoning as fetchLookupMaps.
+export async function getBasStageHistoryForTasks(
+  taskIds: string[]
+): Promise<Map<string, BasStageHistoryEntry[]>> {
+  const result = new Map<string, BasStageHistoryEntry[]>();
+  if (taskIds.length === 0) return result;
+
+  const admin = getSupabaseAdmin();
+  const [{ data, error }, lookups] = await Promise.all([
+    admin
+      .from("bas_stage_history")
+      .select("*")
+      .in("task_id", taskIds)
+      .order("changed_at", { ascending: true })
+      .returns<BasStageHistoryRow[]>(),
+    fetchLookupMaps(),
+  ]);
+
+  if (error) {
+    console.error("[workflow] getBasStageHistoryForTasks failed:", error.message);
+    return result;
+  }
+
+  for (const row of data ?? []) {
+    const entry: BasStageHistoryEntry = {
+      id: row.id,
+      taskId: row.task_id,
+      fromStage: row.from_stage,
+      toStage: row.to_stage,
+      changedByStaffId: row.changed_by_staff_id,
+      changedByName: row.changed_by_staff_id
+        ? lookups.staffById.get(row.changed_by_staff_id)?.name ?? null
+        : null,
+      changedAt: row.changed_at,
+    };
+    const list = result.get(row.task_id);
+    if (list) list.push(entry);
+    else result.set(row.task_id, [entry]);
+  }
+  return result;
 }
 
 // Every job attached to a given customer, with its manager's name -- feeds
