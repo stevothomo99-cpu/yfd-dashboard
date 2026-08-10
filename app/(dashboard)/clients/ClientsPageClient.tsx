@@ -12,7 +12,7 @@ import {
   type PeriodSelection,
   type UtilisationPeriodKey,
 } from "@/lib/workOverview";
-import type { ClientSummary } from "@/types/workflow";
+import type { ClientSummary, WorkflowCustomer, WorkflowStaff, WorkflowStatus, WorkflowTaskType } from "@/types/workflow";
 import type { XpmTimesheet } from "@/types/xpm";
 
 type Filter = "all" | TileStatus;
@@ -46,6 +46,13 @@ interface ClientsPageClientProps {
   // stored link to a Xero contact), prefetched for all four period buttons
   // up front so the slicer doesn't need a client-side round trip.
   revenueByPeriodByClientId: Record<UtilisationPeriodKey, Record<string, number>>;
+  // Reference data for the task drill-down modal opened from a client's
+  // Overdue/In progress/Completed task rows in TileDrawer -- same shapes
+  // My Work and BAS Status already pass into that same modal.
+  staffForModal: WorkflowStaff[];
+  statuses: WorkflowStatus[];
+  taskTypes: WorkflowTaskType[];
+  clientsForModal: WorkflowCustomer[];
 }
 
 function todayIso(): string {
@@ -63,6 +70,10 @@ export default function ClientsPageClient({
   staffIds,
   clientNamesById,
   revenueByPeriodByClientId,
+  staffForModal,
+  statuses,
+  taskTypes,
+  clientsForModal,
 }: ClientsPageClientProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -365,7 +376,15 @@ export default function ClientsPageClient({
         </div>
       )}
 
-      <TileDrawer tile={activeTile} onClose={() => setActiveTile(null)} allClients={allClientOptions} />
+      <TileDrawer
+        tile={activeTile}
+        onClose={() => setActiveTile(null)}
+        allClients={allClientOptions}
+        staff={staffForModal}
+        statuses={statuses}
+        taskTypes={taskTypes}
+        clients={clientsForModal}
+      />
     </div>
   );
 }

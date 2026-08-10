@@ -1,5 +1,6 @@
 import ClientsPageClient from "./ClientsPageClient";
-import { getClientSummaries, listStaff } from "@/lib/workflow";
+import { getClientSummaries, listStaff, listStatuses, listTaskTypes } from "@/lib/workflow";
+import type { WorkflowCustomer } from "@/types/workflow";
 import { getSettings } from "@/lib/settings";
 import { getXpmTimesheets, isXpmConfigured } from "@/lib/xpm";
 import { getRevenueByClientName, isXeroAccountingConfigured } from "@/lib/xeroAccounting";
@@ -25,7 +26,12 @@ import type { XpmTimesheet } from "@/types/xpm";
 // XPM clients by exact name (confirmed decision -- no stored link between
 // an XPM client and a Xero Accounting contact).
 export default async function ClientsPage() {
-  const [tiles, allStaff] = await Promise.all([getClientSummaries(), listStaff()]);
+  const [tiles, allStaff, statuses, taskTypes] = await Promise.all([
+    getClientSummaries(),
+    listStaff(),
+    listStatuses(),
+    listTaskTypes(),
+  ]);
   // Settings → Included staff. Excluded people drop out of the slicer and out
   // of the hours totals, so the two agree -- a slicer option that can't be
   // reached from the totals would just look broken.
@@ -33,6 +39,18 @@ export default async function ClientsPage() {
   const staffOptions = staff
     .map((s) => ({ id: s.id, name: s.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Same shape the task modal already expects elsewhere (My Work, BAS
+  // Status) -- ClientSummary carries everything WorkflowCustomer actually
+  // needs (id/xpmClientId/name) except partnerId, which the modal's own
+  // code never reads (only used to satisfy the type), so it's safe to
+  // synthesize as null rather than fetching a second, full client list.
+  const clientsForModal: WorkflowCustomer[] = tiles.map((t) => ({
+    id: t.id,
+    xpmClientId: t.xpmClientId,
+    name: t.name,
+    partnerId: null,
+  }));
 
   const clientNamesById: Record<string, string> = {};
   for (const t of tiles) {
@@ -58,6 +76,10 @@ export default async function ClientsPage() {
       staffIds={staffIds}
       clientNamesById={clientNamesById}
       revenueByPeriodByClientId={revenueByPeriodByClientId}
+      staffForModal={staff}
+      statuses={statuses}
+      taskTypes={taskTypes}
+      clientsForModal={clientsForModal}
     />
   );
 }

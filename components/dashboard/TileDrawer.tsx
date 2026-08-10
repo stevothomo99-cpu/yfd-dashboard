@@ -5,8 +5,19 @@ import StaffAvatar from "./StaffAvatar";
 import CopyTaskModal from "./CopyTaskModal";
 import SaveTemplateModal from "./SaveTemplateModal";
 import ApplyTemplateModal from "./ApplyTemplateModal";
+import NewTaskModal from "./NewTaskModal";
 import { formatDate, initialsOf } from "@/lib/utils";
-import type { ClientSummary, CustomerFile, CustomerNote, JobWithManager, TaskWithDetails } from "@/types/workflow";
+import type {
+  ClientSummary,
+  CustomerFile,
+  CustomerNote,
+  JobWithManager,
+  TaskWithDetails,
+  WorkflowCustomer,
+  WorkflowStaff,
+  WorkflowStatus,
+  WorkflowTaskType,
+} from "@/types/workflow";
 
 interface Props {
   tile: ClientSummary | null;
@@ -16,6 +27,12 @@ interface Props {
   // ClientsPageClient.tsx, which already loads the full tile list for its
   // own grid, rather than fetching a second copy here.
   allClients: { id: string; name: string }[];
+  // Reference data for the task drill-down modal (My Work/BAS Status use
+  // the same NewTaskModal, same shapes).
+  staff: WorkflowStaff[];
+  statuses: WorkflowStatus[];
+  taskTypes: WorkflowTaskType[];
+  clients: WorkflowCustomer[];
 }
 
 function todayIso(): string {
@@ -35,7 +52,7 @@ function fmtBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function TileDrawer({ tile, onClose, allClients }: Props) {
+export default function TileDrawer({ tile, onClose, allClients, staff, statuses, taskTypes, clients }: Props) {
   const [jobs, setJobs] = useState<JobWithManager[]>([]);
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [notes, setNotes] = useState<CustomerNote[]>([]);
@@ -48,6 +65,7 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyingTask, setCopyingTask] = useState<TaskWithDetails | null>(null);
+  const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [showApplyTemplate, setShowApplyTemplate] = useState(false);
 
@@ -259,7 +277,7 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
               {overdue.length === 0 ? (
                 <Empty label="No overdue tasks." />
               ) : (
-                <Stack>{overdue.map((t) => <WorkItemRow key={t.id} task={t} accent="#e24b4a" onCopy={setCopyingTask} />)}</Stack>
+                <Stack>{overdue.map((t) => <WorkItemRow key={t.id} task={t} accent="#e24b4a" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
               )}
             </Section>
 
@@ -267,7 +285,7 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
               {inProgress.length === 0 ? (
                 <Empty label="Nothing in progress." />
               ) : (
-                <Stack>{inProgress.map((t) => <WorkItemRow key={t.id} task={t} accent="#2a78d6" onCopy={setCopyingTask} />)}</Stack>
+                <Stack>{inProgress.map((t) => <WorkItemRow key={t.id} task={t} accent="#2a78d6" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
               )}
             </Section>
 
@@ -275,7 +293,7 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
               {completed.length === 0 ? (
                 <Empty label="No completed tasks yet." />
               ) : (
-                <Stack>{completed.map((t) => <WorkItemRow key={t.id} task={t} accent="#1baf7a" onCopy={setCopyingTask} />)}</Stack>
+                <Stack>{completed.map((t) => <WorkItemRow key={t.id} task={t} accent="#1baf7a" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
               )}
             </Section>
           </>
@@ -439,6 +457,18 @@ export default function TileDrawer({ tile, onClose, allClients }: Props) {
         />
       ) : null}
 
+      {editingTask ? (
+        <NewTaskModal
+          onClose={() => setEditingTask(null)}
+          onCreated={refreshTasks}
+          clients={clients}
+          staff={staff}
+          statuses={statuses}
+          taskTypes={taskTypes}
+          editTask={editingTask}
+        />
+      ) : null}
+
       {showSaveTemplate ? (
         <SaveTemplateModal
           customerName={tile.name}
@@ -464,13 +494,23 @@ function WorkItemRow({
   task,
   accent,
   onCopy,
+  onOpen,
 }: {
   task: TaskWithDetails;
   accent: string;
   onCopy: (task: TaskWithDetails) => void;
+  onOpen: (task: TaskWithDetails) => void;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px" }}>
+    <div
+      onClick={() => onOpen(task)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onOpen(task);
+      }}
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px", cursor: "pointer" }}
+    >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {task.title}
@@ -482,7 +522,10 @@ function WorkItemRow({
       </div>
       <button
         type="button"
-        onClick={() => onCopy(task)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onCopy(task);
+        }}
         style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", flexShrink: 0, marginLeft: "8px" }}
       >
         Copy…
