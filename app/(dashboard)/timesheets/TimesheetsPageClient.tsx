@@ -257,22 +257,20 @@ export default function TimesheetsPageClient({
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
 
-  // Internal (YFD) -- per employee, hours that are internal YFD work
-  // (leave/idle/admin, all coded to the internal client) rather than
-  // billable client work. Reuses computeWagesUtilisation's own
-  // classification (lib/workOverview.ts: clientId === INTERNAL_CLIENT_XPM_ID,
-  // then split by taskName via isIdleTask/LEAVE_TASK_NAME) instead of
-  // re-deriving it here, so this tile can't drift from the By employee
-  // figures or the KPI cards above.
+  // Internal (YFD) -- per employee, a breakdown of the same four firm-wide
+  // tiles above (Admin/Meetings, Leave, Idle, Unlogged) rather than one
+  // merged "internal" number -- collapsing them loses exactly the
+  // "who coded what to YFD" and "how much of the 38hr capacity is assumed
+  // non-billable" visibility Steve asked to see per person. Reuses
+  // computeWagesUtilisation's own fields (lib/workOverview.ts) so this
+  // can't drift from the KPI cards or the By employee table.
   //
-  // The "or if not registered" half of the brief -- time logged against a
-  // job XPM couldn't match to a real client -- isn't representable from
-  // this array: fetchXpmTimesheetsForPartner (lib/xpm.ts) already drops
-  // those entries before they become an XpmTimesheet (clientId is
-  // non-nullable there), so there's no null/unmatched clientId to test for
-  // by the time data reaches this page. Surfacing that half would mean
-  // changing what that fetch keeps, which affects every consumer of
-  // getXpmTimesheets (dashboard, business KPIs), not just this tile.
+  // The "or if not registered" half of the original brief -- time logged
+  // against a job XPM couldn't match to a real client -- still isn't
+  // representable here: fetchXpmTimesheetsForPartner (lib/xpm.ts) already
+  // drops those entries before they become an XpmTimesheet (clientId is
+  // non-nullable there), so there's no unmatched-client bucket to show by
+  // the time data reaches this page without changing that upstream fetch.
   const internalByStaff = useMemo(
     () =>
       staffOptions
@@ -280,14 +278,24 @@ export default function TimesheetsPageClient({
           const u = computeWagesUtilisation(timesheets, [s.id], selection, today);
           return {
             staff: s,
-            internalHours: u.leaveHours + u.internalOtherHours + u.idleHours,
-            loggedHours: u.loggedHours,
+            adminHours: u.internalOtherHours,
+            leaveHours: u.leaveHours,
+            idleHours: u.idleHours,
+            unloggedHours: u.unloggedHours,
           };
         })
-        .sort((a, b) => b.internalHours - a.internalHours),
+        .sort((a, b) => a.unloggedHours + a.adminHours + a.leaveHours + a.idleHours < b.unloggedHours + b.adminHours + b.leaveHours + b.idleHours ? 1 : -1),
     [staffOptions, timesheets, selection, today],
   );
-  const totalInternalHours = internalByStaff.reduce((acc, r) => acc + r.internalHours, 0);
+  const internalTotals = internalByStaff.reduce(
+    (acc, r) => ({
+      adminHours: acc.adminHours + r.adminHours,
+      leaveHours: acc.leaveHours + r.leaveHours,
+      idleHours: acc.idleHours + r.idleHours,
+      unloggedHours: acc.unloggedHours + r.unloggedHours,
+    }),
+    { adminHours: 0, leaveHours: 0, idleHours: 0, unloggedHours: 0 },
+  );
 
   return (
     <div>
@@ -563,7 +571,7 @@ export default function TimesheetsPageClient({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
           <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Internal (YFD)</div>
           <div style={{ fontSize: "11px", color: "#888780" }}>
-            {totalInternalHours.toFixed(1)} hrs total · leave, idle &amp; admin
+            who coded what to YFD, and what's assumed non-billable per person
           </div>
         </div>
 
@@ -581,33 +589,51 @@ export default function TimesheetsPageClient({
           }}
         >
           <div style={{ flex: 1 }}>Employee</div>
-          <HeadCell>Internal</HeadCell>
-          <HeadCell>% logged</HeadCell>
+          <HeadCell>Admin / meetings</HeadCell>
+          <HeadCell>Leave</HeadCell>
+          <HeadCell>Idle</HeadCell>
+          <HeadCell>Unlogged</HeadCell>
         </div>
 
         {internalByStaff.length === 0 ? (
           <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>No staff to show.</div>
         ) : (
           <div>
-            {internalByStaff.map(({ staff, internalHours, loggedHours }) => {
-              const pctOfLogged = loggedHours > 0 ? Math.round((internalHours / loggedHours) * 100) : null;
-              return (
-                <div
-                  key={staff.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    padding: "10px 0",
-                    borderBottom: "0.5px solid #e1e0d9",
-                  }}
-                >
-                  <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
-                  <Cell>{internalHours.toFixed(1)}</Cell>
-                  <Cell dim>{pctOfLogged !== null ? `${pctOfLogged}%` : "—"}</Cell>
-                </div>
-              );
-            })}
+            {internalByStaff.map(({ staff, adminHours, leaveHours, idleHours, unloggedHours }) => (
+              <div
+                key={staff.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "10px 0",
+                  borderBottom: "0.5px solid #e1e0d9",
+                }}
+              >
+                <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
+                <Cell>{adminHours.toFixed(1)}</Cell>
+                <Cell>{leaveHours.toFixed(1)}</Cell>
+                <Cell>{idleHours.toFixed(1)}</Cell>
+                <Cell dim={unloggedHours <= 0}>{unloggedHours.toFixed(1)}</Cell>
+              </div>
+            ))}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "10px 0 0",
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "#111111",
+              }}
+            >
+              <div style={{ flex: 1 }}>Total</div>
+              <Cell>{internalTotals.adminHours.toFixed(1)}</Cell>
+              <Cell>{internalTotals.leaveHours.toFixed(1)}</Cell>
+              <Cell>{internalTotals.idleHours.toFixed(1)}</Cell>
+              <Cell>{internalTotals.unloggedHours.toFixed(1)}</Cell>
+            </div>
           </div>
         )}
       </div>
