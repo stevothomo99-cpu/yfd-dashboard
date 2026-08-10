@@ -1,7 +1,16 @@
 import { auth } from "@/auth";
 import BasStatusPageClient from "./BasStatusPageClient";
-import { getAllTasks, getBasStageHistoryForTasks, listStaff } from "@/lib/workflow";
+import {
+  getAllTasks,
+  getBasStageHistoryForTasks,
+  getPartners,
+  listStaff,
+  listStatuses,
+  listTaskTypes,
+  searchClientsForPartner,
+} from "@/lib/workflow";
 import { BAS_TASK_TYPE_ID } from "@/lib/workOverview";
+import type { WorkflowCustomer } from "@/types/workflow";
 
 // Server entry point for the BAS/IAS approval-pipeline board -- see
 // migration 022/023 and lib/workflow.ts's setBasStage. Practice-wide (every
@@ -13,10 +22,24 @@ export default async function BasStatusPage() {
   const session = await auth();
   const isAdmin = session?.user?.role === "admin";
 
-  const [allTasks, staff] = await Promise.all([getAllTasks(), listStaff()]);
+  const [allTasks, staff, partners, statuses, taskTypes] = await Promise.all([
+    getAllTasks(),
+    listStaff(),
+    getPartners(),
+    listStatuses(),
+    listTaskTypes(),
+  ]);
   const basTasks = allTasks.filter((t) => t.typeId === BAS_TASK_TYPE_ID);
   const historyByTaskId = await getBasStageHistoryForTasks(basTasks.map((t) => t.id));
   const initialHistory = Object.fromEntries(historyByTaskId);
+
+  // Same practice-wide client list My Work gives an admin -- the task modal
+  // opened from a BAS card needs every client available, not just one
+  // partner's, since this board itself is already practice-wide.
+  const clientsByPartner = await Promise.all(partners.map((p) => searchClientsForPartner(p.id)));
+  const clientsById = new Map<string, WorkflowCustomer>();
+  for (const clients of clientsByPartner) for (const client of clients) clientsById.set(client.id, client);
+  const allClients = Array.from(clientsById.values());
 
   return (
     <BasStatusPageClient
@@ -24,6 +47,9 @@ export default async function BasStatusPage() {
       staff={staff}
       isAdmin={isAdmin}
       initialHistory={initialHistory}
+      clients={allClients}
+      statuses={statuses}
+      taskTypes={taskTypes}
     />
   );
 }
