@@ -86,6 +86,7 @@ interface TaskRow {
   recurrence: RecurrenceInterval;
   recurrence_parent_id: string | null;
   completed_at: string | null;
+  completed_by_staff_id: string | null;
   created_at: string;
   updated_at: string;
   karbon_client_name: string | null;
@@ -314,6 +315,10 @@ function hydrateTask(
     recurrence: row.recurrence,
     recurrenceParentId: row.recurrence_parent_id,
     completedAt: row.completed_at,
+    completedByStaffId: row.completed_by_staff_id,
+    completedByName: row.completed_by_staff_id
+      ? lookups.staffById.get(row.completed_by_staff_id)?.name ?? null
+      : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     customerName: customer?.name ?? "Unknown client",
@@ -607,18 +612,36 @@ async function generateNextOccurrence(completed: TaskRow, lookups: Awaited<Retur
 //    zero rows.
 //  - Marking an occurrence complete rolls the series forward -- see
 //    generateNextOccurrence.
+//  - Landing on a complete status stamps completed_at/completed_by_staff_id
+//    (a small audit note, not a full history log); moving off one clears
+//    both, since they describe current state, not "was ever completed."
+//    actorStaffId is who's doing this edit -- null if unknown (e.g. an
+//    admin login with no linked staff row) -- and is only ever written
+//    when patch.statusId actually changes the completion state.
 export async function updateTask(
   taskId: string,
-  patch: UpdateTaskInput
+  patch: UpdateTaskInput,
+  actorStaffId: string | null = null
 ): Promise<TaskWithDetails | null> {
   const admin = getSupabaseAdmin();
+  const lookups = await fetchLookupMaps();
+
   const update: Record<string, unknown> = {};
   if (patch.customerId !== undefined) update.customer_id = patch.customerId;
   if (patch.title !== undefined) update.title = patch.title;
   if (patch.assigneeId !== undefined) update.assignee_id = patch.assigneeId;
   if (patch.dueDate !== undefined) update.due_date = patch.dueDate;
   if (patch.startDate !== undefined) update.start_date = patch.startDate;
-  if (patch.statusId !== undefined) update.status_id = patch.statusId;
+  if (patch.statusId !== undefined) {
+    update.status_id = patch.statusId;
+    if (lookups.statusesById.get(patch.statusId)?.is_complete) {
+      update.completed_at = new Date().toISOString();
+      update.completed_by_staff_id = actorStaffId;
+    } else {
+      update.completed_at = null;
+      update.completed_by_staff_id = null;
+    }
+  }
   if (patch.typeId !== undefined) update.type_id = patch.typeId;
   if (patch.recurrence !== undefined) update.recurrence = patch.recurrence;
   if (patch.details !== undefined) update.details = patch.details;
@@ -634,8 +657,6 @@ export async function updateTask(
     console.error("[workflow] updateTask failed:", error.message);
     return null;
   }
-
-  const lookups = await fetchLookupMaps();
 
   const shared = sharedFieldUpdate(patch);
   if (shared) {

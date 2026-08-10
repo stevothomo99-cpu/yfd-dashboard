@@ -45,6 +45,15 @@ function toneOf(t: TaskWithDetails, today: string): "overdue" | "normal" | "comp
   return "normal";
 }
 
+const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
+  none: "One-off",
+  daily: "Daily",
+  weekly: "Weekly",
+  fortnightly: "Fortnightly",
+  monthly: "Monthly",
+  quarterly: "Quarterly",
+};
+
 function fmtBytes(bytes: number | null): string {
   if (bytes == null) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -122,6 +131,10 @@ export default function TileDrawer({ tile, onClose, allClients, staff, statuses,
   const overdue = tasks.filter((t) => toneOf(t, today) === "overdue");
   const inProgress = tasks.filter((t) => toneOf(t, today) === "normal");
   const completed = tasks.filter((t) => toneOf(t, today) === "completed");
+  // A cross-cutting view, not a status bucket -- what's currently set to
+  // recur against this client at all, regardless of where any one
+  // occurrence sits in Overdue/In progress/Completed above.
+  const recurring = tasks.filter((t) => t.recurrence !== "none");
 
   async function handleAddNote() {
     if (!tile || !noteText.trim()) return;
@@ -294,6 +307,18 @@ export default function TileDrawer({ tile, onClose, allClients, staff, statuses,
                 <Empty label="No completed tasks yet." />
               ) : (
                 <Stack>{completed.map((t) => <WorkItemRow key={t.id} task={t} accent="#1baf7a" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
+              )}
+            </Section>
+
+            <Section title={`Recurring · ${recurring.length}`}>
+              {recurring.length === 0 ? (
+                <Empty label="Nothing set to recur on this client." />
+              ) : (
+                <Stack>
+                  {recurring.map((t) => (
+                    <WorkItemRow key={t.id} task={t} accent="#8a5ea8" onCopy={setCopyingTask} onOpen={setEditingTask} showRecurrence />
+                  ))}
+                </Stack>
               )}
             </Section>
           </>
@@ -495,11 +520,17 @@ function WorkItemRow({
   accent,
   onCopy,
   onOpen,
+  showRecurrence,
 }: {
   task: TaskWithDetails;
   accent: string;
   onCopy: (task: TaskWithDetails) => void;
   onOpen: (task: TaskWithDetails) => void;
+  // Recurring is a cross-cutting list, not a status bucket -- the frequency
+  // is the useful thing to see there, in place of the due date every other
+  // section already shows (a recurring task's due date is just whichever
+  // occurrence happens to be open right now, not the interesting fact).
+  showRecurrence?: boolean;
 }) {
   return (
     <div
@@ -517,7 +548,10 @@ function WorkItemRow({
         </div>
         <div style={{ fontSize: "12px", color: "#888780", marginTop: "4px" }}>
           {task.typeName ? `${task.typeName} · ` : ""}
-          {task.assigneeName ?? "Unassigned"} · Due {formatDate(task.dueDate)}
+          {task.assigneeName ?? "Unassigned"}
+          {showRecurrence
+            ? ` · ${RECURRENCE_LABEL[task.recurrence]}`
+            : ` · Due ${formatDate(task.dueDate)}`}
         </div>
       </div>
       <button
