@@ -203,3 +203,132 @@ export async function buildFollowUpData(todayIso: string = aestTodayIso()): Prom
 export async function getFollowUpSummaryRecipients(): Promise<WorkflowStaff[]> {
   return getCombinedReportRecipients();
 }
+
+// ── Personal, multi-week shortfall (draft #4) ──────────────────────────
+//
+// The single-week nudge above tells someone they're short THIS week, but
+// says nothing about a week from a month ago that never got topped up --
+// each week is judged independently and then forgotten. This instead looks
+// back across every completed week of the current FY and lists every one
+// that's still short, so a person (and whoever else reads their email) can
+// see the whole open backlog in one place, not just the most recent gap.
+
+export interface WeekShortfall {
+  startIso: string; // Monday
+  endIso: string; // Sunday
+  loggedHours: number;
+  standardHours: number;
+  hoursShort: number;
+}
+
+// Every completed Monday-Sunday week from fromIso through priorWeek
+// (inclusive) -- the current, still-in-progress week is deliberately
+// excluded since it can't be judged short yet (same reasoning as
+// priorWeekFor itself).
+function completedWeeksSince(fromIso: string, priorWeek: PriorWeek): PriorWeek[] {
+  const weeks: PriorWeek[] = [];
+  const cursor = new Date(fromIso + "T00:00:00Z");
+  const lastEnd = new Date(priorWeek.endIso + "T00:00:00Z");
+  while (cursor.getTime() <= lastEnd.getTime()) {
+    const end = new Date(cursor);
+    end.setUTCDate(end.getUTCDate() + 6);
+    weeks.push({ startIso: cursor.toISOString().slice(0, 10), endIso: end.toISOString().slice(0, 10) });
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return weeks;
+}
+
+export interface PersonalShortfallData {
+  staffId: string;
+  staffName: string;
+  email: string;
+  rangeStartIso: string; // start of the current FY
+  rangeEndIso: string; // end of the last completed week
+  shortWeeks: WeekShortfall[];
+  totalHoursShort: number;
+  // This person's own FY-to-date figures -- billableCapacityPct is the
+  // same "performance-manage on" figure the Partner summary shows for
+  // everyone (§6.1), pct is how much of their capacity is accounted for at
+  // all (the "logged %" half of the ask), and fytdHours is their logged
+  // hours for context.
+  fytdBillableCapacityPct: number | null;
+  fytdLoggedPct: number;
+  fytdHours: number;
+}
+
+function computeShortfallForStaff(
+  staff: WorkflowStaff & { xpmStaffId: string },
+  timesheets: XpmTimesheet[],
+  weeks: PriorWeek[],
+  fytdRange: { start: string; end: string },
+  todayIso: string,
+): PersonalShortfallData {
+  const shortWeeks: WeekShortfall[] = [];
+  for (const week of weeks) {
+    const result = computeWagesUtilisation(
+      timesheets,
+      [staff.xpmStaffId],
+      { start: week.startIso, end: week.endIso },
+      todayIso,
+    );
+    const hoursShort = Math.max(0, result.standardHours - result.loggedHours);
+    if (hoursShort > 0) {
+      shortWeeks.push({
+        startIso: week.startIso,
+        endIso: week.endIso,
+        loggedHours: result.loggedHours,
+        standardHours: result.standardHours,
+        hoursShort,
+      });
+    }
+  }
+
+  const fytd = computeWagesUtilisation(timesheets, [staff.xpmStaffId], fytdRange, todayIso);
+
+  return {
+    staffId: staff.id,
+    staffName: staff.name,
+    email: staff.email,
+    rangeStartIso: weeks[0]?.startIso ?? todayIso,
+    rangeEndIso: weeks[weeks.length - 1]?.endIso ?? todayIso,
+    shortWeeks,
+    totalHoursShort: shortWeeks.reduce((sum, w) => sum + w.hoursShort, 0),
+    fytdBillableCapacityPct: fytd.billableCapacityPct,
+    fytdLoggedPct: fytd.pct,
+    fytdHours: fytd.loggedHours,
+  };
+}
+
+// One row per included, XPM-linked staff member who has at least one short
+// week this FY -- staff with a clean record aren't included at all (nothing
+// to send them). Same XPM-availability guards as buildFollowUpData.
+export async function buildPersonalShortfallData(todayIso: string = aestTodayIso()): Promise<PersonalShortfallData[]> {
+  if (!isXpmConfigured()) return [];
+
+  const settings = await getSettings();
+  if (!settings.partnerName) return [];
+
+  let timesheets: XpmTimesheet[];
+  try {
+    timesheets = await getXpmTimesheets(settings.partnerName);
+  } catch (err) {
+    console.error("[timesheetReminders] getXpmTimesheets failed:", err instanceof Error ? err.message : err);
+    return [];
+  }
+
+  const staffList = (await listStaff())
+    .filter((s) => s.included)
+    .filter((s): s is WorkflowStaff & { xpmStaffId: string } => Boolean(s.xpmStaffId));
+
+  const priorWeek = priorWeekFor(todayIso);
+  const today = new Date(todayIso + "T00:00:00Z");
+  const { start: fyStart } = fyRange(fyYearFor(today));
+  const fyStartIso = fyStart.toISOString().slice(0, 10);
+  const weeks = completedWeeksSince(fyStartIso, priorWeek);
+  const fytdRange = { start: fyStartIso, end: todayIso };
+
+  return staffList
+    .map((s) => computeShortfallForStaff(s, timesheets, weeks, fytdRange, todayIso))
+    .filter((d) => d.shortWeeks.length > 0)
+    .sort((a, b) => b.totalHoursShort - a.totalHoursShort);
+}

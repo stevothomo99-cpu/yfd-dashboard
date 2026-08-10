@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildFollowUpData, getFollowUpSummaryRecipients } from "@/lib/timesheetReminders";
-import { renderFollowUpNudgeEmail, renderFollowUpSummaryEmail } from "@/lib/emailTemplates/timesheetReminders";
+import { buildFollowUpData, buildPersonalShortfallData, getFollowUpSummaryRecipients } from "@/lib/timesheetReminders";
+import {
+  renderFollowUpNudgeEmail,
+  renderFollowUpSummaryEmail,
+  renderPersonalShortfallEmail,
+} from "@/lib/emailTemplates/timesheetReminders";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 
 // Vercel Cron only issues GET requests -- see vercel.json for the schedule
-// (Monday 02:00 UTC = Monday 12:00 AEST, QLD has no DST). Individual nudges
-// only go to staff still short of a full week; Partners always get the
-// summary, even when nobody's short (so "all clear" is visible too, same
-// convention as the Monday Report's combined report).
+// (Monday 02:00 UTC = Monday 12:00 AEST, QLD has no DST). Three emails fire
+// from this one trigger: a last-week-only nudge and a whole-FY shortfall
+// summary both go to whoever's still short (a person can get both -- they
+// answer different questions, "am I short this week" vs "what's my open
+// backlog"), and Partners always get the firm-wide summary, even when
+// nobody's short (so "all clear" is visible too, same convention as the
+// Monday Report's combined report).
 export const maxDuration = 300;
 
 interface SendResult {
@@ -61,6 +68,27 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const shortfallData = await buildPersonalShortfallData();
+  const shortfallResults: SendResult[] = [];
+  for (const row of shortfallData) {
+    try {
+      const { subject, html, text } = renderPersonalShortfallEmail(row);
+      if (!resendReady) {
+        console.log(`[timesheet-followup] Resend not configured -- would have sent "${subject}" to ${row.email}`);
+        shortfallResults.push({ name: row.staffName, email: row.email, ok: false, error: "Resend not configured" });
+        continue;
+      }
+      shortfallResults.push(await sendOne(row.staffName, row.email, subject, text, html));
+    } catch (err) {
+      shortfallResults.push({
+        name: row.staffName,
+        email: row.email,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const summaryRecipients = await getFollowUpSummaryRecipients();
   const summaryResults: SendResult[] = [];
   if (summaryRecipients.length > 0) {
@@ -82,7 +110,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const allResults = [...individualResults, ...summaryResults];
+  const allResults = [...individualResults, ...shortfallResults, ...summaryResults];
   const failed = allResults.filter((r) => !r.ok);
 
   return NextResponse.json({
@@ -91,6 +119,7 @@ export async function GET(request: NextRequest) {
     timesheetsAvailable: data.timesheetsAvailable,
     unavailableReason: data.unavailableReason,
     incomplete: { total: data.incomplete.length, sent: individualResults.filter((r) => r.ok).length },
+    shortfall: { total: shortfallData.length, sent: shortfallResults.filter((r) => r.ok).length },
     summary: { total: summaryRecipients.length, sent: summaryResults.filter((r) => r.ok).length },
     sent: allResults.filter((r) => r.ok).length,
     failed: failed.length,

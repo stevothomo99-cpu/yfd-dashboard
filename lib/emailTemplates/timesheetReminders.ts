@@ -1,5 +1,5 @@
-import type { FollowUpData, PriorWeek, SubmitReminderData, TimesheetStatusRow } from "@/lib/timesheetReminders";
-import { COLORS, escapeHtml, fmtDateRange, fmtGeneratedAt, htmlShell, masthead, sectionCard, tilesRow } from "./shared";
+import type { FollowUpData, PersonalShortfallData, PriorWeek, SubmitReminderData, TimesheetStatusRow } from "@/lib/timesheetReminders";
+import { COLORS, escapeHtml, fmtDate, fmtDateRange, fmtGeneratedAt, htmlShell, masthead, sectionCard, tilesRow } from "./shared";
 import type { EmailContent } from "./shared";
 
 // Timesheet submission reminder emails -- same shared HTML primitives as
@@ -190,6 +190,93 @@ export function renderFollowUpSummaryEmail(data: FollowUpData): EmailContent {
       textLines.push(`  ${r.staffName}: ${r.fytdBillableCapacityPct !== null ? `${r.fytdBillableCapacityPct}%` : "—"} (${r.fytdHours.toFixed(1)} hrs FYTD)`);
     }
   }
+  textLines.push("");
+  textLines.push(`Generated ${fmtGeneratedAt(generatedAtIso)}`);
+
+  return { subject, html, text: textLines.join("\n") };
+}
+
+// ── Personal, multi-week shortfall (draft #4) ──────────────────────────
+//
+// Unlike renderFollowUpNudgeEmail (last week only), this looks back across
+// the whole FY and lists every completed week that's still short -- so
+// someone who caught up last week but still has a gap from six weeks ago
+// sees it here instead of it going unmentioned forever.
+
+function shortWeeksTable(data: PersonalShortfallData): string {
+  const rows = data.shortWeeks
+    .map(
+      (w) => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.text};">${escapeHtml(fmtDateRange(w.startIso, w.endIso))}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.text};">${w.loggedHours.toFixed(1)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.text};">${w.standardHours.toFixed(1)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.amber};font-weight:600;">${w.hoursShort.toFixed(1)}</td>
+    </tr>`,
+    )
+    .join("");
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Week</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Logged</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Standard</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Short</td>
+    </tr>
+    ${rows}
+  </table>`;
+}
+
+export function renderPersonalShortfallEmail(data: PersonalShortfallData): EmailContent {
+  const firstName = data.staffName.split(" ")[0];
+  const rangeLabel = fmtDateRange(data.rangeStartIso, data.rangeEndIso);
+  const generatedAtIso = new Date().toISOString();
+  const weekCount = data.shortWeeks.length;
+  const subject = `Timesheet follow-up — ${weekCount} week${weekCount === 1 ? "" : "s"} short this FY (${data.totalHoursShort.toFixed(1)} hrs)`;
+
+  const tiles = tilesRow([
+    { label: "Weeks short", value: weekCount, tone: weekCount > 0 ? "amber" : "default" },
+    { label: "Total hours short", value: data.totalHoursShort.toFixed(1), tone: weekCount > 0 ? "amber" : "default" },
+  ]);
+
+  const ytdTiles = tilesRow([
+    { label: "YTD billable %", value: data.fytdBillableCapacityPct !== null ? `${data.fytdBillableCapacityPct}%` : "—" },
+    { label: "YTD logged %", value: `${data.fytdLoggedPct}%` },
+    { label: "YTD hours logged", value: data.fytdHours.toFixed(1) },
+  ]);
+
+  const bodyHtml = `
+    ${masthead("Timesheet follow-up", `Weeks short this FY, as of ${escapeHtml(fmtDate(data.rangeEndIso))}`, generatedAtIso)}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLORS.card};border:1px solid ${COLORS.border};border-top:none;">
+      <tr><td style="padding:18px 24px;">${tiles}</td></tr>
+    </table>
+    ${sectionCard(
+      "Your incomplete weeks this FY",
+      `<div style="font-size:13px;color:${COLORS.text};line-height:1.6;margin-bottom:12px;">
+        Hi ${escapeHtml(firstName)}, these weeks (${escapeHtml(rangeLabel)}) are still short of a full standard week.
+        Please go back and complete them in XPM when you get a chance.
+      </div>${shortWeeksTable(data)}`,
+    )}
+    ${sectionCard("Your YTD summary", ytdTiles)}
+  `;
+  const html = htmlShell(`${weekCount} week${weekCount === 1 ? "" : "s"} short, ${data.totalHoursShort.toFixed(1)} hrs total`, bodyHtml, FOOTER_TEXT);
+
+  const textLines: string[] = [];
+  textLines.push("TIMESHEET FOLLOW-UP — WEEKS SHORT THIS FY");
+  textLines.push(`As of ${fmtDate(data.rangeEndIso)}`);
+  textLines.push("");
+  textLines.push(`Weeks short: ${weekCount}`);
+  textLines.push(`Total hours short: ${data.totalHoursShort.toFixed(1)}`);
+  textLines.push("");
+  textLines.push(`Hi ${firstName}, these weeks are still short of a full standard week. Please complete them in XPM when you can.`);
+  textLines.push("");
+  for (const w of data.shortWeeks) {
+    textLines.push(`  ${fmtDateRange(w.startIso, w.endIso)}: ${w.loggedHours.toFixed(1)}/${w.standardHours.toFixed(1)} hrs, ${w.hoursShort.toFixed(1)} short`);
+  }
+  textLines.push("");
+  textLines.push("YOUR YTD SUMMARY");
+  textLines.push(`  Billable %: ${data.fytdBillableCapacityPct !== null ? `${data.fytdBillableCapacityPct}%` : "—"}`);
+  textLines.push(`  Logged %: ${data.fytdLoggedPct}%`);
+  textLines.push(`  Hours logged: ${data.fytdHours.toFixed(1)}`);
   textLines.push("");
   textLines.push(`Generated ${fmtGeneratedAt(generatedAtIso)}`);
 
