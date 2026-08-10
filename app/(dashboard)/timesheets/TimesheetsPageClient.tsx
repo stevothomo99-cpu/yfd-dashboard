@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils";
 import {
   computeHoursByClient,
   computeWagesUtilisation,
+  periodBounds,
   UTILISATION_PERIODS,
   type DateRange,
   type PeriodSelection,
@@ -200,7 +201,7 @@ export default function TimesheetsPageClient({
   clientNamesById,
   message,
 }: TimesheetsPageClientProps) {
-  const [period, setPeriod] = useState<UtilisationPeriodKey | "custom">("week");
+  const [period, setPeriod] = useState<UtilisationPeriodKey | "custom" | "lastweek">("week");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [showTimeByClient, setShowTimeByClient] = useState(false);
@@ -219,16 +220,30 @@ export default function TimesheetsPageClient({
   const today = todayIso();
   const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
 
+  // "Last week" is just "this week" (startOfWeekMonday/periodBounds, via the
+  // exported periodBounds helper) shifted back 7 days, so it stays a
+  // calendar Monday-Sunday week computed the same way as the "This Week"
+  // button rather than re-deriving the date math here.
+  const lastWeekRange: DateRange = useMemo(() => {
+    const thisWeek = periodBounds("week", new Date(today + "T00:00:00Z"));
+    const start = new Date(thisWeek.start);
+    start.setUTCDate(start.getUTCDate() - 7);
+    const end = new Date(thisWeek.end);
+    end.setUTCDate(end.getUTCDate() - 7);
+    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+  }, [today]);
+
   // A half-filled custom range would silently measure something nobody
   // asked for, so it falls back to the last fixed period until both ends
   // are set. Reversed dates are swapped rather than rejected.
   const customComplete = period === "custom" && Boolean(customFrom) && Boolean(customTo);
   const selection: PeriodSelection = useMemo(() => {
+    if (period === "lastweek") return lastWeekRange;
     if (!customComplete) return period === "custom" ? "week" : period;
     return customFrom <= customTo
       ? { start: customFrom, end: customTo }
       : { start: customTo, end: customFrom };
-  }, [customComplete, period, customFrom, customTo]);
+  }, [customComplete, period, customFrom, customTo, lastWeekRange]);
 
   const utilisation = useMemo(
     () => computeWagesUtilisation(timesheets, practiceStaffIds, selection, today),
@@ -279,6 +294,7 @@ export default function TimesheetsPageClient({
             onClick={() => setPeriod(p.value)}
           />
         ))}
+        <PeriodButton label="Last week" active={period === "lastweek"} onClick={() => setPeriod("lastweek")} />
         <PeriodButton label="Custom…" active={period === "custom"} onClick={() => setPeriod("custom")} />
 
         {period === "custom" ? (
