@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
+import { BAS_TASK_TYPE_ID } from "@/lib/workOverview";
 import type {
+  BasStage,
   CustomerFile,
   CustomerNote,
   RecurrenceInterval,
@@ -12,6 +14,13 @@ import type {
   WorkflowStatus,
   WorkflowTaskType,
 } from "@/types/workflow";
+
+const BAS_STAGE_ORDER: Record<BasStage, number> = { pending: 0, ready_for_approval: 1, waiting_on_customer: 2 };
+const BAS_STAGE_LABEL: Record<BasStage, string> = {
+  pending: "Pending",
+  ready_for_approval: "Ready for Approval",
+  waiting_on_customer: "Waiting on Customer",
+};
 
 interface NewTaskModalProps {
   onClose: () => void;
@@ -82,6 +91,17 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
   const [details, setDetails] = useState(editTask?.details ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The BAS/IAS approval-pipeline stage (see app/(dashboard)/bas-status/)
+  // has its own side effects on transition -- temp-reassignment to Steve,
+  // a history entry, an email on landing on Ready for Approval -- all
+  // handled by the dedicated bas-stage route (lib/workflow.ts's
+  // setBasStage), so this goes through that same route immediately on
+  // click rather than being folded into the regular Save button, which
+  // only knows about the plain PATCH fields above.
+  const [basStage, setBasStage] = useState<BasStage>(editTask?.basStage ?? "pending");
+  const [basStageBusy, setBasStageBusy] = useState(false);
+  const [basStageError, setBasStageError] = useState<string | null>(null);
 
   // Read-only reference list of the selected client's existing notes/files
   // (see app/api/workflow/customers/[id]/notes and .../files, the same
@@ -165,6 +185,27 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
       setError(err instanceof Error ? err.message : `Failed to ${isEdit ? "save" : "create"} task`);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleBasStageTransition(stage: BasStage) {
+    if (!editTask) return;
+    setBasStageBusy(true);
+    setBasStageError(null);
+    try {
+      const res = await fetch(`/api/workflow/tasks/${editTask.id}/bas-stage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update BAS status");
+      setBasStage(stage);
+      onCreated();
+    } catch (err) {
+      setBasStageError(err instanceof Error ? err.message : "Failed to update BAS status");
+    } finally {
+      setBasStageBusy(false);
     }
   }
 
@@ -276,6 +317,59 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
               </select>
             </Field>
           </div>
+
+          {/* Only for an existing BAS/IAS task -- the pipeline stage has
+              real side effects (reassignment, history, an approval email),
+              so it only makes sense once the task exists and is actually
+              BAS/IAS-typed. Uses the currently-selected Category, not just
+              editTask's original type, so it disappears immediately if
+              someone changes the category away from BAS/IAS mid-edit. */}
+          {editTask && typeId === BAS_TASK_TYPE_ID ? (
+            <Field label="BAS Status">
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "13px", color: "#111111", fontWeight: 500 }}>
+                  {BAS_STAGE_LABEL[basStage]}
+                </span>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  {BAS_STAGE_ORDER[basStage] > 0 ? (
+                    <button
+                      type="button"
+                      disabled={basStageBusy}
+                      onClick={() =>
+                        handleBasStageTransition(
+                          (Object.keys(BAS_STAGE_ORDER) as BasStage[]).find(
+                            (s) => BAS_STAGE_ORDER[s] === BAS_STAGE_ORDER[basStage] - 1
+                          )!
+                        )
+                      }
+                      style={secondaryButtonStyle}
+                    >
+                      ‹ Back
+                    </button>
+                  ) : null}
+                  {BAS_STAGE_ORDER[basStage] < 2 ? (
+                    <button
+                      type="button"
+                      disabled={basStageBusy}
+                      onClick={() =>
+                        handleBasStageTransition(
+                          (Object.keys(BAS_STAGE_ORDER) as BasStage[]).find(
+                            (s) => BAS_STAGE_ORDER[s] === BAS_STAGE_ORDER[basStage] + 1
+                          )!
+                        )
+                      }
+                      style={secondaryButtonStyle}
+                    >
+                      Forward ›
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {basStageError ? (
+                <div style={{ fontSize: "11px", color: "#c0392b", marginTop: "2px" }}>{basStageError}</div>
+              ) : null}
+            </Field>
+          ) : null}
 
           {/* A small audit note, not a full history log -- who completed
               this task and when, cleared again if it's reopened (see
