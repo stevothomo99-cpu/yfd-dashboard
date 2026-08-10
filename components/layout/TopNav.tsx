@@ -11,10 +11,12 @@ import { initialsOf } from "@/lib/utils";
 // their API routes are untouched, just unlinked, so they're easy to compare
 // against or restore if needed. The standalone Jobs list (/jobs) was
 // retired outright -- jobs now live under each client's tile on /clients.
+// /leaderboard was retired the same way -- its ranked table now lives on
+// /team (see CONTEXT.md §0).
 //
-// Nav is role-gated: Business KPIs/Team/Leaderboard/Settings are
-// company-wide/admin views, only shown to admins. Dashboard/My Work/
-// Clients/Timesheets are every user's own work tools.
+// Nav is role-gated: Business KPIs/Team/Settings are company-wide/admin
+// views, only shown to admins. Dashboard/My Work/Clients/Timesheets are
+// every user's own work tools.
 // Karbon Import moved under Settings (still at /karbon-import, just no
 // longer a top-level nav item -- it's a one-off/occasional admin action,
 // not something anyone needs one click away every day) -- see the link on
@@ -22,7 +24,6 @@ import { initialsOf } from "@/lib/utils";
 const ADMIN_ONLY_ITEMS = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
-  { label: "Leaderboard", href: "/leaderboard" },
   { label: "BAS Status", href: "/bas-status" },
 ];
 const EVERYONE_ITEMS = [
