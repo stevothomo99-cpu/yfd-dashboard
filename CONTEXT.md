@@ -1,22 +1,11 @@
 # YFD Dashboard — Project Context Document
 
-**Version:** 5.0
+**Version:** 5.1
 **Last updated:** 10 August 2026
 **Owner:** CEO (Steve Thomas), Your Finance Department (YFD)
 **Purpose:** Full context for any developer or AI coding assistant picking up this project. Describes what is **actually built and deployed**, not a spec or plan.
 
-v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). v4.3 moves tasks/workflow off jobs and onto clients entirely (§6) — the same job-vs-client confusion already fixed once on Manager allocations, this time in the tasks table's own foreign key. **v5.0 is one long session's worth of feature work on top of that foundation**: a new BAS approval-pipeline page (§6.5), a weekly Monday Report email (§6.4), a task completion audit trail (§6.6), a `/my-work` and `/timesheets` round of polish, and an in-progress `/team`+`/leaderboard` merge — see **"Pick up here"** immediately below before doing anything else in a new session.
-
----
-
-## 0. Pick up here (in progress as of v5.0)
-
-**The `/team` + `/leaderboard` merge is mid-flight.** Both pages are still the old 100%-Karbon/mock pages described in §10 as of this writing — the rebuild (real Supabase/XPM data, the completed 50/30/20 leaderboard formula, retiring Karbon/mock for this page) has been attempted three times in this session. The first two attempts vanished silently (no commit, no error, no notification — cause unknown, possibly a very-long-session/background-agent lifetime issue, not a problem with the task itself). The third attempt was dispatched in an **isolated git worktree** specifically to rule out shared-working-directory corruption (see the gotcha below) and was still running when this session ended.
-
-**To pick this up in a new session:**
-1. Check `/home/user/yfd-dashboard/.claude/worktrees/` for a directory matching an agent id — if one exists with commits on its branch (`worktree-agent-<id>`), review the diff, typecheck/build it, and merge (`git merge --ff-only worktree-agent-<id>` from the main checkout, or cherry-pick if it's diverged).
-2. If no worktree/commits exist, the third attempt also died silently — just redispatch the same task fresh. The prompt used each time is preserved in this session's history; the short version: retire `lib/dashboardData.ts`'s Karbon/mock loading for `/team`, delete `/leaderboard` and fold its ranked table into `/team`, implement the real 50% billable-hours / 30% task-completion / 20% BAS-on-time formula in `lib/leaderboard.ts` (billable data is now available via `lib/workOverview.ts`'s `computeWagesUtilisation` — it wasn't when that formula was originally scoped out to 60/40), and use `completed_at <= due_date` for BAS on-time now that `completed_at` is actually populated (§6.6) instead of the old "not currently overdue" proxy.
-3. **Known-good starting point**: `main` at commit `026c915` ("Move Karbon Import under Settings (#84)") has everything else in this changelog already merged and deployed. `/team` and `/leaderboard` are the only two pages this version doesn't touch.
+v3.0 described the XPM-native practice-management system replacing Karbon. v4.0 keeps that architecture and records a large round of correctness work on top of it: the timesheet figures were wrong in three independent ways (§4.1, §6.1), a client's Manager was being inferred rather than read (§6), and the XPM client silently dropped data under rate limiting (§4.1). v4.1 adds a fourth timesheet correction — a billable-share denominator that omitted a bucket, and unlogged hours that were counted nowhere (§6.1). v4.2 removes the last of Karbon from Settings and makes the Included staff toggles actually take effect (§6.3). v4.3 moves tasks/workflow off jobs and onto clients entirely (§6) — the same job-vs-client confusion already fixed once on Manager allocations, this time in the tasks table's own foreign key. v5.0 is one long session's worth of feature work on top of that foundation: a new BAS approval-pipeline page (§6.5), a weekly Monday Report email (§6.4), a task completion audit trail (§6.6), a `/my-work` and `/timesheets` round of polish, and an in-progress `/team`+`/leaderboard` merge that three earlier attempts had failed to land. **v5.0's own "Pick up here" note is closed out in v5.1**: the `/team`+`/leaderboard` merge is done — see §6.7.
 
 ---
 
@@ -61,11 +50,11 @@ Repo: `stevothomo99-cpu/yfd-dashboard`. Deploys to Vercel on every push to `main
 | `/timesheets` | everyone | Utilisation by period (fixed buttons, **custom From/To**, or **Last week** — same Monday-Sunday math as "This week" shifted back 7 days), collapsible practice-wide "Time by client" list, and a **By employee** table: Billable / Admin·meetings / Leave / Downtime / Unlogged / **% of logged** / **% of capacity** (relabelled from the ambiguous "% log"/"% cap" — see §6.1), plus a **Total row** summing every column so it can be cross-checked against the KPI tiles above by eye. Each row expandable to that person's own client breakdown. Settings gains a **"Show Partners on Timesheets"** toggle (default on) — separate from Partners already not counting toward practice utilisation; this controls whether they show as a row at all |
 | `/bas-status` | admin only (nav-gated; page itself has no additional server-side restriction beyond login — see §6.5) | **New in v5.0.** BAS/IAS approval pipeline: three tiles (Pending / Ready for Approval / Waiting on Customer), bidirectional moves with a collapsible per-card history log, coloured by stage and by overdue, sortable per-column (due date or client name A-Z), searchable by client, click-through to the same task edit modal. See §6.5 |
 | `/personal` | admin only | Business KPIs — see §5, mostly unchanged from v2.0 |
-| `/team`, `/leaderboard` | admin only | **Merge in progress, not yet complete** — see §0. As of this writing still the old 100%-Karbon/mock pages described in §10 |
+| `/team` | admin only | Ranked staff table — real Supabase/XPM data, the full 50/30/20 leaderboard formula. `/leaderboard` is retired, folded into this page — see §6.7 |
 | `/tasks`, `/bas` | nobody (unlinked) | Old Karbon-only pages, deliberately not removed but not in nav either ("quarantined") |
 | `/settings` | admin only, **now server-enforced on every sub-route** | Staff & Sync (Partner dropdown + "Save & resync", **Included staff** toggles — see §6.3, **Show Partners on Timesheets** toggle), Dashboard Users (create/list/**pause**/**remove**, with **Last login**), My Security (MFA), **Karbon Import** (moved here in v5.0, was previously its own top-level nav item — verify current shape in a new session, this move happened without full visibility into its details) |
 
-Nav itself (`components/layout/TopNav.tsx`) computes `isAdmin` once in `app/(dashboard)/layout.tsx` and conditionally includes Business KPIs/Team/Leaderboard/Settings — Dashboard/My Work/Clients/Timesheets are always shown.
+Nav itself (`components/layout/TopNav.tsx`) computes `isAdmin` once in `app/(dashboard)/layout.tsx` and conditionally includes Business KPIs/Team/BAS Status/Settings — Dashboard/My Work/Clients/Timesheets are always shown.
 
 ---
 
@@ -275,7 +264,22 @@ A three-stage approval workflow for BAS/IAS-typed tasks specifically, layered on
 
 `tasks.completed_at` existed in the schema since early on but **was never actually written by any code path** until v5.0 (confirmed directly: 0 of 806 live rows had it set before this). `updateTask()` (`lib/workflow.ts`) now stamps `completed_at = now()` and the new `completed_by_staff_id` whenever a status-changing PATCH lands the task on an `is_complete` status, and **clears both** if the task is later reopened — this is a live "current completion state" note, not a historical multi-entry log (contrast with `bas_stage_history` above, which *is* a full log — different asks, deliberately different shapes). The acting staff id comes from the PATCH route's existing session→`getStaffByEmail` lookup, same pattern as `bas_stage_history`'s `changed_by_staff_id`. Surfaced in the task edit modal as a small "Completed by X on Y" note, not an editable field.
 
-**If a `/team`+`/leaderboard` rebuild (§0) computes "BAS on-time" as `completed_at <= due_date`, this is why that's finally possible** — it previously had to approximate on-time as "not currently overdue," which isn't the same thing (a late-but-eventually-completed task and a still-open overdue task both would have read as on-time or not depending only on the moment you asked, never on when it actually finished).
+**This is why the `/team` rebuild (§6.7) can finally compute "BAS on-time" as `completed_at <= due_date`** — it previously had to approximate on-time as "not currently overdue," which isn't the same thing (a late-but-eventually-completed task and a still-open overdue task both would have read as on-time or not depending only on the moment you asked, never on when it actually finished).
+
+---
+
+## 6.7 `/team` — the real leaderboard (retired `/leaderboard`)
+
+The `/team`+`/leaderboard` merge that v5.0's "Pick up here" note left mid-flight (three prior attempts vanished silently) is done. `/leaderboard`, `lib/dashboardData.ts`, and the seven Karbon/mock-only dashboard components it alone imported (`KpiStrip`, `TopPerformers`, `BillableChart`, `WeeklyTrendChart`, `OverdueTasks`, `BasSnapshot`, `RevenueSnapshot`) are deleted outright — confirmed via a repo-wide grep that nothing else referenced them before removing them.
+
+- **`lib/leaderboard.ts`** now implements the real formula: **50% billable-hours-against-capacity, 30% task completion, 20% BAS on-time** — reachable in full now that both inputs exist (`computeWagesUtilisation`'s `billableCapacityPct`, §6.1; `tasks.completed_at`, §6.6), where the old formula could only manage a 60/40 partial score from Karbon.
+  - Task/BAS stats come from `getAllTasks()` (already built for the Monday Report, §6.4, and reused as CONTEXT.md itself anticipated), grouped by `assigneeId` — a task's **permanent** owner, not `tempAssigneeId`, so a BAS task briefly parked on Steve via the approval pipeline (§6.5) doesn't count toward his score.
+  - **BAS on-time is `completed_at <= due_date`**, judged only over BAS/IAS tasks that are actually complete (open tasks aren't yet either on-time or late — that's what Overdue already covers). A person with zero completed BAS work reads as no data for that component, not a 0%.
+  - **Billable % is `billableCapacityPct`** (client hours against capacity net of leave — "the one to performance-manage on", §6.1), not `billableSharePct` (which flatters under-loggers) — computed over the current calendar month via `getXpmTimesheets(settings.partnerName)` + `computeWagesUtilisation(..., "month", today)`, keyed by `xpmStaffId`.
+  - **Missing-component reweighting, generalised**: any of the three components with no data for a given person (no XPM link, zero tasks, zero completed BAS work) drops out and the remaining weights renormalise — the same shape the old 60/40 fallback used, now applied per-component per-person instead of as one global all-or-nothing switch on billable data.
+- **`/team`** is the only surviving route — a `PageHeader` explaining the formula plus the ranked table `/leaderboard` used to render (Rank/Staff/Tasks done/Overdue/BAS on-time/Billable %/Score), now fed by `listStaff()` + `getAllTasks()` + XPM timesheets instead of `dashboardData.ts`'s Karbon/mock loader. Ranked staff are `included` (§6.3) and not Partners, consistent with Partners being excluded from delivery-workload figures elsewhere (§6.1).
+- **Nav**: the separate "Leaderboard" item is removed from `TopNav.tsx`'s admin-only list; "Team" remains.
+- Verified with `tsc --noEmit`, `eslint`, and `next build` all clean (three pre-existing lint errors noted in §10/Gotchas are unrelated and unchanged) — not yet checked against real Karbon-free production data since XPM/Supabase aren't reachable from this session's network egress.
 
 ---
 ## 7. Auth
@@ -358,7 +362,6 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 - **Monday Report (§6.4) and BAS Status approval emails (§6.5) are built but not yet actually sending mail** — both gated behind `isResendConfigured()`, pending a real Resend account/domain, `RESEND_API_KEY`/`RESEND_FROM_EMAIL`, and (for the Monday Report's cron) `CRON_SECRET` set in Vercel.
 - **Per-person exclusion from practice figures.** Only Partners are excluded from practice-wide *utilisation* today (§6.1) — v5.0 separately added a Settings toggle for whether Partners even show as a *row* on `/timesheets` (§6.3-adjacent), but excluding a non-Partner from the figures entirely still needs a real toggle *and* `lib/xpmSync.ts` to stop hardcoding `included: true`, which would otherwise wipe the setting on every sync.
 - **Job-level manager gaps in XPM**: ~120 of 493 jobs have no Job Manager (concentrated in a handful of clients). Doesn't affect client tiles, which read the client record, but does affect each person's work board. Fix in XPM, then resync.
-- **`/leaderboard` and `/team`** — merge in progress, not complete. See §0 for exactly where this stands and how to pick it up.
 - **Dependabot backlog**: several open PRs, of which TypeScript 5.9→7.0 and ESLint 9→10 are major versions needing a build check.
 - **Three pre-existing lint errors** remain (`settings/users/page.tsx`, `api/hubspot/deals/route.ts`, `lib/hubspot.ts`) — unrelated to v4.0 work, verified as pre-existing.
 - **The BAS Status page (§6.5) has no server-side access restriction of its own** — only its nav link is admin-gated; any authenticated user hitting `/bas-status` directly can view the whole practice-wide board (though every stage-change action still goes through the same per-task `canModifyTask` permission check as editing that task normally would). Flagged, not yet locked down further.
@@ -366,6 +369,8 @@ All live in Vercel → Project Settings → Environment Variables. Redeploy requ
 *Closed in v4.0*: `/api/settings` PATCH and the staff routes now enforce admin server-side; `partnerName` is durably stored (§6.2); `lib/google.ts` no longer throws at import; `getClientSummaries` no longer walks the tasks table per customer.
 
 *Closed in v5.0*: weekly performance summary / overdue-task digest emails (§6.4, built but not yet sending — see above); a task's completion date/actor is finally recorded (§6.6, `completed_at` existed but was dead code before this); `/my-work`'s Status filter gains a date-derived Overdue option; `/clients` and `/bas-status` both drill into the same task edit modal `/my-work` already used.
+
+*Closed in v5.1*: the `/team`+`/leaderboard` merge (§6.7) — real Supabase/XPM data, the full 50/30/20 formula, `/leaderboard` retired.
 
 ---
 
