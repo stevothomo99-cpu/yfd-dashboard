@@ -91,7 +91,29 @@ export interface WorkflowTask {
   // null = "Pending" (unset/default); only meaningful for BAS/IAS-typed
   // tasks, but stored as a plain generic column -- see the migration's
   // comment.
-  basStage: "ready_for_approval" | "waiting_on_customer" | null;
+  basStage: BasStage | null;
+}
+
+// The /bas-status board's three tiles, in pipeline order. NULL on the
+// tasks.bas_stage column (pre-migration-023 rows) means the same thing as
+// the explicit 'pending' value -- see migration 023's comment -- so callers
+// reading basStage should treat null and "pending" identically.
+export type BasStage = "pending" | "ready_for_approval" | "waiting_on_customer";
+
+// One row of a task's /bas-status audit trail (migration 023). fromStage is
+// null for a task's very first recorded transition out of the implicit
+// "pending" starting point when no earlier row exists to read it from.
+// changedByStaffId/changedByName are null when the acting user has no
+// linked staff record (e.g. an admin login) -- see bas_stage_history's
+// column comment for why this isn't backfilled with new auth plumbing.
+export interface BasStageHistoryEntry {
+  id: string;
+  taskId: string;
+  fromStage: BasStage | null;
+  toStage: BasStage;
+  changedByStaffId: string | null;
+  changedByName: string | null;
+  changedAt: string;
 }
 
 // A task, hydrated with everything a board/list view needs to render
