@@ -19,22 +19,27 @@ const ROW_ID = 1;
 export interface DashboardSettings {
   partnerName: string;
   excludedStaffIds: string[];
+  showPartnersInTimesheets: boolean;
 }
 
 const DEFAULTS: DashboardSettings = {
   partnerName: "",
   excludedStaffIds: [],
+  showPartnersInTimesheets: true,
 };
 
 interface AppSettingsRow {
   partner_name: string | null;
   excluded_staff_ids: string[] | null;
+  show_partners_in_timesheets: boolean | null;
 }
 
 function fromRow(row: AppSettingsRow | null): DashboardSettings {
   return {
     partnerName: row?.partner_name ?? DEFAULTS.partnerName,
     excludedStaffIds: row?.excluded_staff_ids ?? DEFAULTS.excludedStaffIds,
+    showPartnersInTimesheets:
+      row?.show_partners_in_timesheets ?? DEFAULTS.showPartnersInTimesheets,
   };
 }
 
@@ -42,7 +47,7 @@ async function readFromDatabase(): Promise<DashboardSettings> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("app_settings")
-    .select("partner_name, excluded_staff_ids")
+    .select("partner_name, excluded_staff_ids, show_partners_in_timesheets")
     .eq("id", ROW_ID)
     .maybeSingle<AppSettingsRow>();
 
@@ -64,6 +69,8 @@ export const getSettings = cache(async function getSettings(): Promise<Dashboard
     return {
       partnerName: cached.partnerName ?? DEFAULTS.partnerName,
       excludedStaffIds: cached.excludedStaffIds ?? DEFAULTS.excludedStaffIds,
+      showPartnersInTimesheets:
+        cached.showPartnersInTimesheets ?? DEFAULTS.showPartnersInTimesheets,
     };
   }
 
@@ -95,6 +102,7 @@ export async function updateSettings(
       id: ROW_ID,
       partner_name: next.partnerName,
       excluded_staff_ids: next.excludedStaffIds,
+      show_partners_in_timesheets: next.showPartnersInTimesheets,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "id" },

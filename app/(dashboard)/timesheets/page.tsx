@@ -68,15 +68,18 @@ export default async function TimesheetsPage() {
   // Partners are excluded from the practice-wide utilisation figures: they
   // don't carry a delivery workload, so counting their 38hr week in the
   // capacity denominator understates everyone else's efficiency (one Partner
-  // in a team of four drags the practice percentage down by a quarter). They
-  // still appear in the By employee table, so any time they do log is
-  // visible -- it just doesn't set the bar for the team.
+  // in a team of four drags the practice percentage down by a quarter).
+  // Whether they still appear as a row in the By employee table is a
+  // separate, Settings-controlled choice (showPartnersInTimesheets) -- by
+  // default they do, so any time they log is visible, but it never sets the
+  // bar for the team.
   // `included` is the Settings → Included staff toggle. Excluding someone
   // drops both their hours and their 38hr capacity, so the practice
   // percentages read as if they weren't on the team -- which is the point for
   // a departed or non-delivery staff member still present in XPM.
   const staffOptions = staff
     .filter((s) => s.included)
+    .filter((s) => settings.showPartnersInTimesheets || s.role !== "Partner")
     .filter((s): s is typeof s & { xpmStaffId: string } => Boolean(s.xpmStaffId))
     .map((s) => ({
       id: s.xpmStaffId,

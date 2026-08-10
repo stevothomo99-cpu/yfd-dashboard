@@ -22,6 +22,7 @@ export interface RosterEntry {
 
 export interface SettingsSnapshot {
   partnerName: string;
+  showPartnersInTimesheets: boolean;
   // Empty when XPM isn't configured or the lookup failed -- the client then
   // falls back to a free-text field so the setting stays editable.
   partnerOptions: XpmPartnerOption[];
@@ -94,6 +95,7 @@ export default async function SettingsPage() {
     <SettingsPageClient
       initial={{
         partnerName: settings.partnerName,
+        showPartnersInTimesheets: settings.showPartnersInTimesheets,
         partnerOptions,
         roster,
         partnerRoster,
