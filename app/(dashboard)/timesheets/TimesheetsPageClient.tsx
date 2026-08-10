@@ -513,9 +513,14 @@ export default function TimesheetsPageClient({
           </div>
         </div>
 
-        {/* Six numeric columns need labels. "% log" is XPM's basis, "% cap"
-            counts unlogged time against the person -- the two disagree by
-            exactly the Unlogged column. */}
+        {/* Six numeric columns need labels. "% of logged" (XPM's own basis)
+            answers "of the hours you entered, how much was billable" and
+            says nothing about hours nobody logged -- someone can hit 100%
+            here while still being well short on total hours entered, which
+            read as contradictory next to Unlogged before the label spelled
+            out "of logged". "% of capacity" counts unlogged time against
+            the person instead; the two disagree by exactly the Unlogged
+            column. */}
         <div
           style={{
             display: "flex",
@@ -535,8 +540,8 @@ export default function TimesheetsPageClient({
           <HeadCell>Non-bill</HeadCell>
           <HeadCell>Capacity</HeadCell>
           <HeadCell>Unlogged</HeadCell>
-          <HeadCell>% log</HeadCell>
-          <HeadCell>% cap</HeadCell>
+          <HeadCell>% of logged</HeadCell>
+          <HeadCell>% of capacity</HeadCell>
         </div>
 
         {staffOptions.length === 0 ? (
