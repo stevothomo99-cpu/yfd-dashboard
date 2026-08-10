@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils";
 import {
   computeHoursByClient,
   computeWagesUtilisation,
+  periodBounds,
   UTILISATION_PERIODS,
   type DateRange,
   type PeriodSelection,
@@ -200,7 +201,7 @@ export default function TimesheetsPageClient({
   clientNamesById,
   message,
 }: TimesheetsPageClientProps) {
-  const [period, setPeriod] = useState<UtilisationPeriodKey | "custom">("week");
+  const [period, setPeriod] = useState<UtilisationPeriodKey | "custom" | "lastweek">("week");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [showTimeByClient, setShowTimeByClient] = useState(false);
@@ -219,16 +220,30 @@ export default function TimesheetsPageClient({
   const today = todayIso();
   const clientNamesMap = useMemo(() => new Map(Object.entries(clientNamesById)), [clientNamesById]);
 
+  // "Last week" is just "this week" (startOfWeekMonday/periodBounds, via the
+  // exported periodBounds helper) shifted back 7 days, so it stays a
+  // calendar Monday-Sunday week computed the same way as the "This Week"
+  // button rather than re-deriving the date math here.
+  const lastWeekRange: DateRange = useMemo(() => {
+    const thisWeek = periodBounds("week", new Date(today + "T00:00:00Z"));
+    const start = new Date(thisWeek.start);
+    start.setUTCDate(start.getUTCDate() - 7);
+    const end = new Date(thisWeek.end);
+    end.setUTCDate(end.getUTCDate() - 7);
+    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+  }, [today]);
+
   // A half-filled custom range would silently measure something nobody
   // asked for, so it falls back to the last fixed period until both ends
   // are set. Reversed dates are swapped rather than rejected.
   const customComplete = period === "custom" && Boolean(customFrom) && Boolean(customTo);
   const selection: PeriodSelection = useMemo(() => {
+    if (period === "lastweek") return lastWeekRange;
     if (!customComplete) return period === "custom" ? "week" : period;
     return customFrom <= customTo
       ? { start: customFrom, end: customTo }
       : { start: customTo, end: customFrom };
-  }, [customComplete, period, customFrom, customTo]);
+  }, [customComplete, period, customFrom, customTo, lastWeekRange]);
 
   const utilisation = useMemo(
     () => computeWagesUtilisation(timesheets, practiceStaffIds, selection, today),
@@ -241,6 +256,46 @@ export default function TimesheetsPageClient({
   );
 
   const totalClientHours = byClient.reduce((acc, c) => acc + c.hours, 0);
+
+  // Internal (YFD) -- per employee, a breakdown of the same four firm-wide
+  // tiles above (Admin/Meetings, Leave, Idle, Unlogged) rather than one
+  // merged "internal" number -- collapsing them loses exactly the
+  // "who coded what to YFD" and "how much of the 38hr capacity is assumed
+  // non-billable" visibility Steve asked to see per person. Reuses
+  // computeWagesUtilisation's own fields (lib/workOverview.ts) so this
+  // can't drift from the KPI cards or the By employee table.
+  //
+  // The "or if not registered" half of the original brief -- time logged
+  // against a job XPM couldn't match to a real client -- still isn't
+  // representable here: fetchXpmTimesheetsForPartner (lib/xpm.ts) already
+  // drops those entries before they become an XpmTimesheet (clientId is
+  // non-nullable there), so there's no unmatched-client bucket to show by
+  // the time data reaches this page without changing that upstream fetch.
+  const internalByStaff = useMemo(
+    () =>
+      staffOptions
+        .map((s) => {
+          const u = computeWagesUtilisation(timesheets, [s.id], selection, today);
+          return {
+            staff: s,
+            adminHours: u.internalOtherHours,
+            leaveHours: u.leaveHours,
+            idleHours: u.idleHours,
+            unloggedHours: u.unloggedHours,
+          };
+        })
+        .sort((a, b) => a.unloggedHours + a.adminHours + a.leaveHours + a.idleHours < b.unloggedHours + b.adminHours + b.leaveHours + b.idleHours ? 1 : -1),
+    [staffOptions, timesheets, selection, today],
+  );
+  const internalTotals = internalByStaff.reduce(
+    (acc, r) => ({
+      adminHours: acc.adminHours + r.adminHours,
+      leaveHours: acc.leaveHours + r.leaveHours,
+      idleHours: acc.idleHours + r.idleHours,
+      unloggedHours: acc.unloggedHours + r.unloggedHours,
+    }),
+    { adminHours: 0, leaveHours: 0, idleHours: 0, unloggedHours: 0 },
+  );
 
   return (
     <div>
@@ -279,6 +334,7 @@ export default function TimesheetsPageClient({
             onClick={() => setPeriod(p.value)}
           />
         ))}
+        <PeriodButton label="Last week" active={period === "lastweek"} onClick={() => setPeriod("lastweek")} />
         <PeriodButton label="Custom…" active={period === "custom"} onClick={() => setPeriod("custom")} />
 
         {period === "custom" ? (
@@ -499,6 +555,85 @@ export default function TimesheetsPageClient({
                 onToggle={() => setExpandedStaffId((cur) => (cur === s.id ? null : s.id))}
               />
             ))}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          background: "white",
+          border: "0.5px solid #e1e0d9",
+          borderRadius: "14px",
+          padding: "1.1rem 1.2rem",
+          marginTop: "14px",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111" }}>Internal (YFD)</div>
+          <div style={{ fontSize: "11px", color: "#888780" }}>
+            who coded what to YFD, and what's assumed non-billable per person
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "12px",
+            padding: "0 0 6px",
+            borderBottom: "0.5px solid #e1e0d9",
+            fontSize: "10px",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            color: "#888780",
+          }}
+        >
+          <div style={{ flex: 1 }}>Employee</div>
+          <HeadCell>Admin / meetings</HeadCell>
+          <HeadCell>Leave</HeadCell>
+          <HeadCell>Idle</HeadCell>
+          <HeadCell>Unlogged</HeadCell>
+        </div>
+
+        {internalByStaff.length === 0 ? (
+          <div style={{ fontSize: "12px", color: "#888780", padding: "8px 0" }}>No staff to show.</div>
+        ) : (
+          <div>
+            {internalByStaff.map(({ staff, adminHours, leaveHours, idleHours, unloggedHours }) => (
+              <div
+                key={staff.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "10px 0",
+                  borderBottom: "0.5px solid #e1e0d9",
+                }}
+              >
+                <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
+                <Cell>{adminHours.toFixed(1)}</Cell>
+                <Cell>{leaveHours.toFixed(1)}</Cell>
+                <Cell>{idleHours.toFixed(1)}</Cell>
+                <Cell dim={unloggedHours <= 0}>{unloggedHours.toFixed(1)}</Cell>
+              </div>
+            ))}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "10px 0 0",
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "#111111",
+              }}
+            >
+              <div style={{ flex: 1 }}>Total</div>
+              <Cell>{internalTotals.adminHours.toFixed(1)}</Cell>
+              <Cell>{internalTotals.leaveHours.toFixed(1)}</Cell>
+              <Cell>{internalTotals.idleHours.toFixed(1)}</Cell>
+              <Cell>{internalTotals.unloggedHours.toFixed(1)}</Cell>
+            </div>
           </div>
         )}
       </div>
