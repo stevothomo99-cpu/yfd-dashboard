@@ -2,8 +2,24 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
+      "path": "/api/reports/overdue-summary",
+      "schedule": "0 10 * * 0"
+    },
+    {
       "path": "/api/reports/monday-report",
-      "schedule": "0 20 * * 0"
+      "schedule": "0 21 * * 0"
+    },
+    {
+      "path": "/api/reports/timesheet-reminder",
+      "schedule": "0 22 * * 0"
+    },
+    {
+      "path": "/api/reports/timesheet-reminder-2",
+      "schedule": "0 0 * * 1"
+    },
+    {
+      "path": "/api/reports/timesheet-followup",
+      "schedule": "0 2 * * 1"
     }
   ]
 }

@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  buildReportWindow,
-  buildCombinedReportData,
-  buildStaffReportData,
-  getCombinedReportRecipients,
-  getIndividualReportRecipients,
-} from "@/lib/mondayReport";
-import { renderCombinedReportEmail, renderStaffReportEmail } from "@/lib/emailTemplates/mondayReport";
+import { buildReportWindow, buildStaffReportData, getIndividualReportRecipients } from "@/lib/mondayReport";
+import { renderStaffReportEmail } from "@/lib/emailTemplates/mondayReport";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 
 // Vercel Cron only issues GET requests -- see vercel.json for the schedule
-// (Sunday 20:00 UTC = Monday 06:00 AEST, QLD has no DST).
+// (Sunday 21:00 UTC = Monday 07:00 AEST, QLD has no DST). This is the
+// "Workflow Update" -- each person's own overdue/due-this-week/BAS/payroll
+// summary. The firm-wide overdue report that used to fire from this same
+// route now has its own earlier trigger the night before -- see
+// app/api/reports/overdue-summary/route.ts.
 //
 // Same "whole staff roster, fan-out per person" shape as the timesheet sync,
 // so it gets the same generous ceiling.
@@ -72,39 +70,13 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const combinedRecipients = await getCombinedReportRecipients();
-  const combinedResults: SendResult[] = [];
-
-  if (combinedRecipients.length > 0) {
-    try {
-      const combinedData = await buildCombinedReportData(window);
-      const { subject, html, text } = renderCombinedReportEmail(combinedData);
-      for (const partner of combinedRecipients) {
-        if (!resendReady) {
-          console.log(`[monday-report] Resend not configured -- would have sent "${subject}" to ${partner.email}`);
-          combinedResults.push({ name: partner.name, email: partner.email, ok: false, error: "Resend not configured" });
-          continue;
-        }
-        combinedResults.push(await sendOne(partner.name, partner.email, subject, text, html));
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      for (const partner of combinedRecipients) {
-        combinedResults.push({ name: partner.name, email: partner.email, ok: false, error: message });
-      }
-    }
-  }
-
-  const allResults = [...individualResults, ...combinedResults];
-  const sent = allResults.filter((r) => r.ok).length;
-  const failed = allResults.filter((r) => !r.ok);
+  const failed = individualResults.filter((r) => !r.ok);
 
   return NextResponse.json({
     resendConfigured: resendReady,
     weekOf: window.weekStartIso,
-    individual: { total: individualRecipients.length, sent: individualResults.filter((r) => r.ok).length },
-    combined: { total: combinedRecipients.length, sent: combinedResults.filter((r) => r.ok).length },
-    sent,
+    total: individualRecipients.length,
+    sent: individualResults.filter((r) => r.ok).length,
     failed: failed.length,
     failures: failed.map((f) => ({ name: f.name, email: f.email, error: f.error })),
   });

@@ -134,6 +134,11 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
             Karbon Import
           </button>
         </Link>
+        <Link href="/settings/email-schedule">
+          <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
+            Email Schedule
+          </button>
+        </Link>
       </div>
 
       {snapshot.rosterMessage ? <Banner tone="info">{snapshot.rosterMessage}</Banner> : null}

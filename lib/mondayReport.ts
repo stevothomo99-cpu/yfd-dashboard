@@ -7,9 +7,13 @@ import type { TaskWithDetails, WorkflowStaff } from "@/types/workflow";
 import type { XpmTimesheet } from "@/types/xpm";
 
 // Pure(ish) data computation for the weekly "Monday Report" email -- see
-// lib/emailTemplates/mondayReport.ts for how this is rendered, and
-// app/api/reports/monday-report/route.ts for the cron entry point that ties
-// data + templates + sending together.
+// lib/emailTemplates/mondayReport.ts for how this is rendered. Two separate
+// cron entry points consume this, at two different times, per the
+// practice's requested schedule (see Settings -> Email Schedule):
+// app/api/reports/overdue-summary/route.ts (buildCombinedReportData, Sunday
+// 20:00 AEST -- the firm-wide overdue report, to the Partner) and
+// app/api/reports/monday-report/route.ts (buildStaffReportData, Monday
+// 07:00 AEST -- each person's own "Workflow Update").
 //
 // Deliberately due-date driven throughout, unlike the My Work page's own
 // "Overdue" tile (start-date based) -- this report is about deadlines, not
@@ -17,7 +21,7 @@ import type { XpmTimesheet } from "@/types/xpm";
 
 const PAYROLL_TYPE_NAME = "Payroll";
 
-// The cron fires at 06:00 UTC+10 (see vercel.json), but a Vercel Cron
+// Both crons run at fixed AEST times (see vercel.json), but a Vercel Cron
 // function itself runs in UTC -- "today"/"this week" must be computed
 // against Brisbane's wall clock, not the server's. QLD does not observe
 // daylight saving, so this is a fixed +10h offset year-round (confirmed
