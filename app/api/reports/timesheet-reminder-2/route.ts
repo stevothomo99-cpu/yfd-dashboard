@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSubmitReminderRecipients, buildSubmitReminderData } from "@/lib/timesheetReminders";
-import { renderSubmitReminderEmail } from "@/lib/emailTemplates/timesheetReminders";
+import { buildFollowUpData } from "@/lib/timesheetReminders";
+import { renderFollowUpNudgeEmail } from "@/lib/emailTemplates/timesheetReminders";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 
 // Vercel Cron only issues GET requests -- see vercel.json for the schedule
-// (Sunday 22:00 UTC = Monday 08:00 AEST, QLD has no DST). "Timesheet
-// Reminder #1" -- fires an hour after the Monday Report's "Workflow
-// Update" (07:00 AEST) so the two don't compete for the same XPM
-// rate-limit budget on the one morning both run.
+// (Monday 00:00 UTC = Monday 10:00 AEST, QLD has no DST). "Timesheet
+// Reminder #2" -- a second, harder nudge for whoever's still short of last
+// week's standard hours, between the morning "please submit" ask
+// (timesheet-reminder, 08:00 AEST) and the midday round
+// (timesheet-followup, 12:00 AEST) that adds the whole-FY shortfall email
+// and the Partner-facing summary. Only people still short get this one.
 export const maxDuration = 300;
 
 interface SendResult {
@@ -39,23 +41,22 @@ export async function GET(request: NextRequest) {
   }
 
   const resendReady = isResendConfigured();
-  const recipients = await getSubmitReminderRecipients();
-  const results: SendResult[] = [];
+  const data = await buildFollowUpData();
 
-  for (const staff of recipients) {
+  const results: SendResult[] = [];
+  for (const row of data.incomplete) {
     try {
-      const data = buildSubmitReminderData(staff);
-      const { subject, html, text } = renderSubmitReminderEmail(data);
+      const { subject, html, text } = renderFollowUpNudgeEmail(row, data.priorWeek);
       if (!resendReady) {
-        console.log(`[timesheet-reminder] Resend not configured -- would have sent "${subject}" to ${staff.email}`);
-        results.push({ name: staff.name, email: staff.email, ok: false, error: "Resend not configured" });
+        console.log(`[timesheet-reminder-2] Resend not configured -- would have sent "${subject}" to ${row.email}`);
+        results.push({ name: row.staffName, email: row.email, ok: false, error: "Resend not configured" });
         continue;
       }
-      results.push(await sendOne(staff.name, staff.email, subject, text, html));
+      results.push(await sendOne(row.staffName, row.email, subject, text, html));
     } catch (err) {
       results.push({
-        name: staff.name,
-        email: staff.email,
+        name: row.staffName,
+        email: row.email,
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -63,9 +64,13 @@ export async function GET(request: NextRequest) {
   }
 
   const failed = results.filter((r) => !r.ok);
+
   return NextResponse.json({
     resendConfigured: resendReady,
-    total: recipients.length,
+    weekOf: data.priorWeek.startIso,
+    timesheetsAvailable: data.timesheetsAvailable,
+    unavailableReason: data.unavailableReason,
+    total: data.incomplete.length,
     sent: results.filter((r) => r.ok).length,
     failed: failed.length,
     failures: failed.map((f) => ({ name: f.name, email: f.email, error: f.error })),
