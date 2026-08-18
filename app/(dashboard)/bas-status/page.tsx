@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import PageHeader from "@/components/dashboard/PageHeader";
 import BasStatusPageClient from "./BasStatusPageClient";
 import {
   getAllTasks,
@@ -21,6 +22,19 @@ import type { WorkflowCustomer } from "@/types/workflow";
 export default async function BasStatusPage() {
   const session = await auth();
   const isAdmin = session?.user?.role === "admin";
+
+  // Self-gated the same way /settings/karbon-import is -- nav-gated only
+  // otherwise, so this doesn't add a new pattern. Every stage-change action
+  // still goes through the same per-task canModifyTask check as editing that
+  // task normally would.
+  if (!isAdmin) {
+    return (
+      <div>
+        <PageHeader title="BAS Status" />
+        <div style={{ fontSize: "13px", color: "#888780" }}>Admins only.</div>
+      </div>
+    );
+  }
 
   const [allTasks, staff, partners, statuses, taskTypes] = await Promise.all([
     getAllTasks(),
