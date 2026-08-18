@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildReportWindow, buildStaffReportData, getIndividualReportRecipients } from "@/lib/mondayReport";
+import { buildReportWindow, buildStaffReportData, getIndividualReportRecipients, getCombinedReportRecipients } from "@/lib/mondayReport";
 import { renderStaffReportEmail } from "@/lib/emailTemplates/mondayReport";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 
@@ -21,9 +21,9 @@ interface SendResult {
   error?: string;
 }
 
-async function sendOne(name: string, email: string, subject: string, text: string, html: string): Promise<SendResult> {
+async function sendOne(name: string, email: string, subject: string, text: string, html: string, cc?: string[]): Promise<SendResult> {
   try {
-    await sendEmail({ to: email, subject, text, html });
+    await sendEmail({ to: email, cc, subject, text, html });
     return { name, email, ok: true };
   } catch (err) {
     // sendEmail itself is best-effort and swallows failures, but this loop
@@ -48,6 +48,11 @@ export async function GET(request: NextRequest) {
   const resendReady = isResendConfigured();
 
   const individualRecipients = await getIndividualReportRecipients();
+  // Every included Partner is CC'd on every individual's report -- so
+  // whoever's watching the practice sees each person's own Workflow Update
+  // as it goes out, not just the separate firm-wide summary. Excludes the
+  // recipient themself so a Partner isn't CC'd on their own report.
+  const partnerEmails = (await getCombinedReportRecipients()).map((p) => p.email);
   const individualResults: SendResult[] = [];
 
   for (const staff of individualRecipients) {
@@ -59,7 +64,8 @@ export async function GET(request: NextRequest) {
         individualResults.push({ name: staff.name, email: staff.email, ok: false, error: "Resend not configured" });
         continue;
       }
-      individualResults.push(await sendOne(staff.name, staff.email, subject, text, html));
+      const cc = partnerEmails.filter((email) => email !== staff.email);
+      individualResults.push(await sendOne(staff.name, staff.email, subject, text, html, cc));
     } catch (err) {
       individualResults.push({
         name: staff.name,

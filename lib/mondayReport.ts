@@ -77,6 +77,15 @@ export interface ClientOverdueGroup {
   tasks: OverdueTaskLine[];
 }
 
+// Hours logged vs. standard for the calendar week that just finished --
+// null if XPM isn't configured, this staff member isn't linked to an XPM
+// record, or the fetch fails, so the report can degrade gracefully instead
+// of showing a wrong or stale number.
+export interface PriorWeekTimesheet {
+  loggedHours: number;
+  standardHours: number;
+}
+
 export interface StaffReportData {
   staff: WorkflowStaff;
   window: ReportWindow;
@@ -87,6 +96,7 @@ export interface StaffReportData {
   payrollDueCount: number;
   dueThisWeekTasks: TaskLine[];
   overdueByClient: ClientOverdueGroup[];
+  priorWeekTimesheet: PriorWeekTimesheet | null;
 }
 
 function daysOverdue(dueDate: string, todayIso: string): number {
@@ -113,6 +123,7 @@ export function computeStaffReport(
   staff: WorkflowStaff,
   tasks: TaskWithDetails[],
   window: ReportWindow,
+  priorWeekTimesheet: PriorWeekTimesheet | null = null,
 ): StaffReportData {
   let overdueCount = 0;
   let dueThisWeekCount = 0;
@@ -181,17 +192,55 @@ export function computeStaffReport(
     payrollDueCount,
     dueThisWeekTasks,
     overdueByClient,
+    priorWeekTimesheet,
   };
 }
 
-// Fetches staff's own board and builds their report -- the per-staff email
-// route's entry point.
+// The calendar week immediately before window's week -- i.e. the working
+// week that just finished, which is what a Monday-morning report should be
+// summarising (this week has barely started). Shared by the per-staff
+// prior-week tile and the combined report's timesheet summary below, so
+// the two can't drift apart on what "prior week" means.
+function priorWeekRangeFromWindow(window: ReportWindow): { start: string; end: string } {
+  const priorWeekEnd = new Date(window.weekStartIso + "T00:00:00Z");
+  priorWeekEnd.setUTCDate(priorWeekEnd.getUTCDate() - 1);
+  const priorWeekStart = new Date(priorWeekEnd);
+  priorWeekStart.setUTCDate(priorWeekStart.getUTCDate() - 6);
+  return {
+    start: priorWeekStart.toISOString().slice(0, 10),
+    end: priorWeekEnd.toISOString().slice(0, 10),
+  };
+}
+
+async function fetchPriorWeekTimesheet(
+  staff: WorkflowStaff,
+  window: ReportWindow,
+): Promise<PriorWeekTimesheet | null> {
+  if (!staff.xpmStaffId || !isXpmConfigured()) return null;
+  const settings = await getSettings();
+  if (!settings.partnerName) return null;
+
+  try {
+    const timesheets = await getXpmTimesheets(settings.partnerName);
+    const result = computeWagesUtilisation(timesheets, [staff.xpmStaffId], priorWeekRangeFromWindow(window), window.todayIso);
+    return { loggedHours: result.loggedHours, standardHours: result.standardHours };
+  } catch (err) {
+    console.error("[mondayReport] fetchPriorWeekTimesheet failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+// Fetches staff's own board and prior-week timesheet status, and builds
+// their report -- the per-staff email route's entry point.
 export async function buildStaffReportData(
   staff: WorkflowStaff,
   window: ReportWindow = buildReportWindow(),
 ): Promise<StaffReportData> {
-  const tasks = await getTasksForStaff(staff.id);
-  return computeStaffReport(staff, tasks, window);
+  const [tasks, priorWeekTimesheet] = await Promise.all([
+    getTasksForStaff(staff.id),
+    fetchPriorWeekTimesheet(staff, window),
+  ]);
+  return computeStaffReport(staff, tasks, window, priorWeekTimesheet);
 }
 
 export interface FirmTotals {
@@ -351,17 +400,7 @@ async function buildTimesheetSummaries(
   }
 
   const today = new Date(window.todayIso + "T00:00:00Z");
-  // The calendar week immediately before this one -- i.e. the working week
-  // that just finished, which is what a Monday-morning report should be
-  // summarising (this week has barely started).
-  const priorWeekEnd = new Date(window.weekStartIso + "T00:00:00Z");
-  priorWeekEnd.setUTCDate(priorWeekEnd.getUTCDate() - 1);
-  const priorWeekStart = new Date(priorWeekEnd);
-  priorWeekStart.setUTCDate(priorWeekStart.getUTCDate() - 6);
-  const priorWeekRange = {
-    start: priorWeekStart.toISOString().slice(0, 10),
-    end: priorWeekEnd.toISOString().slice(0, 10),
-  };
+  const priorWeekRange = priorWeekRangeFromWindow(window);
 
   const { start: fyStart } = fyRange(fyYearFor(today));
   const fytdRange = { start: fyStart.toISOString().slice(0, 10), end: window.todayIso };
