@@ -117,10 +117,22 @@ function topOverdueClientsTable(clients: TopOverdueClient[]): string {
 
 // ── Per-staff report ────────────────────────────────────────────────────
 
+// One stand-out line summarising last week's logged hours against
+// standard, ahead of everything else in the report -- null (no XPM link,
+// XPM not configured, or a fetch failure) reads as "—", not a false zero.
+function priorWeekLabel(t: StaffReportData["priorWeekTimesheet"]): { value: string; tone: "green" | "amber" | "default" } {
+  if (!t) return { value: "—", tone: "default" };
+  const value = `${t.loggedHours.toFixed(1)} / ${t.standardHours.toFixed(1)} hrs`;
+  return { value, tone: t.loggedHours >= t.standardHours ? "green" : "amber" };
+}
+
 export function renderStaffReportEmail(data: StaffReportData): EmailContent {
   const firstName = data.staff.name.split(" ")[0];
   const rangeLabel = fmtDateRange(data.window.weekStartIso, data.window.weekEndIso);
   const subject = `Monday Report — week of ${fmtDate(data.window.weekStartIso)} (${data.overdueCount} overdue, ${data.dueThisWeekCount} due this week)`;
+
+  const priorWeek = priorWeekLabel(data.priorWeekTimesheet);
+  const timesheetTile = tilesRow([{ label: "Prior week timesheet", value: priorWeek.value, tone: priorWeek.tone }]);
 
   const mainTiles = tilesRow([
     { label: "Overdue", value: data.overdueCount, tone: data.overdueCount > 0 ? "red" : "default" },
@@ -135,7 +147,8 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
   const bodyHtml = `
     ${masthead(`Monday Report — ${escapeHtml(data.staff.name)}`, `Week of ${escapeHtml(rangeLabel)}`, data.window.generatedAtIso)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLORS.card};border:1px solid ${COLORS.border};border-top:none;">
-      <tr><td style="padding:18px 24px 6px 24px;">${mainTiles}</td></tr>
+      <tr><td style="padding:18px 24px 6px 24px;">${timesheetTile}</td></tr>
+      <tr><td style="padding:6px 24px 6px 24px;">${mainTiles}</td></tr>
       <tr><td style="padding:6px 24px 18px 24px;">${deadlineTiles}</td></tr>
     </table>
     ${sectionCard("Due this week", taskListTable(data.dueThisWeekTasks, "Nothing due this week."))}
@@ -146,6 +159,8 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
   const textLines: string[] = [];
   textLines.push(`MONDAY REPORT — ${data.staff.name}`);
   textLines.push(`Week of ${rangeLabel}`);
+  textLines.push("");
+  textLines.push(`Prior week timesheet: ${priorWeek.value}`);
   textLines.push("");
   textLines.push(`Overdue: ${data.overdueCount}`);
   textLines.push(`Due this week: ${data.dueThisWeekCount}`);

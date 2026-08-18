@@ -26,6 +26,7 @@ export interface SendEmailInput {
   subject: string;
   text: string;
   html?: string;
+  cc?: string | string[];
 }
 
 // Best-effort -- logs and swallows failures rather than throwing, since a
@@ -45,9 +46,11 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
 
   try {
     const resend = getResendClient();
+    const cc = input.cc && (Array.isArray(input.cc) ? input.cc.length > 0 : true) ? input.cc : undefined;
     const { error } = await resend.emails.send({
       from,
       to: input.to,
+      cc,
       subject: input.subject,
       text: input.text,
       html: input.html,

@@ -82,36 +82,26 @@ function computeWeekStatus(
     });
 }
 
-export interface FytdBillableRow {
-  staffId: string;
-  staffName: string;
-  fytdHours: number;
-  fytdBillableCapacityPct: number | null;
-}
-
-// FY-to-date billable-against-capacity per staff member -- the same figure
-// lib/leaderboard.ts weighs at 50%, "the one to performance-manage on"
-// (§6.1), not the share-of-logged figure that flatters under-loggers.
-function computeFytdBillable(
+// FY-to-date billable-against-capacity across the whole team at once (not
+// an average of individual %s) -- the same aggregate figure the Timesheets
+// page's top tile shows for "This FY", and the same one lib/leaderboard.ts
+// weighs at 50%, "the one to performance-manage on" (§6.1). A per-employee
+// breakdown of this already lives on that page (select "This FY"), so the
+// Partner email surfaces just the one firm-wide number rather than
+// re-rendering that table -- see /timesheets for the full breakdown.
+function computeFirmFytdBillable(
   staffList: WorkflowStaff[],
   timesheets: XpmTimesheet[],
   todayIso: string,
-): FytdBillableRow[] {
+): number | null {
   const today = new Date(todayIso + "T00:00:00Z");
   const { start } = fyRange(fyYearFor(today));
   const fytdRange = { start: start.toISOString().slice(0, 10), end: todayIso };
-
-  return staffList
+  const xpmStaffIds = staffList
     .filter((s): s is WorkflowStaff & { xpmStaffId: string } => Boolean(s.xpmStaffId))
-    .map((s) => {
-      const result = computeWagesUtilisation(timesheets, [s.xpmStaffId], fytdRange, todayIso);
-      return {
-        staffId: s.id,
-        staffName: s.name,
-        fytdHours: result.clientHours,
-        fytdBillableCapacityPct: result.billableCapacityPct,
-      };
-    });
+    .map((s) => s.xpmStaffId);
+  if (xpmStaffIds.length === 0) return null;
+  return computeWagesUtilisation(timesheets, xpmStaffIds, fytdRange, todayIso).billableCapacityPct;
 }
 
 export interface SubmitReminderData {
@@ -137,12 +127,12 @@ export interface FollowUpData {
   // individual follow-up nudge goes only to these people, and this same
   // list is the "still incomplete" table in the Partner summary.
   incomplete: TimesheetStatusRow[];
-  // Every included non-Partner staff member's FY-to-date billable %,
-  // regardless of last week's status -- Partners are excluded here for the
-  // same reason they're excluded from every other billable/utilisation
-  // figure in this app (§6.1): no delivery workload, so including them
-  // would misrepresent the team's billable performance.
-  fytdBillable: FytdBillableRow[];
+  // Firm-wide FY-to-date billable % against capacity, across every
+  // included non-Partner staff member at once -- Partners are excluded
+  // here for the same reason they're excluded from every other
+  // billable/utilisation figure in this app (§6.1): no delivery workload,
+  // so including them would misrepresent the team's billable performance.
+  firmFytdBillableCapacityPct: number | null;
   timesheetsAvailable: boolean;
   unavailableReason: string | null;
 }
@@ -155,7 +145,7 @@ export async function buildFollowUpData(todayIso: string = aestTodayIso()): Prom
     return {
       priorWeek,
       incomplete: [],
-      fytdBillable: [],
+      firmFytdBillableCapacityPct: null,
       timesheetsAvailable: false,
       unavailableReason: "XPM isn't configured (XPM_CLIENT_ID etc. not set).",
     };
@@ -166,7 +156,7 @@ export async function buildFollowUpData(todayIso: string = aestTodayIso()): Prom
     return {
       priorWeek,
       incomplete: [],
-      fytdBillable: [],
+      firmFytdBillableCapacityPct: null,
       timesheetsAvailable: false,
       unavailableReason: "Set a Partner name in Settings to sync XPM timesheets.",
     };
@@ -180,7 +170,7 @@ export async function buildFollowUpData(todayIso: string = aestTodayIso()): Prom
     return {
       priorWeek,
       incomplete: [],
-      fytdBillable: [],
+      firmFytdBillableCapacityPct: null,
       timesheetsAvailable: false,
       unavailableReason: err instanceof Error ? err.message : "Failed to load timesheets from XPM.",
     };
@@ -190,11 +180,9 @@ export async function buildFollowUpData(todayIso: string = aestTodayIso()): Prom
   const incomplete = statusRows.filter((r) => !r.complete).sort((a, b) => a.staffName.localeCompare(b.staffName));
 
   const nonPartnerStaff = staffList.filter((s) => s.role !== "Partner");
-  const fytdBillable = computeFytdBillable(nonPartnerStaff, timesheets, todayIso).sort(
-    (a, b) => (b.fytdBillableCapacityPct ?? -1) - (a.fytdBillableCapacityPct ?? -1),
-  );
+  const firmFytdBillableCapacityPct = computeFirmFytdBillable(nonPartnerStaff, timesheets, todayIso);
 
-  return { priorWeek, incomplete, fytdBillable, timesheetsAvailable: true, unavailableReason: null };
+  return { priorWeek, incomplete, firmFytdBillableCapacityPct, timesheetsAvailable: true, unavailableReason: null };
 }
 
 // Partners get the summary email (who's still incomplete + the FYTD

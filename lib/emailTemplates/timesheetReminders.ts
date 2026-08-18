@@ -120,41 +120,30 @@ function incompleteTable(rows: TimesheetStatusRow[]): string {
   </table>`;
 }
 
-function fytdBillableTable(data: FollowUpData): string {
-  if (!data.timesheetsAvailable) {
-    return `<div style="font-size:13px;color:${COLORS.muted};">${escapeHtml(
-      data.unavailableReason ?? "Unavailable this week.",
-    )}</div>`;
-  }
-  if (data.fytdBillable.length === 0) {
-    return `<div style="font-size:13px;color:${COLORS.muted};">No staff linked to an XPM record yet.</div>`;
-  }
-  const body = data.fytdBillable
-    .map(
-      (r) => `
-    <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.text};">${escapeHtml(r.staffName)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.text};">${r.fytdHours.toFixed(1)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:${COLORS.text};font-weight:600;">${r.fytdBillableCapacityPct !== null ? `${r.fytdBillableCapacityPct}%` : "—"}</td>
-    </tr>`,
-    )
-    .join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-    <tr>
-      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Staff</td>
-      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">FYTD hrs (billable)</td>
-      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">FYTD billable %</td>
-    </tr>
-    ${body}
-  </table>`;
+// Same red/amber/green billable-% thresholds as the Timesheets page's own
+// pctColor (TimesheetsPageClient.tsx) -- kept in sync deliberately so the
+// tile's colour means the same thing here as it does on that page.
+function billableTone(pct: number | null): "default" | "red" | "amber" | "green" {
+  if (pct === null) return "default";
+  if (pct < 60) return "red";
+  if (pct < 75) return "amber";
+  return "green";
 }
 
 export function renderFollowUpSummaryEmail(data: FollowUpData): EmailContent {
   const rangeLabel = fmtDateRange(data.priorWeek.startIso, data.priorWeek.endIso);
   const generatedAtIso = new Date().toISOString();
-  const subject = `Timesheet follow-up — Firm summary, week of ${rangeLabel} (${data.incomplete.length} still incomplete)`;
+  const billablePct = data.firmFytdBillableCapacityPct;
+  const billableLabel = billablePct !== null ? `${billablePct}%` : "—";
+  const subject = `Timesheet follow-up — Firm summary, week of ${rangeLabel} (${data.incomplete.length} still incomplete, ${billableLabel} FYTD billable)`;
 
+  // The firm-wide FYTD billable % is the one number Steve reads first --
+  // given the biggest tile and its own stand-out colour, ahead of "still
+  // incomplete", rather than buried in a per-employee table further down.
+  // Full per-employee breakdown already lives on /timesheets ("This FY"),
+  // so it isn't re-rendered here -- see lib/timesheetReminders.ts.
   const tiles = tilesRow([
+    { label: "Firm YTD billable %", value: billableLabel, tone: billableTone(billablePct) },
     { label: "Still incomplete", value: data.incomplete.length, tone: data.incomplete.length > 0 ? "amber" : "default" },
   ]);
 
@@ -164,14 +153,17 @@ export function renderFollowUpSummaryEmail(data: FollowUpData): EmailContent {
       <tr><td style="padding:18px 24px;">${tiles}</td></tr>
     </table>
     ${sectionCard(`Last week (${escapeHtml(rangeLabel)}) — still incomplete`, incompleteTable(data.incomplete))}
-    ${sectionCard("YTD billable overview (against capacity, Partners excluded)", fytdBillableTable(data))}
+    <div style="font-size:12px;color:${COLORS.muted};padding:8px 24px 0;">
+      Per-employee FYTD billable % breakdown: /timesheets (This FY).
+    </div>
   `;
-  const html = htmlShell(`${data.incomplete.length} still incomplete for ${rangeLabel}`, bodyHtml, FOOTER_TEXT);
+  const html = htmlShell(`${billableLabel} FYTD billable, ${data.incomplete.length} still incomplete for ${rangeLabel}`, bodyHtml, FOOTER_TEXT);
 
   const textLines: string[] = [];
   textLines.push("TIMESHEET FOLLOW-UP — FIRM SUMMARY");
   textLines.push(`Week of ${rangeLabel}`);
   textLines.push("");
+  textLines.push(`Firm YTD billable %: ${billableLabel}${!data.timesheetsAvailable ? ` (${data.unavailableReason ?? "unavailable"})` : ""}`);
   textLines.push(`Still incomplete: ${data.incomplete.length}`);
   textLines.push("");
   textLines.push(`LAST WEEK (${rangeLabel}) — STILL INCOMPLETE`);
@@ -180,16 +172,7 @@ export function renderFollowUpSummaryEmail(data: FollowUpData): EmailContent {
     textLines.push(`  ${r.staffName}: ${r.loggedHours.toFixed(1)}/${r.standardHours.toFixed(1)} hrs, ${hoursShort(r).toFixed(1)} short`);
   }
   textLines.push("");
-  textLines.push("YTD BILLABLE OVERVIEW (against capacity, Partners excluded)");
-  if (!data.timesheetsAvailable) {
-    textLines.push(`  (${data.unavailableReason ?? "unavailable"})`);
-  } else if (data.fytdBillable.length === 0) {
-    textLines.push("  (no staff linked to an XPM record yet)");
-  } else {
-    for (const r of data.fytdBillable) {
-      textLines.push(`  ${r.staffName}: ${r.fytdBillableCapacityPct !== null ? `${r.fytdBillableCapacityPct}%` : "—"} (${r.fytdHours.toFixed(1)} hrs FYTD)`);
-    }
-  }
+  textLines.push("Per-employee FYTD billable % breakdown: /timesheets (This FY)");
   textLines.push("");
   textLines.push(`Generated ${fmtGeneratedAt(generatedAtIso)}`);
 
