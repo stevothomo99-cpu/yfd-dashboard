@@ -22,6 +22,8 @@ export const COLORS = {
   redBg: "#fbeae9",
   amber: "#a3620a",
   amberBg: "#fdf2e1",
+  green: "#1a7f4b",
+  greenBg: "#e8f5ee",
   accent: "#1f5c4c",
 };
 
@@ -92,19 +94,31 @@ export function masthead(title: string, subtitle: string, generatedAtIso: string
 export interface Tile {
   label: string;
   value: number | string;
-  tone?: "default" | "red" | "amber";
+  tone?: "default" | "red" | "amber" | "green";
 }
+
+const TILE_BG: Record<NonNullable<Tile["tone"]>, string> = {
+  default: COLORS.card,
+  red: COLORS.redBg,
+  amber: COLORS.amberBg,
+  green: COLORS.greenBg,
+};
+const TILE_VALUE_COLOR: Record<NonNullable<Tile["tone"]>, string> = {
+  default: COLORS.text,
+  red: COLORS.red,
+  amber: COLORS.amber,
+  green: COLORS.green,
+};
 
 export function tilesRow(tiles: Tile[]): string {
   const cellWidth = Math.floor(100 / tiles.length);
   const cells = tiles
     .map((tile) => {
-      const bg = tile.tone === "red" ? COLORS.redBg : tile.tone === "amber" ? COLORS.amberBg : COLORS.card;
-      const valueColor = tile.tone === "red" ? COLORS.red : tile.tone === "amber" ? COLORS.amber : COLORS.text;
+      const tone = tile.tone ?? "default";
       return `<td width="${cellWidth}%" style="padding:4px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${bg};border:1px solid ${COLORS.border};border-radius:6px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${TILE_BG[tone]};border:1px solid ${COLORS.border};border-radius:6px;">
           <tr><td style="padding:14px 10px;text-align:center;">
-            <div style="font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;color:${valueColor};">${tile.value}</div>
+            <div style="font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;color:${TILE_VALUE_COLOR[tone]};">${tile.value}</div>
             <div style="font-size:11px;color:${COLORS.muted};margin-top:2px;text-transform:uppercase;letter-spacing:0.03em;">${escapeHtml(tile.label)}</div>
           </tr></td>
         </table>
