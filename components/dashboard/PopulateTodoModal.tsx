@@ -10,15 +10,23 @@ interface ClientOption {
   name: string;
 }
 
+interface StaffOption {
+  id: string;
+  name: string;
+}
+
 interface PopulateTodoModalProps {
   todo: TodoItem;
   allClients: ClientOption[];
+  // Every assignable staff member, for the "Assign to" picker -- same
+  // roster the task edit modal's assignee dropdown uses.
+  staff: StaffOption[];
   // "populate" triages a pending_triage item (client + due date +
   // recurrence, where recurrence can convert it into a Task). "edit" only
-  // changes the client/due date of an already-triaged item -- recurrence is
-  // deliberately absent there, since silently turning an existing to-do
-  // into a Task from an Edit button would be a surprising thing for that
-  // button to do.
+  // changes the client/due date/assignee of an already-triaged item --
+  // recurrence is deliberately absent there, since silently turning an
+  // existing to-do into a Task from an Edit button would be a surprising
+  // thing for that button to do.
   mode?: "populate" | "edit";
   onClose: () => void;
   onSaved: () => void;
@@ -40,6 +48,7 @@ const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
 export default function PopulateTodoModal({
   todo,
   allClients,
+  staff,
   mode = "populate",
   onClose,
   onSaved,
@@ -48,7 +57,9 @@ export default function PopulateTodoModal({
   const [name, setName] = useState(todoDisplayName(todo));
   const [clientId, setClientId] = useState(isEdit ? todo.customerId ?? "" : "");
   const [dueDate, setDueDate] = useState(isEdit ? todo.dueDate ?? "" : "");
+  const [assigneeId, setAssigneeId] = useState(todo.ownerStaffId);
   const [recurrence, setRecurrence] = useState<RecurrenceInterval>("none");
+  const [showEmail, setShowEmail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [convertedMessage, setConvertedMessage] = useState<string | null>(null);
@@ -67,11 +78,12 @@ export default function PopulateTodoModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isEdit
-            ? { intent: "edit", customerId: clientId, dueDate: dueDate || null, title: name }
+            ? { intent: "edit", customerId: clientId, dueDate: dueDate || null, title: name, assigneeId }
             : {
                 customerId: clientId,
                 dueDate: dueDate || null,
                 recurrence,
+                assigneeId,
               },
         ),
       });
@@ -136,9 +148,47 @@ export default function PopulateTodoModal({
             ×
           </button>
         </div>
-        <div style={{ fontSize: "12px", color: "#888780", marginBottom: "18px" }}>
+        <div style={{ fontSize: "12px", color: "#888780", marginBottom: todo.body ? "6px" : "18px" }}>
           {isEdit ? `Forwarded email: ${todo.subject}` : todo.subject}
         </div>
+
+        {todo.body ? (
+          <div style={{ marginBottom: "18px" }}>
+            <button
+              type="button"
+              onClick={() => setShowEmail((v) => !v)}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                fontSize: "11px",
+                fontWeight: 500,
+                color: "#2a78d6",
+                cursor: "pointer",
+              }}
+            >
+              {showEmail ? "Hide original email" : "Show original email"}
+            </button>
+            {showEmail ? (
+              <div
+                style={{
+                  marginTop: "8px",
+                  maxHeight: "160px",
+                  overflowY: "auto",
+                  fontSize: "12px",
+                  color: "#444441",
+                  whiteSpace: "pre-wrap",
+                  background: "#fafaf8",
+                  border: "0.5px solid #e1e0d9",
+                  borderRadius: "8px",
+                  padding: "10px 12px",
+                }}
+              >
+                {todo.body}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {convertedMessage ? (
           <div style={{ fontSize: "13px", color: "#0d4a2f", background: "#e3f6ec", border: "0.5px solid #b8e6cd", borderRadius: "10px", padding: "10px 12px" }}>
@@ -174,6 +224,22 @@ export default function PopulateTodoModal({
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={labelStyle}>Due date</span>
                 <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+              </label>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={labelStyle}>Assign to</span>
+                <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={inputStyle}>
+                  {staff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                {assigneeId !== todo.ownerStaffId ? (
+                  <span style={{ fontSize: "11px", color: "#888780" }}>
+                    They&rsquo;ll get an email; you&rsquo;ll be notified when it&rsquo;s marked done or discarded.
+                  </span>
+                ) : null}
               </label>
 
               {isEdit ? null : (
