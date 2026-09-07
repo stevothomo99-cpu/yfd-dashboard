@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildReportWindow, buildCombinedReportData, getCombinedReportRecipients } from "@/lib/mondayReport";
-import { renderCombinedReportEmail } from "@/lib/emailTemplates/mondayReport";
+import { buildDailyDigestData, getDailyDigestRecipients, type DailyDigestData } from "@/lib/dailyDigest";
+import { aestTodayIso } from "@/lib/mondayReport";
+import { renderDailyDigestEmail } from "@/lib/emailTemplates/dailyDigest";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 
 // Vercel Cron only issues GET requests -- see vercel.json for the schedule
-// (Sunday 02:00 UTC = Sunday 12:00pm/midday AEST, QLD has no DST). The
-// firm-wide overdue summary -- deliberately a morning ahead of the
-// Monday-morning "Workflow Update" (app/api/reports/monday-report/route.ts)
-// so the Partner sees where things stand before the week even starts, not
-// at the same moment everyone else gets their own report.
+// (UTC Mon-Sat 21:00 = AEST Tue-Sun 07:00, QLD has no DST). Deliberately
+// does NOT include Sunday-UTC/Monday-AEST -- that morning's fuller
+// "Workflow Update" (app/api/reports/monday-report/route.ts) already covers
+// overdue + due-today as part of its weekly report, so a second email at
+// the same moment would just be a duplicate. A lighter, every-other-morning
+// version of that report: just overdue + due today, to every included
+// staff member.
 export const maxDuration = 300;
 
 interface SendResult {
@@ -39,29 +42,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const window = buildReportWindow();
+  const todayIso = aestTodayIso();
   const resendReady = isResendConfigured();
 
-  const recipients = await getCombinedReportRecipients();
+  const recipients = await getDailyDigestRecipients();
   const results: SendResult[] = [];
 
-  if (recipients.length > 0) {
+  for (const staff of recipients) {
     try {
-      const data = await buildCombinedReportData(window);
-      const { subject, html, text } = renderCombinedReportEmail(data);
-      for (const partner of recipients) {
-        if (!resendReady) {
-          console.log(`[overdue-summary] Resend not configured -- would have sent "${subject}" to ${partner.email}`);
-          results.push({ name: partner.name, email: partner.email, ok: false, error: "Resend not configured" });
-          continue;
-        }
-        results.push(await sendOne(partner.name, partner.email, subject, text, html));
+      const data: DailyDigestData = await buildDailyDigestData(staff, todayIso);
+      const { subject, html, text } = renderDailyDigestEmail(data);
+      if (!resendReady) {
+        console.log(`[daily-digest] Resend not configured -- would have sent "${subject}" to ${staff.email}`);
+        results.push({ name: staff.name, email: staff.email, ok: false, error: "Resend not configured" });
+        continue;
       }
+      results.push(await sendOne(staff.name, staff.email, subject, text, html));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      for (const partner of recipients) {
-        results.push({ name: partner.name, email: partner.email, ok: false, error: message });
-      }
+      results.push({
+        name: staff.name,
+        email: staff.email,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -69,7 +72,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     resendConfigured: resendReady,
-    weekOf: window.weekStartIso,
+    date: todayIso,
     total: recipients.length,
     sent: results.filter((r) => r.ok).length,
     failed: failed.length,

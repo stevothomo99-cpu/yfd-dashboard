@@ -7,8 +7,8 @@ import { isResendConfigured, sendEmail } from "@/lib/resend";
 // (Sunday 21:00 UTC = Monday 07:00 AEST, QLD has no DST). This is the
 // "Workflow Update" -- each person's own overdue/due-this-week/BAS/payroll
 // summary. The firm-wide overdue report that used to fire from this same
-// route now has its own earlier trigger the night before -- see
-// app/api/reports/overdue-summary/route.ts.
+// route now has its own earlier trigger the morning before (Sunday midday
+// AEST) -- see app/api/reports/overdue-summary/route.ts.
 //
 // Same "whole staff roster, fan-out per person" shape as the timesheet sync,
 // so it gets the same generous ceiling.

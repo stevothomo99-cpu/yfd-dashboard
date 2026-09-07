@@ -38,13 +38,14 @@ export default async function EmailSchedulePage() {
           lineHeight: 1.6,
         }}
       >
-        None of this sends real mail yet — every entry below is gated behind Resend being configured
-        (<code>RESEND_API_KEY</code>/<code>RESEND_FROM_EMAIL</code>) and degrades to logging instead of
-        crashing when it isn&rsquo;t. Each cron also needs <code>CRON_SECRET</code> set in Vercel — Vercel
-        Cron sends it as the request&rsquo;s bearer token automatically once the env var exists, and every
-        route below rejects the request outright if it&rsquo;s missing. Five cron jobs also need to fit
-        this project&rsquo;s Vercel plan limits — check those if fewer emails run than the table below
-        expects.
+        Every entry below is gated behind Resend being configured (<code>RESEND_API_KEY</code>/
+        <code>RESEND_FROM_EMAIL</code>) and degrades to logging instead of crashing when it isn&rsquo;t.
+        Each cron also needs <code>CRON_SECRET</code> set in Vercel — Vercel Cron sends it as the
+        request&rsquo;s bearer token automatically once the env var exists, and every route below rejects
+        the request outright if it&rsquo;s missing (this is exactly what silently blocked every one of
+        these emails for their first two weeks live — double-check this in Vercel&rsquo;s Environment
+        Variables if something stops arriving). Six cron jobs also need to fit this project&rsquo;s Vercel
+        plan limits — check those if fewer emails run than the table below expects.
       </div>
 
       <ScheduleTable />
@@ -74,11 +75,18 @@ export default async function EmailSchedulePage() {
           backlog stays visible — not just the most recent gap. Someone short this week can receive both
           Reminder #2 and the Timesheet Overview in the same morning; they answer different questions.
         </Note>
-        <SectionHeading style={{ marginTop: "14px" }}>Why does the Overdue Summary fire Sunday night, not Monday morning?</SectionHeading>
+        <SectionHeading style={{ marginTop: "14px" }}>Why does the Overdue Summary fire Sunday midday, not Monday morning?</SectionHeading>
         <Note>
-          It&rsquo;s Partner-facing and deliberately a night ahead of the Workflow Update everyone else
+          It&rsquo;s Partner-facing and deliberately a morning ahead of the Workflow Update everyone else
           gets Monday morning, so whoever&rsquo;s reading it sees where the firm stands before the week
           starts, not at the same moment as everyone else&rsquo;s own report.
+        </Note>
+        <SectionHeading style={{ marginTop: "14px" }}>Why doesn&rsquo;t the Daily Digest fire on Monday?</SectionHeading>
+        <Note>
+          Monday morning already gets the fuller Workflow Update, which covers overdue and due-today as
+          part of its weekly report — a second, lighter email at the same moment would just be a
+          duplicate. The Daily Digest&rsquo;s cron schedule itself skips Monday entirely rather than
+          relying on a runtime check, so there&rsquo;s nothing to misfire.
         </Note>
       </div>
     </div>
@@ -99,7 +107,7 @@ const SCHEDULE: ScheduleRow[] = [
     order: 1,
     name: "Overdue Summary",
     audience: "Partner",
-    time: "Sun 8:00pm AEST",
+    time: "Sun 12:00pm AEST",
     route: "/api/reports/overdue-summary",
     content: "Firm-wide overdue tasks across all staff, top overdue clients, per-staff mini-summary, prior-week/FYTD hours.",
   },
@@ -109,7 +117,7 @@ const SCHEDULE: ScheduleRow[] = [
     audience: "Each employee",
     time: "Mon 7:00am AEST",
     route: "/api/reports/monday-report",
-    content: "Their own overdue / due this week / due later tasks, plus BAS/IAS and Payroll deadline tiles.",
+    content: "Their own overdue / due this week / due later tasks, BAS/IAS and Payroll deadline tiles, and their open Dashboard To-Do items.",
   },
   {
     order: 3,
@@ -142,6 +150,14 @@ const SCHEDULE: ScheduleRow[] = [
     time: "Mon 12:00pm AEST",
     route: "/api/reports/timesheet-followup",
     content: "Every incomplete week this FY (not just last week), running total, and their own YTD billable %/logged %.",
+  },
+  {
+    order: 7,
+    name: "Daily Digest",
+    audience: "Each employee",
+    time: "Tue–Sun 7:00am AEST",
+    route: "/api/reports/daily-digest",
+    content: "A lighter, every-other-morning version of the Workflow Update — overdue, due-today, and open Dashboard To-Dos. Skips Monday, since the Workflow Update already covers that.",
   },
 ];
 
