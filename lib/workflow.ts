@@ -158,6 +158,21 @@ export const getStaffByEmail = cache(async function getStaffByEmail(
   return data ? mapStaff(data) : null;
 });
 
+export const getStaffById = cache(async function getStaffById(id: string): Promise<WorkflowStaff | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("staff")
+    .select("id, xpm_staff_id, name, email, role, included")
+    .eq("id", id)
+    .maybeSingle<StaffRow>();
+
+  if (error) {
+    console.error("[workflow] getStaffById failed:", error.message);
+    return null;
+  }
+  return data ? mapStaff(data) : null;
+});
+
 export const listStaff = cache(async function listStaff(role?: StaffRole): Promise<WorkflowStaff[]> {
   const admin = getSupabaseAdmin();
   let query = admin

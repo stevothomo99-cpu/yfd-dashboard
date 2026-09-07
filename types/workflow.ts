@@ -253,6 +253,13 @@ export type TodoItemStatus = "pending_triage" | "todo" | "done" | "converted";
 export interface TodoItem {
   id: string;
   ownerStaffId: string;
+  // Who last assigned/reassigned this to-do to ownerStaffId via the
+  // dashboard's "Assign to" picker (migration 026) -- distinct from
+  // createdByEmail/createdByName below, which is the original forwarder of
+  // the email and never changes. Null until someone actually reassigns it;
+  // a to-do resolved purely by the inbound email's To/Cc routing has no
+  // value here even though it clearly has an owner.
+  assignedByStaffId: string | null;
   createdByEmail: string | null;
   createdByName: string | null;
   // The forwarded email's original Subject header -- immutable, and the

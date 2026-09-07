@@ -10,8 +10,18 @@ interface ClientOption {
   name: string;
 }
 
+interface StaffOption {
+  id: string;
+  name: string;
+}
+
 interface TodoSectionProps {
   allClients: ClientOption[];
+  // Every assignable staff member, for the populate/edit modal's "Assign
+  // to" picker -- unfiltered by `included` so a to-do's current owner is
+  // always a valid option even if they've since been excluded from
+  // practice-wide reporting.
+  staff: StaffOption[];
   // Used only to tell "I forwarded this myself" apart from "a colleague
   // delegated this to me" -- see sourceOf(). Null when the logged-in user
   // has no email on the session, in which case everything reads as
@@ -85,7 +95,7 @@ function sourceLabel(todo: TodoItem, currentUserEmail: string | null): string {
 // The filter bar sits above both and drives both, so search stays global
 // across the pair rather than each tile carrying its own duplicate set of
 // controls.
-export default function TodoSection({ allClients, currentUserEmail }: TodoSectionProps) {
+export default function TodoSection({ allClients, staff, currentUserEmail }: TodoSectionProps) {
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -468,6 +478,7 @@ export default function TodoSection({ allClients, currentUserEmail }: TodoSectio
         <PopulateTodoModal
           todo={editing.todo}
           allClients={allClients}
+          staff={staff}
           mode={editing.mode}
           onClose={() => setEditing(null)}
           onSaved={refresh}

@@ -38,7 +38,7 @@ async function requireOwnerOrAdmin(todoId: string) {
   if (!actor.isAdmin && todo.ownerStaffId !== actor.staffId) {
     return { ok: false as const, response: NextResponse.json({ error: "Not your to-do" }, { status: 403 }) };
   }
-  return { ok: true as const, todo };
+  return { ok: true as const, todo, staffId: actor.staffId };
 }
 
 interface PatchBody {
@@ -48,17 +48,23 @@ interface PatchBody {
   customerId?: string;
   dueDate?: string | null;
   recurrence?: RecurrenceInterval;
+  // Reassigns the to-do to a different staff member -- omitted or equal to
+  // the current owner means "leave it as-is". See lib/todos.ts's
+  // populateTodoItem/updateTodoItemDetails for the notification this
+  // triggers.
+  assigneeId?: string;
 }
 
 // Three things this can do, distinguished by which fields are present:
 // - { done } -- toggle a populated one-off to-do's completion.
-// - { intent: "edit", customerId, dueDate, title? } -- change the display
-//   name / client / due date of an already-populated to-do, leaving its
-//   status alone (so editing a completed item doesn't silently reopen it).
-// - { customerId, dueDate, recurrence } -- populate a pending_triage item,
-//   which either finalizes it as a one-off to-do or converts it into a real
-//   Task if recurrence isn't "none" (see lib/todos.ts's populateTodoItem for
-//   exactly what "converts" means).
+// - { intent: "edit", customerId, dueDate, title?, assigneeId? } -- change
+//   the display name / client / due date / assignee of an already-populated
+//   to-do, leaving its status alone (so editing a completed item doesn't
+//   silently reopen it).
+// - { customerId, dueDate, recurrence, assigneeId? } -- populate a
+//   pending_triage item, which either finalizes it as a one-off to-do or
+//   converts it into a real Task if recurrence isn't "none" (see
+//   lib/todos.ts's populateTodoItem for exactly what "converts" means).
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const access = await requireOwnerOrAdmin(id);
@@ -84,11 +90,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // An empty/whitespace name clears the rename rather than storing a
     // blank one, so the item falls back to its email subject.
     const trimmed = typeof body.title === "string" ? body.title.trim() : body.title;
-    const todo = await updateTodoItemDetails(id, {
-      customerId: body.customerId,
-      dueDate: body.dueDate ?? null,
-      title: trimmed === undefined ? undefined : trimmed || null,
-    });
+    const todo = await updateTodoItemDetails(
+      id,
+      {
+        customerId: body.customerId,
+        dueDate: body.dueDate ?? null,
+        title: trimmed === undefined ? undefined : trimmed || null,
+        assigneeStaffId: body.assigneeId,
+      },
+      access.staffId,
+    );
     if (!todo) return NextResponse.json({ error: "Failed to update to-do" }, { status: 500 });
     return NextResponse.json({ todo });
   }
@@ -97,11 +108,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "customerId and recurrence are required" }, { status: 400 });
   }
 
-  const result = await populateTodoItem(id, {
-    customerId: body.customerId,
-    dueDate: body.dueDate ?? null,
-    recurrence: body.recurrence,
-  });
+  const result = await populateTodoItem(
+    id,
+    {
+      customerId: body.customerId,
+      dueDate: body.dueDate ?? null,
+      recurrence: body.recurrence,
+      assigneeStaffId: body.assigneeId,
+    },
+    access.staffId,
+  );
   if (!result) return NextResponse.json({ error: "Failed to populate to-do" }, { status: 500 });
 
   return NextResponse.json(

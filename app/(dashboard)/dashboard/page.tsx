@@ -4,7 +4,7 @@ import WorkItemMiniTable from "@/components/dashboard/WorkItemMiniTable";
 import UtilisationTile from "@/components/dashboard/UtilisationTile";
 import TodoSection from "@/components/dashboard/TodoSection";
 import { getSettings } from "@/lib/settings";
-import { getStaffByEmail, getWorkBoardForStaff, getClientSummaries } from "@/lib/workflow";
+import { getStaffByEmail, getWorkBoardForStaff, getClientSummaries, listStaff } from "@/lib/workflow";
 import {
   computeWagesUtilisation,
   getBasTasks,
@@ -43,16 +43,18 @@ export default async function DashboardPage() {
   // from Supabase, utilisation from XPM. Awaited together because run in
   // series the page waits on the sum of all three, and the XPM leg alone
   // can be seconds on a cold cache.
-  const [board, { utilisation, utilisationMessage }, tiles] = await Promise.all([
+  const [board, { utilisation, utilisationMessage }, tiles, allStaff] = await Promise.all([
     getWorkBoardForStaff(staff),
     loadUtilisation(staff.xpmStaffId, today),
     getClientSummaries(),
+    listStaff(),
   ]);
 
   const overdueTasks = getOverdueTasks(board, today);
   const basTasks = getBasTasks(board, today);
   const basOverdueCount = basTasks.filter((t) => t.dueDate && t.dueDate < today).length;
   const allClients = tiles.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const todoStaffOptions = allStaff.map((s) => ({ id: s.id, name: s.name }));
 
   return (
     <div>
@@ -67,7 +69,7 @@ export default async function DashboardPage() {
         }
       />
 
-      <TodoSection allClients={allClients} currentUserEmail={staff.email} />
+      <TodoSection allClients={allClients} staff={todoStaffOptions} currentUserEmail={staff.email} />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "14px" }}>
         <div style={{ background: "white", border: "0.5px solid #e1e0d9", borderRadius: "14px", padding: "1.1rem 1.2rem" }}>
