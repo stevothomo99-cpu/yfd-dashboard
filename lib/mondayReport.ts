@@ -3,15 +3,17 @@ import { getSettings } from "./settings";
 import { getXpmTimesheets, isXpmConfigured } from "./xpm";
 import { computeWagesUtilisation, periodBounds, BAS_TYPE_NAME } from "./workOverview";
 import { fyRange, fyYearFor } from "./utils";
+import { listOutstandingTodoLines } from "./todos";
 import type { TaskWithDetails, WorkflowStaff } from "@/types/workflow";
 import type { XpmTimesheet } from "@/types/xpm";
+import type { TodoLine } from "./todos";
 
 // Pure(ish) data computation for the weekly "Monday Report" email -- see
 // lib/emailTemplates/mondayReport.ts for how this is rendered. Two separate
 // cron entry points consume this, at two different times, per the
 // practice's requested schedule (see Settings -> Email Schedule):
 // app/api/reports/overdue-summary/route.ts (buildCombinedReportData, Sunday
-// 20:00 AEST -- the firm-wide overdue report, to the Partner) and
+// 12:00pm/midday AEST -- the firm-wide overdue report, to the Partner) and
 // app/api/reports/monday-report/route.ts (buildStaffReportData, Monday
 // 07:00 AEST -- each person's own "Workflow Update").
 //
@@ -97,6 +99,11 @@ export interface StaffReportData {
   dueThisWeekTasks: TaskLine[];
   overdueByClient: ClientOverdueGroup[];
   priorWeekTimesheet: PriorWeekTimesheet | null;
+  // Outstanding Dashboard To-Do items (§4.8) owned by this staff member --
+  // pending_triage or todo, never done/converted. These live entirely
+  // outside the Task system (no job, status, or type), so they'd otherwise
+  // never show up anywhere but /dashboard itself.
+  todoItems: TodoLine[];
 }
 
 function daysOverdue(dueDate: string, todayIso: string): number {
@@ -124,6 +131,7 @@ export function computeStaffReport(
   tasks: TaskWithDetails[],
   window: ReportWindow,
   priorWeekTimesheet: PriorWeekTimesheet | null = null,
+  todoItems: TodoLine[] = [],
 ): StaffReportData {
   let overdueCount = 0;
   let dueThisWeekCount = 0;
@@ -193,6 +201,7 @@ export function computeStaffReport(
     dueThisWeekTasks,
     overdueByClient,
     priorWeekTimesheet,
+    todoItems,
   };
 }
 
@@ -230,17 +239,19 @@ async function fetchPriorWeekTimesheet(
   }
 }
 
-// Fetches staff's own board and prior-week timesheet status, and builds
-// their report -- the per-staff email route's entry point.
+// Fetches staff's own board, prior-week timesheet status, and outstanding
+// To-Do items, and builds their report -- the per-staff email route's entry
+// point.
 export async function buildStaffReportData(
   staff: WorkflowStaff,
   window: ReportWindow = buildReportWindow(),
 ): Promise<StaffReportData> {
-  const [tasks, priorWeekTimesheet] = await Promise.all([
+  const [tasks, priorWeekTimesheet, todoItems] = await Promise.all([
     getTasksForStaff(staff.id),
     fetchPriorWeekTimesheet(staff, window),
+    listOutstandingTodoLines(staff.id),
   ]);
-  return computeStaffReport(staff, tasks, window, priorWeekTimesheet);
+  return computeStaffReport(staff, tasks, window, priorWeekTimesheet, todoItems);
 }
 
 export interface FirmTotals {

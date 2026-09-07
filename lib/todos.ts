@@ -62,6 +62,34 @@ export async function listTodoItemsForStaff(staffId: string): Promise<TodoItem[]
   return (data ?? []).map(mapTodoItem);
 }
 
+// A to-do line shaped for the report emails (lib/mondayReport.ts,
+// lib/dailyDigest.ts) -- just enough to list, not the full TodoItem.
+export interface TodoLine {
+  id: string;
+  title: string;
+  customerName: string | null;
+  dueDate: string | null;
+  status: TodoItemStatus;
+}
+
+// Outstanding to-dos for staffId -- pending_triage (needs a client/due date
+// set before it means anything) or todo (populated, still open).
+// listTodoItemsForStaff already excludes "converted" (now a real Task); this
+// also excludes "done" (a completed one-off needs no more action) since a
+// report of *outstanding* items has no use for either terminal state.
+export async function listOutstandingTodoLines(staffId: string): Promise<TodoLine[]> {
+  const items = await listTodoItemsForStaff(staffId);
+  return items
+    .filter((t) => t.status === "pending_triage" || t.status === "todo")
+    .map((t) => ({
+      id: t.id,
+      title: todoDisplayName(t),
+      customerName: t.customerName,
+      dueDate: t.dueDate,
+      status: t.status,
+    }));
+}
+
 // Practice-wide view for admins -- same "not converted" filter (a converted
 // item's follow-up now lives as a normal Task on the relevant board).
 export async function listAllTodoItems(): Promise<TodoItem[]> {

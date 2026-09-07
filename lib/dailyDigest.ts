@@ -1,6 +1,8 @@
 import { getTasksForStaff } from "./workflow";
 import { aestTodayIso, getIndividualReportRecipients } from "./mondayReport";
+import { listOutstandingTodoLines } from "./todos";
 import type { TaskWithDetails, WorkflowStaff } from "@/types/workflow";
+import type { TodoLine } from "./todos";
 
 // Daily 7am AEST digest -- a lighter, every-morning version of the Monday
 // "Workflow Update" (lib/mondayReport.ts), just overdue + due-today, sent to
@@ -30,6 +32,9 @@ export interface DailyDigestData {
   overdueTasks: DailyDigestTaskLine[];
   dueTodayCount: number;
   dueTodayTasks: DailyDigestTaskLine[];
+  // Outstanding Dashboard To-Do items (§4.8) owned by this staff member --
+  // same "pending_triage or todo" set the Workflow Update shows.
+  todoItems: TodoLine[];
 }
 
 function toLine(task: TaskWithDetails): DailyDigestTaskLine {
@@ -48,6 +53,7 @@ export function computeDailyDigest(
   staff: WorkflowStaff,
   tasks: TaskWithDetails[],
   todayIso: string,
+  todoItems: TodoLine[] = [],
 ): DailyDigestData {
   const overdueTasks: DailyDigestTaskLine[] = [];
   const dueTodayTasks: DailyDigestTaskLine[] = [];
@@ -68,17 +74,22 @@ export function computeDailyDigest(
     overdueTasks,
     dueTodayCount: dueTodayTasks.length,
     dueTodayTasks,
+    todoItems,
   };
 }
 
 // Fetches staff's own board (owned + temporarily reassigned, same set My
-// Work shows) and builds their digest -- the route's entry point.
+// Work shows) and outstanding To-Do items, and builds their digest -- the
+// route's entry point.
 export async function buildDailyDigestData(
   staff: WorkflowStaff,
   todayIso: string = aestTodayIso(),
 ): Promise<DailyDigestData> {
-  const tasks = await getTasksForStaff(staff.id);
-  return computeDailyDigest(staff, tasks, todayIso);
+  const [tasks, todoItems] = await Promise.all([
+    getTasksForStaff(staff.id),
+    listOutstandingTodoLines(staff.id),
+  ]);
+  return computeDailyDigest(staff, tasks, todayIso, todoItems);
 }
 
 // Same recipients as the Monday Report's individual send -- every included

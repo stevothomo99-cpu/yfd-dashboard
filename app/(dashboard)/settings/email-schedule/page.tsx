@@ -75,9 +75,9 @@ export default async function EmailSchedulePage() {
           backlog stays visible — not just the most recent gap. Someone short this week can receive both
           Reminder #2 and the Timesheet Overview in the same morning; they answer different questions.
         </Note>
-        <SectionHeading style={{ marginTop: "14px" }}>Why does the Overdue Summary fire Sunday night, not Monday morning?</SectionHeading>
+        <SectionHeading style={{ marginTop: "14px" }}>Why does the Overdue Summary fire Sunday midday, not Monday morning?</SectionHeading>
         <Note>
-          It&rsquo;s Partner-facing and deliberately a night ahead of the Workflow Update everyone else
+          It&rsquo;s Partner-facing and deliberately a morning ahead of the Workflow Update everyone else
           gets Monday morning, so whoever&rsquo;s reading it sees where the firm stands before the week
           starts, not at the same moment as everyone else&rsquo;s own report.
         </Note>
@@ -107,7 +107,7 @@ const SCHEDULE: ScheduleRow[] = [
     order: 1,
     name: "Overdue Summary",
     audience: "Partner",
-    time: "Sun 8:00pm AEST",
+    time: "Sun 12:00pm AEST",
     route: "/api/reports/overdue-summary",
     content: "Firm-wide overdue tasks across all staff, top overdue clients, per-staff mini-summary, prior-week/FYTD hours.",
   },
@@ -117,7 +117,7 @@ const SCHEDULE: ScheduleRow[] = [
     audience: "Each employee",
     time: "Mon 7:00am AEST",
     route: "/api/reports/monday-report",
-    content: "Their own overdue / due this week / due later tasks, plus BAS/IAS and Payroll deadline tiles.",
+    content: "Their own overdue / due this week / due later tasks, BAS/IAS and Payroll deadline tiles, and their open Dashboard To-Do items.",
   },
   {
     order: 3,
@@ -157,7 +157,7 @@ const SCHEDULE: ScheduleRow[] = [
     audience: "Each employee",
     time: "Tue–Sun 7:00am AEST",
     route: "/api/reports/daily-digest",
-    content: "A lighter, every-other-morning version of the Workflow Update — just overdue and due-today tasks. Skips Monday, since the Workflow Update already covers that.",
+    content: "A lighter, every-other-morning version of the Workflow Update — overdue, due-today, and open Dashboard To-Dos. Skips Monday, since the Workflow Update already covers that.",
   },
 ];
 

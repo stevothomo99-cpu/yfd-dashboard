@@ -4,11 +4,11 @@ import { renderCombinedReportEmail } from "@/lib/emailTemplates/mondayReport";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 
 // Vercel Cron only issues GET requests -- see vercel.json for the schedule
-// (Sunday 10:00 UTC = Sunday 20:00 AEST, QLD has no DST). The firm-wide
-// overdue summary -- deliberately a night ahead of the Monday-morning
-// "Workflow Update" (app/api/reports/monday-report/route.ts) so the Partner
-// sees where things stand before the week even starts, not at the same
-// moment everyone else gets their own report.
+// (Sunday 02:00 UTC = Sunday 12:00pm/midday AEST, QLD has no DST). The
+// firm-wide overdue summary -- deliberately a morning ahead of the
+// Monday-morning "Workflow Update" (app/api/reports/monday-report/route.ts)
+// so the Partner sees where things stand before the week even starts, not
+// at the same moment everyone else gets their own report.
 export const maxDuration = 300;
 
 interface SendResult {

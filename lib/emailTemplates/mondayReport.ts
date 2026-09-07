@@ -5,6 +5,7 @@ import type {
   TaskLine,
   TopOverdueClient,
 } from "@/lib/mondayReport";
+import type { TodoLine } from "@/lib/todos";
 import { COLORS, escapeHtml, fmtDate, fmtDateRange, fmtGeneratedAt, htmlShell, masthead, sectionCard, tilesRow } from "./shared";
 import type { EmailContent } from "./shared";
 
@@ -46,6 +47,42 @@ function taskListTable(tasks: TaskLine[], emptyText: string): string {
       <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Task</td>
       <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Client</td>
       <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Type</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Due</td>
+    </tr>
+    ${rows}
+  </table>`;
+}
+
+const TODO_STATUS_LABEL: Record<TodoLine["status"], string> = {
+  pending_triage: "Needs triage",
+  todo: "Open",
+  done: "Done",
+  converted: "Converted",
+};
+
+// listOutstandingTodoLines already restricts this to pending_triage/todo --
+// done/converted are excluded before this ever sees them, but the label map
+// covers all four so this stays correct if that filter is ever loosened.
+function todoListTable(todos: TodoLine[]): string {
+  if (todos.length === 0) {
+    return `<div style="font-size:13px;color:${COLORS.muted};">No open Dashboard To-Dos.</div>`;
+  }
+  const rows = todos
+    .map(
+      (t) => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.text};">${escapeHtml(t.title)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.muted};">${escapeHtml(t.customerName ?? "—")}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${t.status === "pending_triage" ? COLORS.amber : COLORS.muted};white-space:nowrap;">${escapeHtml(TODO_STATUS_LABEL[t.status])}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid ${COLORS.border};font-size:13px;color:${COLORS.text};font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;">${t.dueDate ? fmtDate(t.dueDate) : "—"}</td>
+    </tr>`,
+    )
+    .join("");
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">To-Do</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Client</td>
+      <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;">Status</td>
       <td style="padding:4px 8px;font-size:11px;color:${COLORS.muted};text-transform:uppercase;letter-spacing:0.03em;text-align:right;">Due</td>
     </tr>
     ${rows}
@@ -138,6 +175,7 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
     { label: "Overdue", value: data.overdueCount, tone: data.overdueCount > 0 ? "red" : "default" },
     { label: "Due this week", value: data.dueThisWeekCount, tone: data.dueThisWeekCount > 0 ? "amber" : "default" },
     { label: "Due later", value: data.dueLaterCount },
+    { label: "Dashboard To-Dos", value: data.todoItems.length, tone: data.todoItems.length > 0 ? "amber" : "default" },
   ]);
   const deadlineTiles = tilesRow([
     { label: "BAS/IAS due", value: data.basDueCount, tone: data.basDueCount > 0 ? "amber" : "default" },
@@ -153,6 +191,7 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
     </table>
     ${sectionCard("Due this week", taskListTable(data.dueThisWeekTasks, "Nothing due this week."))}
     ${sectionCard("Overdue, by client", overdueByClientTable(data.overdueByClient))}
+    ${sectionCard("Dashboard To-Dos", todoListTable(data.todoItems))}
   `;
   const html = htmlShell(`${data.overdueCount} overdue, ${data.dueThisWeekCount} due this week`, bodyHtml, FOOTER_TEXT);
 
@@ -167,6 +206,7 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
   textLines.push(`Due later: ${data.dueLaterCount}`);
   textLines.push(`BAS/IAS due: ${data.basDueCount}`);
   textLines.push(`Payroll due: ${data.payrollDueCount}`);
+  textLines.push(`Dashboard To-Dos: ${data.todoItems.length}`);
   textLines.push("");
   textLines.push(`Hi ${firstName}, here's what's on your plate this week.`);
   textLines.push("");
@@ -183,6 +223,13 @@ export function renderStaffReportEmail(data: StaffReportData): EmailContent {
     for (const t of group.tasks) {
       textLines.push(`    - ${t.title} (${t.typeName ?? "—"}) — due ${fmtDate(t.dueDate)}, ${t.daysOverdue}d overdue`);
     }
+  }
+  textLines.push("");
+  textLines.push("DASHBOARD TO-DOS");
+  if (data.todoItems.length === 0) textLines.push("  (no open Dashboard To-Dos)");
+  for (const t of data.todoItems) {
+    const dueLabel = t.dueDate ? `due ${fmtDate(t.dueDate)}` : "no due date";
+    textLines.push(`  - ${t.title} (${t.customerName ?? "—"}) — ${TODO_STATUS_LABEL[t.status]}, ${dueLabel}`);
   }
   textLines.push("");
   textLines.push(`Generated ${fmtGeneratedAt(data.window.generatedAtIso)}`);
