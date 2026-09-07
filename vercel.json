@@ -10,6 +10,10 @@
       "schedule": "0 21 * * 0"
     },
     {
+      "path": "/api/reports/daily-digest",
+      "schedule": "0 21 * * 1-6"
+    },
+    {
       "path": "/api/reports/timesheet-reminder",
       "schedule": "0 22 * * 0"
     },
