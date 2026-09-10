@@ -308,6 +308,10 @@ export interface PopulateTodoItemInput {
   // change from that triggers the reassignment bookkeeping/notification
   // below.
   assigneeStaffId?: string;
+  // Same rename affordance updateTodoItemDetails offers, but available at
+  // triage time too -- undefined leaves the current title alone, null clears
+  // a rename back to the email subject.
+  title?: string | null;
 }
 
 export type PopulateTodoItemResult =
@@ -341,6 +345,7 @@ export async function populateTodoItem(
         customer_id: input.customerId,
         due_date: input.dueDate,
         status: "todo",
+        ...(input.title !== undefined ? { title: input.title } : {}),
         ...(reassigned ? { owner_staff_id: assigneeId, assigned_by_staff_id: actorStaffId } : {}),
       })
       .eq("id", id)
@@ -363,7 +368,7 @@ export async function populateTodoItem(
 
   const task = await createTask({
     customerId: input.customerId,
-    title: todoDisplayName(todo),
+    title: input.title || todoDisplayName(todo),
     statusId,
     assigneeId,
     dueDate: input.dueDate,
@@ -374,7 +379,13 @@ export async function populateTodoItem(
   const admin = getSupabaseAdmin();
   const { error } = await admin
     .from("todo_items")
-    .update({ customer_id: input.customerId, due_date: input.dueDate, status: "converted", converted_task_id: task.id })
+    .update({
+      customer_id: input.customerId,
+      due_date: input.dueDate,
+      status: "converted",
+      converted_task_id: task.id,
+      ...(input.title !== undefined ? { title: input.title } : {}),
+    })
     .eq("id", id);
   if (error) {
     console.error("[todos] populateTodoItem (converted) failed to update todo row:", error.message);

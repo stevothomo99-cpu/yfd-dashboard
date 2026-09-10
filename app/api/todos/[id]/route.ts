@@ -108,6 +108,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "customerId and recurrence are required" }, { status: 400 });
   }
 
+  // Same "blank clears the rename" convention as the edit branch above.
+  const trimmedTitle = typeof body.title === "string" ? body.title.trim() : body.title;
   const result = await populateTodoItem(
     id,
     {
@@ -115,6 +117,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       dueDate: body.dueDate ?? null,
       recurrence: body.recurrence,
       assigneeStaffId: body.assigneeId,
+      title: trimmedTitle === undefined ? undefined : trimmedTitle || null,
     },
     access.staffId,
   );

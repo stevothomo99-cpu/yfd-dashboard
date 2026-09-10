@@ -84,6 +84,7 @@ export default function PopulateTodoModal({
                 dueDate: dueDate || null,
                 recurrence,
                 assigneeId,
+                title: name,
               },
         ),
       });
@@ -203,21 +204,19 @@ export default function PopulateTodoModal({
             ) : null}
 
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              {isEdit ? (
-                <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <span style={labelStyle}>Name</span>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={todo.subject}
-                    style={inputStyle}
-                  />
-                  <span style={{ fontSize: "11px", color: "#888780" }}>
-                    Leave blank to fall back to the email subject.
-                  </span>
-                </label>
-              ) : null}
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={labelStyle}>Name</span>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={todo.subject}
+                  style={inputStyle}
+                />
+                <span style={{ fontSize: "11px", color: "#888780" }}>
+                  Leave blank to fall back to the email subject.
+                </span>
+              </label>
 
               <ClientPicker clients={allClients} selectedClientId={clientId} onSelectClient={setClientId} />
 

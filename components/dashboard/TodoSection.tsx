@@ -461,7 +461,7 @@ export default function TodoSection({ allClients, staff, currentUserEmail }: Tod
                   </div>
                   <Actions>
                     <button type="button" onClick={() => setEditing({ todo: t, mode: "populate" })} style={primaryButtonStyle}>
-                      Fill in
+                      Create
                     </button>
                     <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
                       Discard
