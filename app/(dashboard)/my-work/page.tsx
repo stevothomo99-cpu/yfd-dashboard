@@ -2,13 +2,12 @@ import { auth } from "@/auth";
 import MyWorkPageClient from "./MyWorkPageClient";
 import {
   getClientsInScopeForStaff,
-  getPartners,
   getStaffByEmail,
   getWorkBoardForStaff,
+  listAllCustomers,
   listStaff,
   listStatuses,
   listTaskTypes,
-  searchClientsForPartner,
 } from "@/lib/workflow";
 import type { WorkflowCustomer } from "@/types/workflow";
 
@@ -32,10 +31,9 @@ export default async function MyWorkPage() {
   // server-side, so the modal never has to refetch on open. Started
   // alongside the staff lookup rather than after it: none of it depends on
   // which staff member the session resolves to.
-  const [sessionStaff, staffForForm, partners, statuses, taskTypes] = await Promise.all([
+  const [sessionStaff, staffForForm, statuses, taskTypes] = await Promise.all([
     session?.user?.email ? getStaffByEmail(session.user.email) : Promise.resolve(null),
     listStaff(),
-    getPartners(),
     listStatuses(),
     listTaskTypes(),
   ]);
@@ -55,15 +53,11 @@ export default async function MyWorkPage() {
   // allowed to create on -- getClientsInScopeForStaff mirrors the
   // create-route's own permission check, so a non-admin never even sees a
   // client they'd be rejected for.
-  let allClients: WorkflowCustomer[];
-  if (isAdmin) {
-    const clientsByPartner = await Promise.all(partners.map((p) => searchClientsForPartner(p.id)));
-    const clientsById = new Map<string, WorkflowCustomer>();
-    for (const clients of clientsByPartner) for (const client of clients) clientsById.set(client.id, client);
-    allClients = Array.from(clientsById.values());
-  } else {
-    allClients = activeStaff ? await getClientsInScopeForStaff(activeStaff) : [];
-  }
+  const allClients: WorkflowCustomer[] = isAdmin
+    ? await listAllCustomers()
+    : activeStaff
+      ? await getClientsInScopeForStaff(activeStaff)
+      : [];
 
   return (
     <MyWorkPageClient

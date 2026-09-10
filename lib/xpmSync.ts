@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "./supabase";
 import { getSettings } from "./settings";
+import { invalidateWorkflowReferenceCache } from "./workflow";
 import {
   fetchXpmJobsForPartner,
   fetchXpmClientsWithManagerForPartner,
@@ -248,6 +249,10 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   // without this a sync leaves stale (possibly rate-limit-truncated) hours in
   // place -- which reads as "I synced and the numbers are still wrong".
   await invalidateXpmTimesheets(partnerName);
+  // Same reasoning for the staff/customers reference cache (lib/workflow.ts)
+  // this full-replace just rewrote -- without this, pages can serve the
+  // pre-sync roster for the rest of the fresh window.
+  await invalidateWorkflowReferenceCache();
 
   return {
     partnerName,
