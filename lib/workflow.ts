@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { getSupabaseAdmin } from "./supabase";
+import { cacheDelete, cachedEncryptedSWR } from "./cache";
 import { BAS_TYPE_NAME } from "./workOverview";
 import type {
   BasStage,
@@ -173,21 +174,100 @@ export const getStaffById = cache(async function getStaffById(id: string): Promi
   return data ? mapStaff(data) : null;
 });
 
-export const listStaff = cache(async function listStaff(role?: StaffRole): Promise<WorkflowStaff[]> {
+// Cross-request cache for reference tables (staff/statuses/task_types/
+// customers) -- these change only via an admin toggle or an XPM resync, yet
+// were previously re-queried from Postgres on every single dashboard page
+// load (My Work, Clients, Team, BAS Status, etc. each call listStaff and/or
+// fetchLookupMaps at least once). React's cache() above only dedupes calls
+// *within* one request; this adds the cross-request layer, same
+// cachedEncryptedSWR primitive lib/xpm.ts already uses for staff/timesheet
+// data. A short fresh window means a stale-write is visible for at most a
+// few seconds, refreshed transparently in the background thereafter.
+const REFERENCE_FRESH_SECONDS = 30;
+const STAFF_ROWS_KEY = "wf:staff";
+const STATUS_ROWS_KEY = "wf:statuses";
+const TASK_TYPE_ROWS_KEY = "wf:task_types";
+const CUSTOMER_ROWS_KEY = "wf:customers";
+
+async function fetchAllStaffRows(): Promise<StaffRow[]> {
   const admin = getSupabaseAdmin();
-  let query = admin
+  const { data, error } = await admin
     .from("staff")
     .select("id, xpm_staff_id, name, email, role, included")
-    .order("name");
-
-  if (role) query = query.eq("role", role);
-
-  const { data, error } = await query.returns<StaffRow[]>();
+    .order("name")
+    .returns<StaffRow[]>();
   if (error) {
-    console.error("[workflow] listStaff failed:", error.message);
+    console.error("[workflow] fetchAllStaffRows failed:", error.message);
     return [];
   }
-  return (data ?? []).map(mapStaff);
+  return data ?? [];
+}
+
+function cachedStaffRows(): Promise<StaffRow[]> {
+  return cachedEncryptedSWR(STAFF_ROWS_KEY, REFERENCE_FRESH_SECONDS, fetchAllStaffRows);
+}
+
+function cachedStatusRows(): Promise<StatusRow[]> {
+  return cachedEncryptedSWR(STATUS_ROWS_KEY, REFERENCE_FRESH_SECONDS, async () => {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin
+      .from("statuses")
+      .select("id, name, color, sort_order, is_complete")
+      .order("sort_order")
+      .returns<StatusRow[]>();
+    if (error) {
+      console.error("[workflow] fetchAllStatusRows failed:", error.message);
+      return [];
+    }
+    return data ?? [];
+  });
+}
+
+function cachedTaskTypeRows(): Promise<TaskTypeRow[]> {
+  return cachedEncryptedSWR(TASK_TYPE_ROWS_KEY, REFERENCE_FRESH_SECONDS, async () => {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin
+      .from("task_types")
+      .select("id, name, color, sort_order")
+      .order("sort_order")
+      .returns<TaskTypeRow[]>();
+    if (error) {
+      console.error("[workflow] fetchAllTaskTypeRows failed:", error.message);
+      return [];
+    }
+    return data ?? [];
+  });
+}
+
+function cachedCustomerRows(): Promise<CustomerRow[]> {
+  return cachedEncryptedSWR(CUSTOMER_ROWS_KEY, REFERENCE_FRESH_SECONDS, async () => {
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin
+      .from("customers")
+      .select("id, xpm_client_id, name, partner_id, manager_id")
+      .returns<CustomerRow[]>();
+    if (error) {
+      console.error("[workflow] fetchAllCustomerRows failed:", error.message);
+      return [];
+    }
+    return data ?? [];
+  });
+}
+
+// Called after anything that writes staff/customers (setStaffIncluded below,
+// and syncWorkflowFromXpm's full-replace) so the next read isn't stuck
+// serving a stale value for the rest of the fresh window.
+export async function invalidateWorkflowReferenceCache(): Promise<void> {
+  await Promise.all([
+    cacheDelete(STAFF_ROWS_KEY),
+    cacheDelete(CUSTOMER_ROWS_KEY),
+  ]);
+}
+
+export const listStaff = cache(async function listStaff(role?: StaffRole): Promise<WorkflowStaff[]> {
+  const rows = await cachedStaffRows();
+  const filtered = role ? rows.filter((s) => s.role === role) : rows;
+  return filtered.map(mapStaff).sort((a, b) => a.name.localeCompare(b.name));
 });
 
 export async function getPartners(): Promise<WorkflowStaff[]> {
@@ -202,6 +282,7 @@ export async function setStaffIncluded(staffId: string, included: boolean): Prom
   const admin = getSupabaseAdmin();
   const { error } = await admin.from("staff").update({ included }).eq("id", staffId);
   if (error) throw new Error(`Failed to update staff: ${error.message}`);
+  await invalidateWorkflowReferenceCache();
 }
 
 // Clients attached to a Partner, optionally narrowed by a search string
@@ -227,6 +308,16 @@ export async function searchClientsForPartner(
     return [];
   }
   return (data ?? []).map(mapCustomer);
+}
+
+// Every client practice-wide, regardless of partner -- for admin-only "see
+// everything" pickers (e.g. My Work's "+ New Task" client dropdown). Reuses
+// the same cached customer rows fetchLookupMaps draws from instead of
+// looping searchClientsForPartner once per partner, which used to fire one
+// extra `customers` query per partner on every admin page load.
+export async function listAllCustomers(): Promise<WorkflowCustomer[]> {
+  const rows = await cachedCustomerRows();
+  return [...rows].sort((a, b) => a.name.localeCompare(b.name)).map(mapCustomer);
 }
 
 // Clients attached to a Manager, optionally narrowed by a search string --
@@ -286,20 +377,18 @@ export async function getClientsInScopeForStaff(staff: WorkflowStaff): Promise<W
 // cache() is per-request and does not persist across requests, so this
 // stays as fresh as the un-memoized version was.
 const fetchLookupMaps = cache(async function fetchLookupMaps() {
-  const admin = getSupabaseAdmin();
-  const [{ data: statuses }, { data: taskTypes }, { data: staff }, { data: customers }] =
-    await Promise.all([
-      admin.from("statuses").select("id, name, color, sort_order, is_complete").returns<StatusRow[]>(),
-      admin.from("task_types").select("id, name, color, sort_order").returns<TaskTypeRow[]>(),
-      admin.from("staff").select("id, xpm_staff_id, name, email, role, included").returns<StaffRow[]>(),
-      admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").returns<CustomerRow[]>(),
-    ]);
+  const [statuses, taskTypes, staff, customers] = await Promise.all([
+    cachedStatusRows(),
+    cachedTaskTypeRows(),
+    cachedStaffRows(),
+    cachedCustomerRows(),
+  ]);
 
   return {
-    statusesById: new Map((statuses ?? []).map((s) => [s.id, s])),
-    taskTypesById: new Map((taskTypes ?? []).map((t) => [t.id, t])),
-    staffById: new Map((staff ?? []).map((s) => [s.id, s])),
-    customersById: new Map((customers ?? []).map((c) => [c.id, c])),
+    statusesById: new Map(statuses.map((s) => [s.id, s])),
+    taskTypesById: new Map(taskTypes.map((t) => [t.id, t])),
+    staffById: new Map(staff.map((s) => [s.id, s])),
+    customersById: new Map(customers.map((c) => [c.id, c])),
   };
 });
 
@@ -442,50 +531,58 @@ export async function getWorkBoardForStaff(staff: WorkflowStaff): Promise<TaskWi
 // Whether a non-admin staff member may edit/delete taskId -- "theirs"
 // (assigned or temporarily-assigned, same as the My Work board's own-tasks
 // semantics) or anything within their broader Partner/Manager roll-up.
-// getWorkBoardForStaff already computes exactly that per role, so this just
-// reuses it as the source of truth rather than re-deriving the hierarchy.
+//
+// Previously delegated to getWorkBoardForStaff and checked whether taskId
+// appeared in the result -- correct, but for a Partner that means
+// recomputing the whole practice-wide board (every client, every task) just
+// to answer a single yes/no on one row, on every task edit/delete. This
+// checks the one task row directly and cross-references its customer's
+// partner_id/manager_id against the cached customer rows fetchLookupMaps
+// already draws from, instead of materializing the entire board.
 export async function canModifyTask(staff: WorkflowStaff, taskId: string): Promise<boolean> {
-  const board = await getWorkBoardForStaff(staff);
-  return board.some((t) => t.id === taskId);
+  const admin = getSupabaseAdmin();
+  const { data: task, error } = await admin
+    .from("tasks")
+    .select("assignee_id, temp_assignee_id, customer_id")
+    .eq("id", taskId)
+    .maybeSingle<Pick<TaskRow, "assignee_id" | "temp_assignee_id" | "customer_id">>();
+  if (error || !task) return false;
+
+  if (task.assignee_id === staff.id || task.temp_assignee_id === staff.id) return true;
+
+  if (staff.role === "Partner" || staff.role === "Manager") {
+    const customers = await cachedCustomerRows();
+    const customer = customers.find((c) => c.id === task.customer_id);
+    if (!customer) return false;
+    return staff.role === "Partner" ? customer.partner_id === staff.id : customer.manager_id === staff.id;
+  }
+
+  return false;
 }
 
 export const listStatuses = cache(async function listStatuses(): Promise<WorkflowStatus[]> {
-  const admin = getSupabaseAdmin();
-  const { data, error } = await admin
-    .from("statuses")
-    .select("id, name, color, sort_order, is_complete")
-    .order("sort_order")
-    .returns<StatusRow[]>();
-  if (error) {
-    console.error("[workflow] listStatuses failed:", error.message);
-    return [];
-  }
-  return (data ?? []).map((s) => ({
-    id: s.id,
-    name: s.name,
-    color: s.color,
-    sortOrder: s.sort_order,
-    isComplete: s.is_complete,
-  }));
+  const rows = await cachedStatusRows();
+  return [...rows]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      color: s.color,
+      sortOrder: s.sort_order,
+      isComplete: s.is_complete,
+    }));
 });
 
 export const listTaskTypes = cache(async function listTaskTypes(): Promise<WorkflowTaskType[]> {
-  const admin = getSupabaseAdmin();
-  const { data, error } = await admin
-    .from("task_types")
-    .select("id, name, color, sort_order")
-    .order("sort_order")
-    .returns<TaskTypeRow[]>();
-  if (error) {
-    console.error("[workflow] listTaskTypes failed:", error.message);
-    return [];
-  }
-  return (data ?? []).map((t) => ({
-    id: t.id,
-    name: t.name,
-    color: t.color,
-    sortOrder: t.sort_order,
-  }));
+  const rows = await cachedTaskTypeRows();
+  return [...rows]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      color: t.color,
+      sortOrder: t.sort_order,
+    }));
 });
 
 export async function createTask(input: CreateTaskInput): Promise<{ id: string } | null> {
@@ -1230,19 +1327,35 @@ export async function getCustomerFiles(customerId: string): Promise<CustomerFile
     return [];
   }
 
-  return Promise.all(
-    (data ?? []).map(async (row) => {
-      const file = mapCustomerFile(row);
-      const { data: signed, error: signedError } = await admin.storage
-        .from(FILES_BUCKET)
-        .createSignedUrl(row.storage_path, SIGNED_URL_TTL_SECONDS);
-      if (signedError) {
-        console.error("[workflow] createSignedUrl failed for", row.storage_path, signedError.message);
-        return file;
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  // One batched call instead of one createSignedUrl round trip per file --
+  // a client with many uploads used to fire that many separate Storage API
+  // calls on every /clients drawer open.
+  const { data: signedUrls, error: signedError } = await admin.storage
+    .from(FILES_BUCKET)
+    .createSignedUrls(
+      rows.map((row) => row.storage_path),
+      SIGNED_URL_TTL_SECONDS
+    );
+  if (signedError) {
+    console.error("[workflow] createSignedUrls failed:", signedError.message);
+    return rows.map(mapCustomerFile);
+  }
+
+  const signedUrlByPath = new Map((signedUrls ?? []).map((s) => [s.path, s]));
+  return rows.map((row) => {
+    const file = mapCustomerFile(row);
+    const signed = signedUrlByPath.get(row.storage_path);
+    if (!signed || signed.error) {
+      if (signed?.error) {
+        console.error("[workflow] createSignedUrls failed for", row.storage_path, signed.error);
       }
-      return { ...file, downloadUrl: signed?.signedUrl };
-    })
-  );
+      return file;
+    }
+    return { ...file, downloadUrl: signed.signedUrl ?? undefined };
+  });
 }
 
 // Uploads the file's bytes to Storage, then records its metadata. Returns
