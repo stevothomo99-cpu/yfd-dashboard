@@ -134,9 +134,9 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
             Karbon Import
           </button>
         </Link>
-        <Link href="/settings/email-schedule">
+        <Link href="/settings/notifications">
           <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100">
-            Email Schedule
+            Notifications
           </button>
         </Link>
       </div>

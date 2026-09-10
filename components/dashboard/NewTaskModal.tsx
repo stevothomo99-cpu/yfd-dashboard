@@ -46,6 +46,19 @@ const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
   { value: "quarterly", label: "Quarterly" },
 ];
 
+// DRAFT -- when the "BAS Workflow" client notification (Settings ->
+// Notifications) fires, per-task rather than on the fixed practice-wide
+// schedule everything else in that catalog uses.
+type ClientNotificationTrigger = "start_date" | "custom_date" | "daily" | "weekly" | "monthly" | "quarterly";
+const CLIENT_NOTIFICATION_TRIGGER_OPTIONS: { value: ClientNotificationTrigger; label: string }[] = [
+  { value: "start_date", label: "On the task's start date" },
+  { value: "custom_date", label: "On a specific date…" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+];
+
 function defaultStatusId(statuses: WorkflowStatus[]): string {
   const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
   return openStatus?.id ?? statuses[0]?.id ?? "";
@@ -102,6 +115,15 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
   const [basStage, setBasStage] = useState<BasStage>(editTask?.basStage ?? "pending");
   const [basStageBusy, setBasStageBusy] = useState(false);
   const [basStageError, setBasStageError] = useState<string | null>(null);
+
+  // DRAFT -- the "BAS Workflow" client-facing notification (see Settings ->
+  // Notifications). Local-only state for now: not read by handleSubmit, not
+  // persisted anywhere. tasks has no columns for any of this yet, and there
+  // is no client contact email to send to -- this exists purely so the
+  // interaction can be reviewed before that gets built.
+  const [clientNotificationEnabled, setClientNotificationEnabled] = useState(false);
+  const [clientNotificationTrigger, setClientNotificationTrigger] = useState<ClientNotificationTrigger>("start_date");
+  const [clientNotificationCustomDate, setClientNotificationCustomDate] = useState("");
 
   // Read-only reference list of the selected client's existing notes/files
   // (see app/api/workflow/customers/[id]/notes and .../files, the same
@@ -414,6 +436,50 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
               ))}
             </select>
           </Field>
+
+          {/* DRAFT -- BAS Workflow client-facing notification (Settings ->
+              Notifications). Scoped to BAS/IAS tasks specifically, since
+              that's the one client notification type built so far. Not
+              read by handleSubmit -- local state only, nothing is created
+              or persisted yet. */}
+          {typeId === BAS_TASK_TYPE_ID ? (
+            <Field label="Client notification (draft)">
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#111111" }}>
+                <input
+                  type="checkbox"
+                  checked={clientNotificationEnabled}
+                  onChange={(e) => setClientNotificationEnabled(e.target.checked)}
+                />
+                Notify the client about this BAS workflow item
+              </label>
+              {clientNotificationEnabled ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
+                  <select
+                    value={clientNotificationTrigger}
+                    onChange={(e) => setClientNotificationTrigger(e.target.value as ClientNotificationTrigger)}
+                    style={inputStyle}
+                  >
+                    {CLIENT_NOTIFICATION_TRIGGER_OPTIONS.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                  {clientNotificationTrigger === "custom_date" ? (
+                    <input
+                      type="date"
+                      value={clientNotificationCustomDate}
+                      onChange={(e) => setClientNotificationCustomDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                  ) : null}
+                  <span style={{ fontSize: "11px", color: "#888780" }}>
+                    Draft only — not yet wired up. See Settings → Notifications for the template this would send.
+                  </span>
+                </div>
+              ) : null}
+            </Field>
+          ) : null}
 
           <Field label="Details">
             <textarea
