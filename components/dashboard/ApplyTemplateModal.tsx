@@ -84,7 +84,6 @@ export default function ApplyTemplateModal({ clients, initialClientId, onClose, 
         justifyContent: "center",
         padding: "24px",
       }}
-      onClick={onClose}
     >
       <div
         style={{
@@ -98,7 +97,6 @@ export default function ApplyTemplateModal({ clients, initialClientId, onClose, 
           padding: "24px",
           boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
         }}
-        onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" }}>
           <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111" }}>Apply template</div>

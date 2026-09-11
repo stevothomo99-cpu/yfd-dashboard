@@ -25,7 +25,6 @@ export default function DeleteTaskDialog({ task, onClose, onConfirm }: DeleteTas
         justifyContent: "center",
         padding: "24px",
       }}
-      onClick={onClose}
     >
       <div
         style={{
@@ -37,7 +36,6 @@ export default function DeleteTaskDialog({ task, onClose, onConfirm }: DeleteTas
           padding: "24px",
           boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
         }}
-        onClick={(e) => e.stopPropagation()}
       >
         <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111", marginBottom: "6px" }}>
           Delete recurring task

@@ -215,7 +215,6 @@ export default function TileDrawer({ tile, onClose, allClients, staff, statuses,
         display: "flex",
         justifyContent: "flex-end",
       }}
-      onClick={onClose}
     >
       <div
         style={{
@@ -227,7 +226,6 @@ export default function TileDrawer({ tile, onClose, allClients, staff, statuses,
           padding: "1.5rem 1.5rem 3rem",
           boxShadow: "-8px 0 24px rgba(0,0,0,0.06)",
         }}
-        onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
           <div>
