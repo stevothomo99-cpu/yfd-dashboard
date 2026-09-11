@@ -302,6 +302,23 @@ export default function MyWorkPageClient({
   // boundary.
   const canModifyTasks = isAdmin || Boolean(defaultStaffId);
 
+  // One-field edit from the table's Category/Status chip -- see
+  // QuickChipPicker -- instead of opening the full Edit Task modal just to
+  // flip a single value.
+  async function handleQuickFieldUpdate(taskId: string, patch: { statusId?: string; typeId?: string | null }) {
+    const res = await fetch(`/api/workflow/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      await refreshTasks(staffId);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      window.alert(data.error ?? "Failed to update task");
+    }
+  }
+
   async function deleteTaskRequest(taskId: string, scope: "occurrence" | "series") {
     const res = await fetch(`/api/workflow/tasks/${taskId}${scope === "series" ? "?scope=series" : ""}`, {
       method: "DELETE",
@@ -649,7 +666,7 @@ export default function MyWorkPageClient({
                               : {};
                         return (
                           <td key={col.field} style={{ ...cell, ...extra }}>
-                            {renderCell(col.field, t, staffId)}
+                            {renderCell(col.field, t, staffId, statuses, taskTypes, canModifyTasks, handleQuickFieldUpdate)}
                           </td>
                         );
                       })}
@@ -730,7 +747,15 @@ export default function MyWorkPageClient({
 
 // Column order (via drag) is independent of which field each column shows,
 // so cell content is looked up by field rather than hardcoded by position.
-function renderCell(field: SortField, t: TaskWithDetails, staffId: string): React.ReactNode {
+function renderCell(
+  field: SortField,
+  t: TaskWithDetails,
+  staffId: string,
+  statuses: WorkflowStatus[],
+  taskTypes: WorkflowTaskType[],
+  canModify: boolean,
+  onQuickUpdate: (taskId: string, patch: { statusId?: string; typeId?: string | null }) => void
+): React.ReactNode {
   switch (field) {
     case "title": {
       const isOwner = t.assigneeId === staffId;
@@ -760,9 +785,30 @@ function renderCell(field: SortField, t: TaskWithDetails, staffId: string): Reac
     case "customerName":
       return t.customerName;
     case "typeName":
-      return t.typeName ? <Chip label={t.typeName} color={t.typeColor ?? "#888780"} /> : "—";
+      return (
+        <QuickChipPicker
+          label={t.typeName ?? "—"}
+          color={t.typeColor ?? "#888780"}
+          options={taskTypes.map((tt) => ({ id: tt.id, name: tt.name, color: tt.color }))}
+          selectedId={t.typeId}
+          allowClear
+          disabled={!canModify}
+          onSelect={(id) => onQuickUpdate(t.id, { typeId: id })}
+        />
+      );
     case "statusName":
-      return <Chip label={t.statusName} color={t.statusColor} />;
+      return (
+        <QuickChipPicker
+          label={t.statusName}
+          color={t.statusColor}
+          options={statuses.map((s) => ({ id: s.id, name: s.name, color: s.color }))}
+          selectedId={t.statusId}
+          disabled={!canModify}
+          onSelect={(id) => {
+            if (id) onQuickUpdate(t.id, { statusId: id });
+          }}
+        />
+      );
     case "ownerName":
       return ownerName(t);
     case "assignedToName":
@@ -796,23 +842,177 @@ function rowStyle(tone: "overdue" | "week" | "normal" | "completed"): React.CSSP
   return base;
 }
 
-function Chip({ label, color }: { label: string; color: string }) {
+interface QuickChipOption {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface QuickChipPickerProps {
+  label: string;
+  color: string;
+  options: QuickChipOption[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  disabled: boolean;
+  // Category can be cleared back to "no type"; Status always has one.
+  allowClear?: boolean;
+}
+
+const QUICK_PICKER_MENU_WIDTH = 170;
+
+// Lets the Category/Status chip in the My Work table be changed with one
+// click-and-pick, instead of opening the full Edit Task modal just to flip
+// a single field. Portaled to document.body and positioned from the chip's
+// own getBoundingClientRect(), same clipping-safe pattern as
+// RowActionsMenu -- without it this would hit the exact same "menu barely
+// opens" bug that component had inside the table's scroll wrapper.
+function QuickChipPicker({ label, color, options, selectedId, onSelect, disabled, allowClear }: QuickChipPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    function handleScroll() {
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, [open]);
+
+  function toggleOpen(e: React.MouseEvent) {
+    // Otherwise this bubbles up to the row's own onClick and opens the full
+    // Edit Task modal on top of (or instead of) this popover.
+    e.stopPropagation();
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({ top: rect.bottom + 4, left: rect.left });
+    }
+    setOpen((o) => !o);
+  }
+
+  function choose(id: string | null) {
+    setOpen(false);
+    onSelect(id);
+  }
+
   return (
-    <span
-      style={{
-        fontSize: "11px",
-        fontWeight: 500,
-        padding: "3px 8px",
-        borderRadius: "999px",
-        background: `${color}1a`,
-        color,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={toggleOpen}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          fontSize: "11px",
+          fontWeight: 500,
+          padding: "3px 8px",
+          borderRadius: "999px",
+          background: `${color}1a`,
+          color,
+          whiteSpace: "nowrap",
+          border: "none",
+          cursor: disabled ? "default" : "pointer",
+        }}
+      >
+        {label}
+      </button>
+
+      {open && coords
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="menu"
+              style={{
+                position: "fixed",
+                top: coords.top,
+                left: coords.left,
+                zIndex: 200,
+                background: "white",
+                border: "0.5px solid #e1e0d9",
+                borderRadius: "8px",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                padding: "4px",
+                minWidth: `${QUICK_PICKER_MENU_WIDTH}px`,
+                maxHeight: "260px",
+                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {allowClear ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => choose(null)}
+                  style={{ ...quickPickerItemStyle, color: "#888780" }}
+                >
+                  — None —
+                </button>
+              ) : null}
+              {options.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => choose(o.id)}
+                  style={{ ...quickPickerItemStyle, fontWeight: o.id === selectedId ? 700 : 500 }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "999px",
+                      background: o.color,
+                      marginRight: "8px",
+                      flexShrink: 0,
+                    }}
+                  />
+                  {o.name}
+                </button>
+              ))}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
+
+const quickPickerItemStyle: React.CSSProperties = {
+  fontSize: "12px",
+  color: "#444441",
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  padding: "6px 10px",
+  textAlign: "left",
+  borderRadius: "5px",
+  whiteSpace: "nowrap",
+  display: "flex",
+  alignItems: "center",
+};
 
 function EmptyState({ message }: { message: string }) {
   return (
