@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
@@ -66,12 +67,15 @@ export default function TopNav({ userName, isAdmin }: TopNavProps) {
             borderBottom: "0.5px solid #e1e0d9",
           }}
         >
-          <div>
-            <div style={{ fontSize: "16px", fontWeight: 500, color: "#111111" }}>
-              YFD Operations Dashboard
-            </div>
-            <div style={{ fontSize: "12px", color: "#888780", marginTop: "2px" }}>
-              Overseas bookkeeping team — daily overview
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <Image src="/yfd-logo-icon.png" alt="" width={32} height={22} style={{ height: "28px", width: "auto" }} />
+            <div>
+              <div style={{ fontSize: "16px", fontWeight: 500, color: "#111111" }}>
+                YFD Operations Dashboard
+              </div>
+              <div style={{ fontSize: "12px", color: "#888780", marginTop: "2px" }}>
+                Overseas bookkeeping team — daily overview
+              </div>
             </div>
           </div>
 
