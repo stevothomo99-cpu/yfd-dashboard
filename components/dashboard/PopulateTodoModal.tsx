@@ -70,6 +70,10 @@ export default function PopulateTodoModal({
       setError("Choose a client.");
       return;
     }
+    if (!dueDate) {
+      setError("Set a due date.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -220,7 +224,13 @@ export default function PopulateTodoModal({
 
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={labelStyle}>Due date</span>
-                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  required
+                  style={inputStyle}
+                />
               </label>
 
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -261,7 +271,11 @@ export default function PopulateTodoModal({
                 <button type="button" onClick={onClose} style={secondaryButtonStyle}>
                   Cancel
                 </button>
-                <button type="submit" disabled={submitting || !clientId} style={{ ...primaryButtonStyle, opacity: submitting || !clientId ? 0.6 : 1 }}>
+                <button
+                  type="submit"
+                  disabled={submitting || !clientId || !dueDate}
+                  style={{ ...primaryButtonStyle, opacity: submitting || !clientId || !dueDate ? 0.6 : 1 }}
+                >
                   {submitting ? "Saving…" : "Save"}
                 </button>
               </div>
