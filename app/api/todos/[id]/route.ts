@@ -82,6 +82,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!body.customerId) {
       return NextResponse.json({ error: "customerId is required" }, { status: 400 });
     }
+    if (!body.dueDate) {
+      return NextResponse.json({ error: "dueDate is required" }, { status: 400 });
+    }
     // Only meaningful once an item has been triaged -- a pending_triage row
     // has to go through the populate path so it picks up a status.
     if (access.todo.status === "pending_triage") {
@@ -94,7 +97,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       id,
       {
         customerId: body.customerId,
-        dueDate: body.dueDate ?? null,
+        dueDate: body.dueDate,
         title: trimmed === undefined ? undefined : trimmed || null,
         assigneeStaffId: body.assigneeId,
       },
@@ -107,6 +110,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!body.customerId || !body.recurrence) {
     return NextResponse.json({ error: "customerId and recurrence are required" }, { status: 400 });
   }
+  if (!body.dueDate) {
+    return NextResponse.json({ error: "dueDate is required" }, { status: 400 });
+  }
 
   // Same "blank clears the rename" convention as the edit branch above.
   const trimmedTitle = typeof body.title === "string" ? body.title.trim() : body.title;
@@ -114,7 +120,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     id,
     {
       customerId: body.customerId,
-      dueDate: body.dueDate ?? null,
+      dueDate: body.dueDate,
       recurrence: body.recurrence,
       assigneeStaffId: body.assigneeId,
       title: trimmedTitle === undefined ? undefined : trimmedTitle || null,
