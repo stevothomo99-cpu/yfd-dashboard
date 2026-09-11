@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 // Shared card/page shell for every unauthenticated-adjacent auth page
 // (login, forgot-password, reset-password, change-password) -- extracted
 // from what was originally login/page.tsx's inline Shell so the same look
@@ -31,7 +33,14 @@ export default function AuthShell({
         }}
       >
         <div style={{ textAlign: "center", marginBottom: "24px" }}>
-          <div style={{ fontSize: "28px", marginBottom: "10px" }}>📊</div>
+          <Image
+            src="/yfd-logo-icon.png"
+            alt="Your Finance Dept"
+            width={56}
+            height={39}
+            style={{ margin: "0 auto 10px", height: "40px", width: "auto" }}
+            priority
+          />
           <h1 style={{ fontSize: "18px", fontWeight: 500, color: "#111111", margin: 0 }}>
             YFD Dashboard
           </h1>
