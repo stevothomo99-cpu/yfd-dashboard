@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import PageHeader from "@/components/dashboard/PageHeader";
 import StatusFilter, { type StatusFilterValue } from "@/components/layout/StatusFilter";
 import NewTaskModal from "@/components/dashboard/NewTaskModal";
@@ -960,25 +961,60 @@ interface RowActionsMenuProps {
   onDelete: () => void;
 }
 
+const ROW_ACTIONS_MENU_WIDTH = 130;
+
+// The table this lives in scrolls both ways (see the overflowX/overflowY
+// wrapper further up) -- a plain position:absolute dropdown gets clipped to
+// that wrapper's box the moment the row isn't near the very top, which read
+// as the menu "barely opening" (only the sliver still inside the visible
+// scroll area rendered). Portaled to document.body and positioned from the
+// trigger button's own getBoundingClientRect() instead, so it floats above
+// everything regardless of which row it's opened from or how far the table
+// has scrolled.
 function RowActionsMenu({ onEdit, onMove, onCombine, onDelete }: RowActionsMenuProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
+
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
+    // Scroll happens on the table's own overflow wrapper (and possibly an
+    // ancestor), which doesn't bubble a "scroll" event to window -- capture
+    // phase catches it regardless of which element scrolled. Closing rather
+    // than repositioning live keeps this simple and matches how most menu
+    // libraries handle a scroll-while-open.
+    function handleScroll() {
+      setOpen(false);
+    }
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleScroll);
     return () => {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleScroll);
     };
   }, [open]);
+
+  function toggleOpen() {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({ top: rect.bottom + 4, left: rect.right - ROW_ACTIONS_MENU_WIDTH });
+    }
+    setOpen((o) => !o);
+  }
 
   function choose(action: () => void) {
     setOpen(false);
@@ -986,10 +1022,11 @@ function RowActionsMenu({ onEdit, onMove, onCombine, onDelete }: RowActionsMenuP
   }
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+    <>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         aria-label="Row actions"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -1008,44 +1045,48 @@ function RowActionsMenu({ onEdit, onMove, onCombine, onDelete }: RowActionsMenuP
         &#8942;
       </button>
 
-      {open ? (
-        <div
-          role="menu"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            right: 0,
-            zIndex: 20,
-            background: "white",
-            border: "0.5px solid #e1e0d9",
-            borderRadius: "8px",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            padding: "4px",
-            minWidth: "130px",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          <button type="button" role="menuitem" onClick={() => choose(onEdit)} style={menuItemStyle}>
-            Edit
-          </button>
-          <button type="button" role="menuitem" onClick={() => choose(onMove)} style={menuItemStyle}>
-            Move to
-          </button>
-          <button type="button" role="menuitem" onClick={() => choose(onCombine)} style={menuItemStyle}>
-            Combine
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => choose(onDelete)}
-            style={{ ...menuItemStyle, color: "#c0392b" }}
-          >
-            Delete
-          </button>
-        </div>
-      ) : null}
-    </div>
+      {open && coords
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="menu"
+              style={{
+                position: "fixed",
+                top: coords.top,
+                left: coords.left,
+                zIndex: 200,
+                background: "white",
+                border: "0.5px solid #e1e0d9",
+                borderRadius: "8px",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                padding: "4px",
+                minWidth: `${ROW_ACTIONS_MENU_WIDTH}px`,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <button type="button" role="menuitem" onClick={() => choose(onEdit)} style={menuItemStyle}>
+                Edit
+              </button>
+              <button type="button" role="menuitem" onClick={() => choose(onMove)} style={menuItemStyle}>
+                Move to
+              </button>
+              <button type="button" role="menuitem" onClick={() => choose(onCombine)} style={menuItemStyle}>
+                Combine
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => choose(onDelete)}
+                style={{ ...menuItemStyle, color: "#c0392b" }}
+              >
+                Delete
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
 
