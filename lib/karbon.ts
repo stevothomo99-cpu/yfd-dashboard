@@ -127,6 +127,80 @@ export async function fetchAllKarbonWorkItemsRaw(): Promise<Record<string, unkno
   return fetchAllWorkItems();
 }
 
+export interface KarbonNotesDiagnosticAttempt {
+  label: string;
+  url: string;
+  ok: boolean;
+  result: unknown;
+}
+
+export interface KarbonNotesDiagnostic {
+  matchedClient: { clientKey: string; clientName: string } | null;
+  attempts: KarbonNotesDiagnosticAttempt[];
+}
+
+// One-off, admin-triggered live probe (see app/api/karbon/notes-diagnose) --
+// not part of any regular sync path. Answers a concrete question ("can we
+// actually pull this client's pinned notes from Karbon?") against the real
+// tenant instead of relying on the public API reference alone, which
+// documents only POST /Notes and GET /Notes/{id} (retrieve-by-known-id) with
+// no list/filter-by-client capability and no mention of pinning at all.
+// Tries every plausible shape a live tenant might actually support, since an
+// undocumented $filter or $expand sometimes still works even when the
+// reference guide doesn't call it out.
+export async function diagnoseClientNotes(clientNameQuery: string): Promise<KarbonNotesDiagnostic> {
+  if (!isKarbonConfigured()) throw new KarbonNotConfiguredError();
+
+  const escaped = clientNameQuery.replace(/'/g, "''");
+  let matchedClient: KarbonNotesDiagnostic["matchedClient"] = null;
+  const attempts: KarbonNotesDiagnosticAttempt[] = [];
+
+  async function attempt(label: string, url: string): Promise<Record<string, unknown> | null> {
+    try {
+      const result = await karbonFetch<Record<string, unknown>>(url);
+      attempts.push({ label, url, ok: true, result });
+      return result;
+    } catch (err) {
+      attempts.push({
+        label,
+        url,
+        ok: false,
+        result: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  // Step 1: resolve the client's real Karbon key from a WorkItem, since
+  // that's the only place this codebase already confirms ClientKey/ClientName
+  // pairing live (see fetchKarbonTasks/fetchKarbonWorkItems above).
+  const workItemsPage = await attempt(
+    "Find client via WorkItems",
+    `/WorkItems?$filter=${encodeURIComponent(`contains(ClientName,'${escaped}')`)}&$top=1`
+  );
+  const firstRow = (workItemsPage?.value as Record<string, unknown>[] | undefined)?.[0];
+  if (firstRow) {
+    matchedClient = {
+      clientKey: String(firstRow.ClientKey ?? ""),
+      clientName: String(firstRow.ClientName ?? ""),
+    };
+  }
+
+  // Step 2: every plausible way a live tenant might expose notes for that
+  // client, in order from "documented" to "speculative."
+  await attempt("Notes unfiltered list", `/Notes?$top=5`);
+  if (matchedClient?.clientKey) {
+    const key = matchedClient.clientKey.replace(/'/g, "''");
+    await attempt("Notes filter RelatesToKey", `/Notes?$filter=${encodeURIComponent(`RelatesToKey eq '${key}'`)}`);
+    await attempt("Notes filter OrganizationKey", `/Notes?$filter=${encodeURIComponent(`OrganizationKey eq '${key}'`)}`);
+    await attempt("Notes filter ClientKey", `/Notes?$filter=${encodeURIComponent(`ClientKey eq '${key}'`)}`);
+    await attempt("Organizations by key", `/Organizations('${key}')`);
+    await attempt("Organizations expand Notes", `/Organizations('${key}')?$expand=Notes`);
+  }
+
+  return { matchedClient, attempts };
+}
+
 // Recurrence isn't a WorkItem field -- Karbon models it on a separate
 // WorkSchedules resource (RecurrenceFrequency, FrequencyDescription,
 // CustomFrequencyUnits/Multiple). A WorkItem only carries a WorkScheduleKey,
