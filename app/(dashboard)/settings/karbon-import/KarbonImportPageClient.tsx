@@ -49,6 +49,9 @@ interface ImportResult {
 // dropdown -- distinct from "" (which means "no client chosen yet") so a
 // removed row can't be confused with one that's merely unresolved.
 const REMOVE_VALUE = "__remove__";
+// Sentinel for "Create a client" -- opens the inline create form instead of
+// resolving the row directly.
+const CREATE_VALUE = "__create__";
 
 const RECURRENCE_LABEL: Record<string, string> = {
   none: "One-off",
@@ -75,6 +78,12 @@ export default function KarbonImportPageClient() {
   // row isn't a client choice, it's an exclusion.
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ImportResult | null>(null);
+  // workItemKey of the row whose "Create a client" inline form is open --
+  // at most one at a time, closed by creating or cancelling.
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [creatingBusy, setCreatingBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   async function fetchPreview(): Promise<PreviewResponse> {
     const res = await fetch("/api/karbon/import-preview");
@@ -129,6 +138,41 @@ export default function KarbonImportPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [visibleRows, clientOverrides],
   );
+
+  // Resolves every row sharing the same unmatched Karbon client name, not
+  // just the one whose form was open -- an unmatched client is usually the
+  // client on several work items, and re-picking the same new client row by
+  // row would defeat the point of creating it once.
+  async function handleCreateClient() {
+    const karbonName = rows.find((r) => r.workItemKey === creatingKey)?.karbonClientName;
+    if (!creatingKey || !draftName.trim()) return;
+    setCreatingBusy(true);
+    setCreateError(null);
+    try {
+      const res = await fetch("/api/workflow/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: draftName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to create client");
+      const newCustomer = data.customer as CustomerOption;
+      setCustomers((prev) => [...prev, newCustomer].sort((a, b) => a.name.localeCompare(b.name)));
+      setClientOverrides((prev) => {
+        const next = { ...prev };
+        for (const r of rows) {
+          if (r.karbonClientName === karbonName) next[r.workItemKey] = newCustomer.id;
+        }
+        return next;
+      });
+      setCreatingKey(null);
+      setDraftName("");
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create client");
+    } finally {
+      setCreatingBusy(false);
+    }
+  }
 
   async function runImport() {
     setImporting(true);
@@ -299,31 +343,77 @@ export default function KarbonImportPageClient() {
                       }}
                     >
                       <td style={{ padding: "8px 10px", minWidth: "220px" }}>
-                        <select
-                          value={resolved ?? ""}
-                          onChange={(e) => {
-                            if (e.target.value === REMOVE_VALUE) {
-                              setRemovedKeys((prev) => new Set(prev).add(row.workItemKey));
-                              return;
-                            }
-                            setClientOverrides((prev) => ({ ...prev, [row.workItemKey]: e.target.value }));
-                          }}
-                          style={{
-                            ...selectCellStyle,
-                            border: flagged ? "1px solid #e24b4a" : "0.5px solid #e1e0d9",
-                          }}
-                        >
-                          <option value="">— Select client —</option>
-                          {customers.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                          <option value={REMOVE_VALUE}>— Remove from import —</option>
-                        </select>
-                        <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
-                          Karbon: {row.karbonClientName || "—"}
-                        </div>
+                        {creatingKey === row.workItemKey ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            <input
+                              type="text"
+                              autoFocus
+                              value={draftName}
+                              onChange={(e) => setDraftName(e.target.value)}
+                              placeholder="New client name…"
+                              style={{ ...selectCellStyle, border: "0.5px solid #e1e0d9" }}
+                            />
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <button
+                                type="button"
+                                onClick={handleCreateClient}
+                                disabled={creatingBusy || !draftName.trim()}
+                                style={{ ...primaryButtonStyle, padding: "4px 10px", opacity: creatingBusy || !draftName.trim() ? 0.5 : 1 }}
+                              >
+                                {creatingBusy ? "Creating…" : "Create"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCreatingKey(null);
+                                  setDraftName("");
+                                  setCreateError(null);
+                                }}
+                                style={{ ...secondaryButtonStyle, padding: "4px 10px" }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                            {createError ? (
+                              <div style={{ fontSize: "10px", color: "#c0392b" }}>{createError}</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <>
+                            <select
+                              value={resolved ?? ""}
+                              onChange={(e) => {
+                                if (e.target.value === REMOVE_VALUE) {
+                                  setRemovedKeys((prev) => new Set(prev).add(row.workItemKey));
+                                  return;
+                                }
+                                if (e.target.value === CREATE_VALUE) {
+                                  setCreatingKey(row.workItemKey);
+                                  setDraftName(row.karbonClientName);
+                                  setCreateError(null);
+                                  return;
+                                }
+                                setClientOverrides((prev) => ({ ...prev, [row.workItemKey]: e.target.value }));
+                              }}
+                              style={{
+                                ...selectCellStyle,
+                                border: flagged ? "1px solid #e24b4a" : "0.5px solid #e1e0d9",
+                              }}
+                            >
+                              <option value="">— Select client —</option>
+                              {customers.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                              <option value={CREATE_VALUE}>+ Create a client…</option>
+                              <option value={REMOVE_VALUE}>— Remove from import —</option>
+                            </select>
+                            <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
+                              Karbon: {row.karbonClientName || "—"}
+                            </div>
+                          </>
+                        )}
                       </td>
                       <td style={tdStyle}>{row.title}</td>
                       <td style={tdStyle}>

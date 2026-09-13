@@ -285,6 +285,28 @@ export async function setStaffIncluded(staffId: string, included: boolean): Prom
   await invalidateWorkflowReferenceCache();
 }
 
+// Creates a bare client with no XPM linkage -- for a Karbon work item whose
+// client genuinely doesn't exist in XPM yet (the Karbon Import mapping
+// page's "Create a client" option). Assigned straight to the Partner so it
+// shows up in every partner-scoped picker immediately, same as a synced
+// client would. xpm_client_id stays null; see xpmSync.ts's stale-customer
+// prune for why a resync no longer treats that as reason to delete it.
+export async function createCustomer(name: string, partnerId: string): Promise<WorkflowCustomer | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customers")
+    .insert({ name, partner_id: partnerId })
+    .select("id, xpm_client_id, name, partner_id, manager_id")
+    .single<CustomerRow>();
+
+  if (error) {
+    console.error("[workflow] createCustomer failed:", error.message);
+    return null;
+  }
+  await invalidateWorkflowReferenceCache();
+  return mapCustomer(data);
+}
+
 // Clients attached to a Partner, optionally narrowed by a search string
 // (case-insensitive match on name) for the searchable client picker.
 export async function searchClientsForPartner(
