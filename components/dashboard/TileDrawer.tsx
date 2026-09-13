@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import StaffAvatar from "./StaffAvatar";
 import CopyTaskModal from "./CopyTaskModal";
 import SaveTemplateModal from "./SaveTemplateModal";
@@ -22,12 +22,6 @@ import type {
 interface Props {
   tile: ClientSummary | null;
   onClose: () => void;
-  // Set when opened via the tile's "Notes" shortcut (ClientTile.tsx) rather
-  // than the tile itself -- scrolls straight past Jobs/Overdue/In
-  // progress/Completed/Recurring to the Notes section once its content has
-  // loaded, instead of making the click-through repeat scrolling the user
-  // was trying to skip in the first place.
-  focusNotes?: boolean;
   // Every client (id/name only) -- feeds the destination-client picker in
   // the "Copy task" and "Apply template" modals. Passed down from
   // ClientsPageClient.tsx, which already loads the full tile list for its
@@ -75,14 +69,12 @@ export default function TileDrawer({
   statuses,
   taskTypes,
   clients,
-  focusNotes,
 }: Props) {
   const [jobs, setJobs] = useState<JobWithManager[]>([]);
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [notes, setNotes] = useState<CustomerNote[]>([]);
   const [files, setFiles] = useState<CustomerFile[]>([]);
   const [loading, setLoading] = useState(false);
-  const notesSectionRef = useRef<HTMLDivElement>(null);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
@@ -131,14 +123,6 @@ export default function TileDrawer({
       cancelled = true;
     };
   }, [tile]);
-
-  // Content above Notes (Jobs/task groups) only exists once loading
-  // finishes, so scrolling before then would land short of where Notes
-  // actually ends up.
-  useEffect(() => {
-    if (!tile || !focusNotes || loading) return;
-    notesSectionRef.current?.scrollIntoView({ block: "start" });
-  }, [tile, focusNotes, loading]);
 
   useEffect(() => {
     if (!tile) return;
@@ -346,7 +330,6 @@ export default function TileDrawer({
           </>
         )}
 
-        <div ref={notesSectionRef}>
         <Section title={`Notes · ${notes.length}`}>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
             <input
@@ -450,7 +433,6 @@ export default function TileDrawer({
             </Stack>
           )}
         </Section>
-        </div>
 
         <Section title={`Files · ${files.length}`}>
           <label
