@@ -434,7 +434,7 @@ export default function TodoSection({ allClients, staff, currentUserEmail }: Tod
             definition these items have neither yet, so the columns would be
             nothing but "Not set" repeated down the tile. */}
         <Tile
-          title="To confirm"
+          title="Inbox"
           count={pending.length}
           total={allPending.length}
           filtered={filtersActive}
