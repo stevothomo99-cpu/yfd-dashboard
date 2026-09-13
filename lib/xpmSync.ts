@@ -211,8 +211,15 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     .returns<IdXpmIdRow[]>();
   if (existingCustomersError) throw new Error(`Customer lookup failed: ${existingCustomersError.message}`);
 
+  // A null xpm_client_id no longer means "leftover dummy trial data" -- the
+  // Karbon Import mapping page can now create a bare client with no XPM
+  // linkage on purpose (createCustomer in lib/workflow.ts, for a Karbon
+  // client that genuinely isn't in XPM yet), and that client needs to
+  // survive every future resync, not get silently deleted by the next one.
+  // Only prune a customer that WAS XPM-synced (has an xpm_client_id) but has
+  // since dropped out of the Partner's current active-client list.
   const staleCustomerIds = (existingCustomers ?? [])
-    .filter((c) => !c.xpm_client_id || !keepCustomerXpmIds.has(c.xpm_client_id))
+    .filter((c) => c.xpm_client_id && !keepCustomerXpmIds.has(c.xpm_client_id))
     .map((c) => c.id);
 
   if (staleCustomerIds.length > 0) {
