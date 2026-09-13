@@ -54,6 +54,9 @@ interface ClientsPageClientProps {
   statuses: WorkflowStatus[];
   taskTypes: WorkflowTaskType[];
   clientsForModal: WorkflowCustomer[];
+  // Gates the "Reassign" control on a client's Manager row in TileDrawer --
+  // a quick admin-only fix tool, see setCustomerManager in lib/workflow.ts.
+  isAdmin: boolean;
 }
 
 function todayIso(): string {
@@ -65,7 +68,7 @@ function fmtCurrency(value: number): string {
 }
 
 export default function ClientsPageClient({
-  tiles: allTiles,
+  tiles: initialTiles,
   staffOptions,
   timesheets,
   staffIds,
@@ -75,7 +78,9 @@ export default function ClientsPageClient({
   statuses,
   taskTypes,
   clientsForModal,
+  isAdmin,
 }: ClientsPageClientProps) {
+  const [allTiles, setAllTiles] = useState<ClientSummary[]>(initialTiles);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [staffId, setStaffId] = useState("");
@@ -87,6 +92,16 @@ export default function ClientsPageClient({
   const [hoursPeriod, setHoursPeriod] = useState<UtilisationPeriodKey | "custom">("fy");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+
+  // Keeps the tile grid and an open TileDrawer in sync immediately after an
+  // admin reassigns a client's Manager (TileDrawer's "Reassign" control) --
+  // without this the change wouldn't show until the page is reloaded, since
+  // allTiles otherwise only ever reflects the server props at initial load.
+  function handleManagerChanged(customerId: string, managerId: string | null, managerName: string | null) {
+    const managerIds = managerId ? [managerId] : [];
+    setAllTiles((prev) => prev.map((t) => (t.id === customerId ? { ...t, managerIds, managerName } : t)));
+    setActiveTile((prev) => (prev && prev.id === customerId ? { ...prev, managerIds, managerName } : prev));
+  }
   // Revenue for the four fixed periods is prefetched server-side, which is
   // what makes those buttons instant. A custom range can't be prefetched, so
   // it's fetched on demand.
@@ -390,6 +405,8 @@ export default function ClientsPageClient({
         statuses={statuses}
         taskTypes={taskTypes}
         clients={clientsForModal}
+        isAdmin={isAdmin}
+        onManagerChanged={handleManagerChanged}
       />
 
       <NotesDrawer tile={notesTile} onClose={() => setNotesTile(null)} />

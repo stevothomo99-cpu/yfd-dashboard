@@ -307,6 +307,32 @@ export async function createCustomer(name: string, partnerId: string): Promise<W
   return mapCustomer(data);
 }
 
+// Manual admin override of a client's Manager -- deliberately NOT persisted
+// against the next XPM resync (confirmed: it's fine for "Save & resync" to
+// revert this back to XPM's own Job Manager field). This is a quick fix
+// tool for reassigning a client without needing to change XPM first and
+// wait for a resync, not a durable override -- unlike staff.included, which
+// the sync payload deliberately excludes to survive every resync.
+export async function setCustomerManager(
+  customerId: string,
+  managerId: string | null
+): Promise<{ id: string; managerId: string | null } | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customers")
+    .update({ manager_id: managerId })
+    .eq("id", customerId)
+    .select("id, manager_id")
+    .single<{ id: string; manager_id: string | null }>();
+
+  if (error) {
+    console.error("[workflow] setCustomerManager failed:", error.message);
+    return null;
+  }
+  await invalidateWorkflowReferenceCache();
+  return { id: data.id, managerId: data.manager_id };
+}
+
 // Clients attached to a Partner, optionally narrowed by a search string
 // (case-insensitive match on name) for the searchable client picker.
 export async function searchClientsForPartner(

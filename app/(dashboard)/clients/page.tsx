@@ -1,4 +1,5 @@
 import ClientsPageClient from "./ClientsPageClient";
+import { auth } from "@/auth";
 import { getClientSummaries, listStaff, listStatuses, listTaskTypes } from "@/lib/workflow";
 import type { WorkflowCustomer } from "@/types/workflow";
 import { getSettings } from "@/lib/settings";
@@ -26,7 +27,8 @@ import type { XpmTimesheet } from "@/types/xpm";
 // XPM clients by exact name (confirmed decision -- no stored link between
 // an XPM client and a Xero Accounting contact).
 export default async function ClientsPage() {
-  const [tiles, allStaff, statuses, taskTypes] = await Promise.all([
+  const [session, tiles, allStaff, statuses, taskTypes] = await Promise.all([
+    auth(),
     getClientSummaries(),
     listStaff(),
     listStatuses(),
@@ -80,6 +82,7 @@ export default async function ClientsPage() {
       statuses={statuses}
       taskTypes={taskTypes}
       clientsForModal={clientsForModal}
+      isAdmin={session?.user?.role === "admin"}
     />
   );
 }
