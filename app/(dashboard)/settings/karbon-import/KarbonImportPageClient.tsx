@@ -401,13 +401,13 @@ export default function KarbonImportPageClient() {
                               }}
                             >
                               <option value="">— Select client —</option>
+                              <option value={CREATE_VALUE}>+ Create a client…</option>
+                              <option value={REMOVE_VALUE}>— Remove from import —</option>
                               {customers.map((c) => (
                                 <option key={c.id} value={c.id}>
                                   {c.name}
                                 </option>
                               ))}
-                              <option value={CREATE_VALUE}>+ Create a client…</option>
-                              <option value={REMOVE_VALUE}>— Remove from import —</option>
                             </select>
                             <div style={{ fontSize: "10px", color: "#888780", marginTop: "3px" }}>
                               Karbon: {row.karbonClientName || "—"}
