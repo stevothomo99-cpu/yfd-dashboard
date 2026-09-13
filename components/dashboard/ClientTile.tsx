@@ -25,6 +25,11 @@ interface Props {
   // client didn't match a Xero contact by exact name.
   revenue?: number;
   onClick?: () => void;
+  // Opens the same drawer as onClick, but scrolled straight to its Notes
+  // section -- a shortcut past Jobs/Overdue/In progress/Completed/Recurring
+  // for the common case of just wanting to check/add a note, without the
+  // drawer's full task history in the way.
+  onNotesClick?: () => void;
 }
 
 function fmtDate(d: string): string {
@@ -35,13 +40,20 @@ function fmtCurrency(value: number): string {
   return `$${Math.round(value).toLocaleString("en-AU")}`;
 }
 
-export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenue, onClick }: Props) {
+export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenue, onClick, onNotesClick }: Props) {
   const status = statusOf(tile);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
       style={{
         background: "white",
         border: "0.5px solid #e1e0d9",
@@ -56,16 +68,41 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenu
         gap: "12px",
       }}
     >
-      <div>
-        <div style={{ fontSize: "14px", fontWeight: 600, color: "#111111" }}>{tile.name}</div>
-        {tile.managerName ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
-            <StaffAvatar initials={initialsOf(tile.managerName)} size={20} />
-            <span style={{ fontSize: "11px", color: "#888780" }}>{tile.managerName}</span>
-          </div>
-        ) : (
-          <div style={{ fontSize: "11px", color: "#888780", marginTop: "4px" }}>No manager assigned</div>
-        )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+        <div>
+          <div style={{ fontSize: "14px", fontWeight: 600, color: "#111111" }}>{tile.name}</div>
+          {tile.managerName ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
+              <StaffAvatar initials={initialsOf(tile.managerName)} size={20} />
+              <span style={{ fontSize: "11px", color: "#888780" }}>{tile.managerName}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: "11px", color: "#888780", marginTop: "4px" }}>No manager assigned</div>
+          )}
+        </div>
+        {onNotesClick ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNotesClick();
+            }}
+            style={{
+              fontSize: "10px",
+              fontWeight: 500,
+              color: "#444441",
+              background: "white",
+              border: "0.5px solid #e1e0d9",
+              borderRadius: "999px",
+              padding: "4px 9px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            Notes
+          </button>
+        ) : null}
       </div>
 
       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -99,7 +136,7 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenu
           ) : null}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
