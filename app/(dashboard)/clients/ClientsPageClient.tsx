@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/dashboard/PageHeader";
 import ClientTile, { statusOf, type TileStatus } from "@/components/dashboard/ClientTile";
 import TileDrawer from "@/components/dashboard/TileDrawer";
+import NotesDrawer from "@/components/dashboard/NotesDrawer";
 import { formatDate } from "@/lib/utils";
 import {
   computeHoursByClient,
@@ -79,10 +80,10 @@ export default function ClientsPageClient({
   const [search, setSearch] = useState("");
   const [staffId, setStaffId] = useState("");
   const [activeTile, setActiveTile] = useState<ClientSummary | null>(null);
-  // Set only when the drawer was opened via a tile's "Notes" shortcut
-  // (ClientTile.tsx), so TileDrawer knows to scroll straight to Notes
-  // instead of opening at the top like a normal tile click.
-  const [focusNotes, setFocusNotes] = useState(false);
+  // Client whose notes-only sidebar (NotesDrawer) is open -- separate from
+  // activeTile/TileDrawer so the "Notes" shortcut on a tile (ClientTile.tsx)
+  // opens a clean, notes-only panel instead of the full drawer.
+  const [notesTile, setNotesTile] = useState<ClientSummary | null>(null);
   const [hoursPeriod, setHoursPeriod] = useState<UtilisationPeriodKey | "custom">("fy");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -374,14 +375,8 @@ export default function ClientsPageClient({
               hoursLogged={t.xpmClientId ? hoursByClientId[t.xpmClientId] : undefined}
               hoursPeriodLabel={hoursPeriodLabel}
               revenue={revenueByClientId[t.id]}
-              onClick={() => {
-                setFocusNotes(false);
-                setActiveTile(t);
-              }}
-              onNotesClick={() => {
-                setFocusNotes(true);
-                setActiveTile(t);
-              }}
+              onClick={() => setActiveTile(t)}
+              onNotesClick={() => setNotesTile(t)}
             />
           ))}
         </div>
@@ -389,7 +384,6 @@ export default function ClientsPageClient({
 
       <TileDrawer
         tile={activeTile}
-        focusNotes={focusNotes}
         onClose={() => setActiveTile(null)}
         allClients={allClientOptions}
         staff={staffForModal}
@@ -397,6 +391,8 @@ export default function ClientsPageClient({
         taskTypes={taskTypes}
         clients={clientsForModal}
       />
+
+      <NotesDrawer tile={notesTile} onClose={() => setNotesTile(null)} />
     </div>
   );
 }
