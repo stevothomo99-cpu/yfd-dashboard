@@ -8,6 +8,11 @@ interface Props {
   onClose: () => void;
 }
 
+// Notes past this length collapse behind a "Show more" toggle by default --
+// long pasted content (like a full Karbon note) would otherwise push every
+// other note down the panel, out of view.
+const LONG_NOTE_CHARS = 220;
+
 // A narrower, notes-only sibling of TileDrawer -- opened from ClientTile's
 // "Notes" shortcut so a quick note check/add doesn't require scrolling past
 // Jobs/Overdue/In progress/Completed/Recurring first.
@@ -18,6 +23,7 @@ export default function NotesDrawer({ tile, onClose }: Props) {
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
   const [togglingPinId, setTogglingPinId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,6 +59,15 @@ export default function NotesDrawer({ tile, onClose }: Props) {
   }, [tile, onClose]);
 
   if (!tile) return null;
+
+  function toggleExpanded(noteId: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+  }
 
   async function handleAddNote() {
     if (!tile || !noteText.trim()) return;
@@ -204,50 +219,87 @@ export default function NotesDrawer({ tile, onClose }: Props) {
           <div style={{ fontSize: "12px", color: "#888780", padding: "4px 0" }}>No notes yet.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {notes.map((n) => (
-              <div
-                key={n.id}
-                style={{
-                  background: n.pinned ? "#fdf6e3" : "#fafaf8",
-                  border: n.pinned ? "0.5px solid #eda100" : "0.5px solid transparent",
-                  borderRadius: "8px",
-                  padding: "10px 12px",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    {n.title ? (
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111", marginBottom: "2px" }}>
-                        {n.title}
+            {notes.map((n) => {
+              const isLong = n.body.length > LONG_NOTE_CHARS;
+              const isExpanded = expandedIds.has(n.id);
+              return (
+                <div
+                  key={n.id}
+                  style={{
+                    background: n.pinned ? "#fdf6e3" : "#fafaf8",
+                    border: n.pinned ? "0.5px solid #eda100" : "0.5px solid transparent",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      {n.title ? (
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#111111", marginBottom: "2px" }}>
+                          {n.title}
+                        </div>
+                      ) : null}
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "#111111",
+                          whiteSpace: "pre-wrap",
+                          ...(isLong && !isExpanded
+                            ? {
+                                display: "-webkit-box",
+                                WebkitLineClamp: 4,
+                                WebkitBoxOrient: "vertical" as const,
+                                overflow: "hidden",
+                              }
+                            : {}),
+                        }}
+                      >
+                        {n.body}
                       </div>
-                    ) : null}
-                    <div style={{ fontSize: "13px", color: "#111111", whiteSpace: "pre-wrap" }}>{n.body}</div>
+                      {isLong ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(n.id)}
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            color: "#2a78d6",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: "4px 0 0",
+                          }}
+                        >
+                          {isExpanded ? "Show less" : "Show more"}
+                        </button>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePin(n)}
+                      disabled={togglingPinId === n.id}
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        color: n.pinned ? "#a8710a" : "#888780",
+                        background: n.pinned ? "#faecc8" : "transparent",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: togglingPinId === n.id ? "default" : "pointer",
+                        padding: "3px 8px",
+                        flexShrink: 0,
+                        opacity: togglingPinId === n.id ? 0.6 : 1,
+                      }}
+                    >
+                      {n.pinned ? "Pinned" : "Pin"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleTogglePin(n)}
-                    disabled={togglingPinId === n.id}
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 600,
-                      color: n.pinned ? "#a8710a" : "#888780",
-                      background: n.pinned ? "#faecc8" : "transparent",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: togglingPinId === n.id ? "default" : "pointer",
-                      padding: "3px 8px",
-                      flexShrink: 0,
-                      opacity: togglingPinId === n.id ? 0.6 : 1,
-                    }}
-                  >
-                    {n.pinned ? "Pinned" : "Pin"}
-                  </button>
+                  <div style={{ fontSize: "11px", color: "#888780", marginTop: "6px" }}>
+                    {n.authorName} · {new Date(n.createdAt).toLocaleString("en-AU")}
+                  </div>
                 </div>
-                <div style={{ fontSize: "11px", color: "#888780", marginTop: "6px" }}>
-                  {n.authorName} · {new Date(n.createdAt).toLocaleString("en-AU")}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
