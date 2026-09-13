@@ -79,6 +79,10 @@ export default function ClientsPageClient({
   const [search, setSearch] = useState("");
   const [staffId, setStaffId] = useState("");
   const [activeTile, setActiveTile] = useState<ClientSummary | null>(null);
+  // Set only when the drawer was opened via a tile's "Notes" shortcut
+  // (ClientTile.tsx), so TileDrawer knows to scroll straight to Notes
+  // instead of opening at the top like a normal tile click.
+  const [focusNotes, setFocusNotes] = useState(false);
   const [hoursPeriod, setHoursPeriod] = useState<UtilisationPeriodKey | "custom">("fy");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -370,7 +374,14 @@ export default function ClientsPageClient({
               hoursLogged={t.xpmClientId ? hoursByClientId[t.xpmClientId] : undefined}
               hoursPeriodLabel={hoursPeriodLabel}
               revenue={revenueByClientId[t.id]}
-              onClick={() => setActiveTile(t)}
+              onClick={() => {
+                setFocusNotes(false);
+                setActiveTile(t);
+              }}
+              onNotesClick={() => {
+                setFocusNotes(true);
+                setActiveTile(t);
+              }}
             />
           ))}
         </div>
@@ -378,6 +389,7 @@ export default function ClientsPageClient({
 
       <TileDrawer
         tile={activeTile}
+        focusNotes={focusNotes}
         onClose={() => setActiveTile(null)}
         allClients={allClientOptions}
         staff={staffForModal}
