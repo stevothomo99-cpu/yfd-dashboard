@@ -188,6 +188,9 @@ export interface ClientSummary {
   overdueBasCount: number;
   // Soonest due date among this client's non-complete tasks, if any.
   nextDueDate: string | null;
+  // Count of customer_notes rows against this client -- lets the tile grid
+  // colour its "Notes" shortcut to show at a glance whether any exist.
+  notesCount: number;
 }
 
 export interface CustomerNote {

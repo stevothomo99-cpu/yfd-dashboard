@@ -1087,18 +1087,29 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskWithD
 // below) and task counts by tone.
 export const getClientSummaries = cache(async function getClientSummaries(): Promise<ClientSummary[]> {
   const admin = getSupabaseAdmin();
-  const [{ data: customers, error: customersError }, { data: allTasks, error: tasksError }, lookups] =
-    await Promise.all([
-      admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").order("name").returns<CustomerRow[]>(),
-      // Only the four columns the tallies below actually read. This used to
-      // be select("*"), which pulled every task body over the wire purely to
-      // count them.
-      admin.from("tasks").select("customer_id, status_id, type_id, due_date").returns<ClientSummaryTaskRow[]>(),
-      fetchLookupMaps(),
-    ]);
+  const [
+    { data: customers, error: customersError },
+    { data: allTasks, error: tasksError },
+    { data: allNotes, error: notesError },
+    lookups,
+  ] = await Promise.all([
+    admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").order("name").returns<CustomerRow[]>(),
+    // Only the four columns the tallies below actually read. This used to
+    // be select("*"), which pulled every task body over the wire purely to
+    // count them.
+    admin.from("tasks").select("customer_id, status_id, type_id, due_date").returns<ClientSummaryTaskRow[]>(),
+    admin.from("customer_notes").select("customer_id").returns<{ customer_id: string }[]>(),
+    fetchLookupMaps(),
+  ]);
 
   if (customersError) console.error("[workflow] getClientSummaries (customers) failed:", customersError.message);
   if (tasksError) console.error("[workflow] getClientSummaries (tasks) failed:", tasksError.message);
+  if (notesError) console.error("[workflow] getClientSummaries (notes) failed:", notesError.message);
+
+  const notesCountByCustomerId = new Map<string, number>();
+  for (const note of allNotes ?? []) {
+    notesCountByCustomerId.set(note.customer_id, (notesCountByCustomerId.get(note.customer_id) ?? 0) + 1);
+  }
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -1162,6 +1173,7 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
       completedCount: tally?.completedCount ?? 0,
       overdueBasCount: tally?.overdueBasCount ?? 0,
       nextDueDate: tally?.nextDueDate ?? null,
+      notesCount: notesCountByCustomerId.get(c.id) ?? 0,
     };
   });
 });
