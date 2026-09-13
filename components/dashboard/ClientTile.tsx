@@ -90,9 +90,9 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenu
             style={{
               fontSize: "10px",
               fontWeight: 500,
-              color: "#444441",
-              background: "white",
-              border: "0.5px solid #e1e0d9",
+              color: tile.notesCount > 0 ? "#0e7a4d" : "#444441",
+              background: tile.notesCount > 0 ? "#e7f6ee" : "white",
+              border: tile.notesCount > 0 ? "0.5px solid #1baf7a" : "0.5px solid #e1e0d9",
               borderRadius: "999px",
               padding: "4px 9px",
               cursor: "pointer",
@@ -100,7 +100,7 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenu
               flexShrink: 0,
             }}
           >
-            Notes
+            Notes{tile.notesCount > 0 ? ` · ${tile.notesCount}` : ""}
           </button>
         ) : null}
       </div>
