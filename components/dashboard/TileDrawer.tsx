@@ -33,6 +33,10 @@ interface Props {
   statuses: WorkflowStatus[];
   taskTypes: WorkflowTaskType[];
   clients: WorkflowCustomer[];
+  // Admin-only "Reassign" control on the Manager row. A quick fix tool, not
+  // synced back to XPM -- see setCustomerManager's comment in lib/workflow.ts.
+  isAdmin?: boolean;
+  onManagerChanged?: (customerId: string, managerId: string | null, managerName: string | null) => void;
 }
 
 function todayIso(): string {
@@ -69,12 +73,17 @@ export default function TileDrawer({
   statuses,
   taskTypes,
   clients,
+  isAdmin,
+  onManagerChanged,
 }: Props) {
   const [jobs, setJobs] = useState<JobWithManager[]>([]);
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [notes, setNotes] = useState<CustomerNote[]>([]);
   const [files, setFiles] = useState<CustomerFile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+  const [savingManager, setSavingManager] = useState(false);
+  const [managerError, setManagerError] = useState<string | null>(null);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
@@ -92,6 +101,29 @@ export default function TileDrawer({
     setTasks(data.tasks ?? []);
   }
 
+  async function handleReassign(newManagerId: string) {
+    if (!tile) return;
+    setSavingManager(true);
+    setManagerError(null);
+    try {
+      const managerId = newManagerId || null;
+      const res = await fetch(`/api/workflow/customers/${tile.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ managerId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to reassign client");
+      const managerName = managerId ? staff.find((s) => s.id === managerId)?.name ?? null : null;
+      onManagerChanged?.(tile.id, managerId, managerName);
+      setReassigning(false);
+    } catch (err) {
+      setManagerError(err instanceof Error ? err.message : "Failed to reassign client");
+    } finally {
+      setSavingManager(false);
+    }
+  }
+
   useEffect(() => {
     if (!tile) return;
     let cancelled = false;
@@ -99,6 +131,8 @@ export default function TileDrawer({
     const fetchDetails = async () => {
       setLoading(true);
       setError(null);
+      setReassigning(false);
+      setManagerError(null);
       try {
         const [jobData, taskData, noteData, fileData] = await Promise.all([
           fetch(`/api/workflow/customers/${tile.id}/jobs`).then((r) => r.json()),
@@ -238,12 +272,65 @@ export default function TileDrawer({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
           <div>
             <div style={{ fontSize: "18px", fontWeight: 600, color: "#111111" }}>{tile.name}</div>
-            {tile.managerName ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px" }}>
-                <StaffAvatar initials={initialsOf(tile.managerName)} size={22} />
-                <span style={{ fontSize: "12px", color: "#444441" }}>{tile.managerName}</span>
+            {reassigning ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "6px" }}>
+                <select
+                  autoFocus
+                  defaultValue={tile.managerIds[0] ?? ""}
+                  onChange={(e) => handleReassign(e.target.value)}
+                  disabled={savingManager}
+                  style={{
+                    fontSize: "12px",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "0.5px solid #e1e0d9",
+                    background: "white",
+                    color: "#111111",
+                  }}
+                >
+                  <option value="">— No manager —</option>
+                  {staff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {savingManager ? <span style={{ fontSize: "11px", color: "#888780" }}>Saving…</span> : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReassigning(false);
+                      setManagerError(null);
+                    }}
+                    style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {managerError ? <div style={{ fontSize: "11px", color: "#c0392b" }}>{managerError}</div> : null}
               </div>
-            ) : null}
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px" }}>
+                {tile.managerName ? (
+                  <>
+                    <StaffAvatar initials={initialsOf(tile.managerName)} size={22} />
+                    <span style={{ fontSize: "12px", color: "#444441" }}>{tile.managerName}</span>
+                  </>
+                ) : (
+                  <span style={{ fontSize: "12px", color: "#888780" }}>No manager assigned</span>
+                )}
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => setReassigning(true)}
+                    style={{ fontSize: "11px", color: "#2a78d6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                  >
+                    Reassign
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
           <button
             type="button"
