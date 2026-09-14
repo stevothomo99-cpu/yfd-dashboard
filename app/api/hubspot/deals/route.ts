@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
-import { getHubSpotDeals } from "@/lib/hubspot";
-
-export interface DealKPI {
-  dealName: string;
-  stage: string;
-  amount: number;
-  closeDate: string;
-}
+import { getHubSpotDeals, type HubSpotDeal } from "@/lib/hubspot";
 
 export interface PipelineMetrics {
   newLeads: number;
@@ -23,26 +16,48 @@ interface ResponseBody {
   lastUpdated: string;
 }
 
+// Real pipeline/stage ids, read off /api/hubspot/pipelines-diagnose against
+// the live account -- HubSpot's API returns dealstage as this kind of raw
+// numeric id, never a human label, which is why the previous version's
+// stage.includes("meeting"/"won"/etc) checks could never match anything.
+// Every deal also carries a `pipeline` property, which the previous version
+// never requested or split on -- FocablyED and SiteMargin rendered the same
+// numbers because they were, literally, the same numbers.
+const PIPELINES: Record<"focablyED" | "siteMargin", { id: string; closedStageIds: Set<string>; wonStageId: string }> = {
+  focablyED: {
+    id: "default",
+    // "Closed Lost" carries the id "closedwon" in this account (a HubSpot
+    // data quirk, not a typo here) -- confirmed directly via the diagnostic.
+    closedStageIds: new Set(["3412465131", "closedwon"]),
+    wonStageId: "3412465131",
+  },
+  siteMargin: {
+    id: "1998139849",
+    closedStageIds: new Set(["3436662221", "3436662222"]),
+    wonStageId: "3436662221",
+  },
+};
+
 function parseAmount(val: unknown): number {
   if (typeof val === "number") return val;
   if (typeof val === "string") return Number(val) || 0;
   return 0;
 }
 
-function calculateDaysBetween(from: string, to: string): number {
-  const d1 = new Date(from);
-  const d2 = new Date(to);
-  const diffMs = Math.abs(d2.getTime() - d1.getTime());
-  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+function daysBetween(from: string, to: string): number {
+  const diffMs = Math.abs(new Date(to).getTime() - new Date(from).getTime());
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
 }
 
-function calculateMetrics(deals: any[]): PipelineMetrics {
+function calculateMetrics(
+  allDeals: HubSpotDeal[],
+  config: (typeof PIPELINES)[keyof typeof PIPELINES]
+): PipelineMetrics {
   const now = new Date();
-  const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-  const today = now.toISOString().split("T")[0];
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const activeDealStages = ["negotiation", "presentation", "proposal"];
-  const wonStages = ["negotiation/won", "won"];
+  const deals = allDeals.filter((d) => d.properties.pipeline === config.id);
 
   let newLeads = 0;
   let activeDealCount = 0;
@@ -51,73 +66,46 @@ function calculateMetrics(deals: any[]): PipelineMetrics {
   const daysToCloseDurations: number[] = [];
 
   for (const deal of deals) {
-    const props = deal.properties || {};
-    const stage = (props.dealstage || "").toLowerCase();
+    const props = deal.properties;
+    const stageId = props.dealstage ?? "";
     const amount = parseAmount(props.amount);
-    const closeDate = props.closedate || "";
-    const lastModified = props.hs_lastmodifieddate || "";
+    const isClosed = config.closedStageIds.has(stageId);
 
-    // New leads (modified in last 30 days, in early stages)
-    if (lastModified) {
-      const modDate = new Date(parseInt(lastModified));
-      if (modDate > monthAgo && stage.includes("meeting")) {
-        newLeads++;
-      }
+    if (props.createdate && new Date(props.createdate) >= thirtyDaysAgo) {
+      newLeads++;
     }
 
-    // Active deals
-    if (activeDealStages.some((s) => stage.includes(s))) {
+    if (!isClosed) {
       activeDealCount++;
       activeDealValue += amount;
     }
 
-    // Won this month
-    if (wonStages.some((s) => stage.includes(s)) && closeDate) {
-      const closeDateObj = new Date(closeDate);
-      if (closeDateObj > monthAgo && closeDateObj <= now) {
+    if (stageId === config.wonStageId && props.closedate) {
+      const closeDate = new Date(props.closedate);
+      if (closeDate >= monthStart && closeDate <= now) {
         wonDealsThisMonth++;
-      }
-    }
-
-    // Days to close
-    if (closeDate && lastModified) {
-      const modDate = new Date(parseInt(lastModified));
-      const closeDateObj = new Date(closeDate);
-      if (closeDateObj >= modDate) {
-        daysToCloseDurations.push(calculateDaysBetween(lastModified, closeDate));
+        if (props.createdate) {
+          daysToCloseDurations.push(daysBetween(props.createdate, props.closedate));
+        }
       }
     }
   }
 
   const avgDaysToClose =
     daysToCloseDurations.length > 0
-      ? Math.round(
-          daysToCloseDurations.reduce((a, b) => a + b, 0) /
-            daysToCloseDurations.length
-        )
+      ? Math.round(daysToCloseDurations.reduce((a, b) => a + b, 0) / daysToCloseDurations.length)
       : 0;
 
-  return {
-    newLeads,
-    activeDealCount,
-    activeDealValue,
-    wonDealsThisMonth,
-    avgDaysToClose,
-  };
+  return { newLeads, activeDealCount, activeDealValue, wonDealsThisMonth, avgDaysToClose };
 }
 
-export async function GET(): Promise<NextResponse<ResponseBody>> {
+async function loadMetrics(): Promise<NextResponse<ResponseBody>> {
   try {
     const deals = await getHubSpotDeals();
 
-    // For now, split deals by some heuristic or custom property
-    // TODO: Update once you clarify pipeline IDs
-    // For now, return same data for both as placeholder
-    const metrics = calculateMetrics(deals);
-
     return NextResponse.json({
-      focablyED: metrics,
-      siteMargin: metrics,
+      focablyED: calculateMetrics(deals, PIPELINES.focablyED),
+      siteMargin: calculateMetrics(deals, PIPELINES.siteMargin),
       lastUpdated: new Date().toISOString(),
     });
   } catch (err) {
@@ -132,4 +120,15 @@ export async function GET(): Promise<NextResponse<ResponseBody>> {
       { status: 502 }
     );
   }
+}
+
+export async function GET(): Promise<NextResponse<ResponseBody>> {
+  return loadMetrics();
+}
+
+// The dashboard's "Refresh" button POSTs here -- there was previously no
+// handler for that at all (a plain 405), since HubSpot is fetched live on
+// every call anyway and there's nothing to invalidate.
+export async function POST(): Promise<NextResponse<ResponseBody>> {
+  return loadMetrics();
 }

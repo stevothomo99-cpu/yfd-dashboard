@@ -31,7 +31,9 @@ export interface HubSpotDeal {
   properties: {
     dealname?: string;
     dealstage?: string;
+    pipeline?: string;
     amount?: string;
+    createdate?: string;
     closedate?: string;
     hs_lastmodifieddate?: string;
   };
@@ -89,7 +91,7 @@ export async function getHubSpotDealsByPipeline(
 
   while (true) {
     const params = new URLSearchParams({
-      properties: "dealname,dealstage,amount,closedate,hs_lastmodifieddate",
+      properties: "dealname,dealstage,pipeline,amount,createdate,closedate,hs_lastmodifieddate",
       limit: "100",
       associations: "pipelines",
     });
@@ -115,7 +117,7 @@ export async function getHubSpotDeals(): Promise<HubSpotDeal[]> {
 
   while (true) {
     const params = new URLSearchParams({
-      properties: "dealname,dealstage,amount,closedate,hs_lastmodifieddate",
+      properties: "dealname,dealstage,pipeline,amount,createdate,closedate,hs_lastmodifieddate",
       limit: "100",
     });
     if (after) params.append("after", after);
