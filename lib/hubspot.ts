@@ -44,11 +44,32 @@ interface HubSpotDealsResponse {
   };
 }
 
+export interface HubSpotPipelineStage {
+  id: string;
+  label: string;
+  displayOrder: number;
+  metadata?: { isClosed?: string; probability?: string };
+}
+
+export interface HubSpotPipelineWithStages {
+  id: string;
+  label: string;
+  stages: HubSpotPipelineStage[];
+}
+
 interface HubSpotPipelinesResponse {
-  results: Array<{
-    id: string;
-    label: string;
-  }>;
+  results: HubSpotPipelineWithStages[];
+}
+
+// Every deal pipeline WITH its stages -- used by the Business KPIs pipeline
+// split/stage-matching (which otherwise has no way to know that a raw
+// dealstage id like "3436662216" means anything at all), and by the
+// pipelines-diagnose route this feeds.
+export async function getHubSpotPipelinesWithStages(): Promise<HubSpotPipelineWithStages[]> {
+  const res = await hubspotFetch<HubSpotPipelinesResponse>(
+    "/crm/v3/pipelines/deals"
+  );
+  return res.results;
 }
 
 export async function getHubSpotPipelines(): Promise<
