@@ -27,9 +27,22 @@ globalForCache.__yfdCacheMemory = memory;
 
 function client(): Redis {
   if (!globalForCache.__yfdRedisClient) {
-    globalForCache.__yfdRedisClient = new Redis(process.env.REDIS_URL as string, {
+    const c = new Redis(process.env.REDIS_URL as string, {
       maxRetriesPerRequest: 3,
     });
+    // Without a listener here, a connection blip (the free-tier Redis Cloud
+    // plan this is attached to has a low concurrent-connection cap, easily
+    // hit by a burst of serverless invocations each opening their own
+    // connection) surfaces as an "Unhandled error event" that Node treats as
+    // uncaught -- logged here instead, and cacheGet/cacheSet/cacheDelete
+    // below now catch around every actual command so a connection failure
+    // degrades to "treat as cache miss" rather than throwing through the
+    // whole page render (this is what turned a Redis hiccup into full
+    // 300-second page timeouts on /clients and /my-work).
+    c.on("error", (err) => {
+      console.error("[cache] Redis client error:", err instanceof Error ? err.message : err);
+    });
+    globalForCache.__yfdRedisClient = c;
   }
   return globalForCache.__yfdRedisClient;
 }
@@ -49,8 +62,13 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
     }
     return entry.value as T;
   }
-  const raw = await client().get(k);
-  return raw === null ? null : (JSON.parse(raw) as T);
+  try {
+    const raw = await client().get(k);
+    return raw === null ? null : (JSON.parse(raw) as T);
+  } catch (err) {
+    console.error(`[cache] Redis GET failed for "${k}", treating as cache miss:`, err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 export async function cacheSet<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
@@ -62,11 +80,17 @@ export async function cacheSet<T>(key: string, value: T, ttlSeconds?: number): P
     });
     return;
   }
-  const raw = JSON.stringify(value);
-  if (ttlSeconds && ttlSeconds > 0) {
-    await client().set(k, raw, "EX", ttlSeconds);
-  } else {
-    await client().set(k, raw);
+  try {
+    const raw = JSON.stringify(value);
+    if (ttlSeconds && ttlSeconds > 0) {
+      await client().set(k, raw, "EX", ttlSeconds);
+    } else {
+      await client().set(k, raw);
+    }
+  } catch (err) {
+    // Best-effort: a failed write just means the next read is a full miss
+    // again, same as a cold cache -- never corrupts correctness.
+    console.error(`[cache] Redis SET failed for "${k}":`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -76,7 +100,11 @@ export async function cacheDelete(key: string): Promise<void> {
     memory.delete(k);
     return;
   }
-  await client().del(k);
+  try {
+    await client().del(k);
+  } catch (err) {
+    console.error(`[cache] Redis DEL failed for "${k}":`, err instanceof Error ? err.message : err);
+  }
 }
 
 export async function cached<T>(
