@@ -114,6 +114,12 @@ export default function BasStatusPageClient({
   const [clientSearch, setClientSearch] = useState<string>("");
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "Complete" on a card sets the task's actual status (separate from
+  // basStage entirely -- this pipeline only ever moved bas_stage, so a
+  // lodged BAS/IAS task never left "Waiting on Customer" on its own). Only
+  // one status is configured with is_complete right now ("Completed"); if
+  // that ever changes, this just becomes the first one found.
+  const completedStatusId = useMemo(() => statuses.find((s) => s.isComplete)?.id ?? null, [statuses]);
   // Drill-down: clicking a card opens the same task modal My Work uses, pre-
   // populated -- the stage Back/Forward buttons and History toggle stop
   // propagation so they keep working independently of this.
@@ -217,6 +223,36 @@ export default function BasStatusPageClient({
       }
     } catch {
       setError("Failed to update task");
+    } finally {
+      setPendingTaskId(null);
+    }
+  }
+
+  async function completeTask(taskId: string) {
+    if (!completedStatusId) {
+      setError("No status is configured as complete -- check Settings.");
+      return;
+    }
+    setPendingTaskId(taskId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workflow/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId: completedStatusId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Failed to complete task");
+        return;
+      }
+      // Marking it complete takes it off this board entirely -- BAS Status
+      // only ever lists tasks still moving through the stage pipeline, same
+      // as it dropping off once the underlying task is done anywhere else
+      // in the app.
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    } catch {
+      setError("Failed to complete task");
     } finally {
       setPendingTaskId(null);
     }
@@ -340,6 +376,7 @@ export default function BasStatusPageClient({
                     onToggleHistory={() => setExpandedTaskId((prev) => (prev === t.id ? null : t.id))}
                     onBack={() => transition(t.id, (Object.keys(STAGE_ORDER) as Stage[]).find((s) => STAGE_ORDER[s] === STAGE_ORDER[stageOf(t)] - 1)!)}
                     onForward={() => transition(t.id, (Object.keys(STAGE_ORDER) as Stage[]).find((s) => STAGE_ORDER[s] === STAGE_ORDER[stageOf(t)] + 1)!)}
+                    onComplete={() => completeTask(t.id)}
                   />
                 ))
               )}
@@ -378,6 +415,7 @@ function TaskCard({
   onToggleHistory,
   onBack,
   onForward,
+  onComplete,
 }: {
   task: TaskWithDetails;
   busy: boolean;
@@ -387,10 +425,16 @@ function TaskCard({
   onToggleHistory: () => void;
   onBack: () => void;
   onForward: () => void;
+  onComplete: () => void;
 }) {
   const stage = stageOf(task);
   const canGoBack = STAGE_ORDER[stage] > 0;
   const canGoForward = STAGE_ORDER[stage] < 2;
+  // Only offered once lodged -- the whole point of "Waiting on Customer" is
+  // that it's back with the team to close out, and completing a task from
+  // an earlier stage should still go through the drill-down modal (it isn't
+  // this pipeline's job to let people skip stages via this shortcut).
+  const canComplete = stage === "waiting_on_customer";
   // Same "overdue" rule the rest of the dashboard uses -- isOverdue is
   // computed server-side in lib/workflow.ts's hydrateTask (due_date < today
   // && not complete), the same convention getClientSummaries and My Work's
@@ -446,6 +490,11 @@ function TaskCard({
             {canGoForward ? (
               <button type="button" disabled={busy} onClick={onForward} style={stageButtonStyle}>
                 Forward ›
+              </button>
+            ) : null}
+            {canComplete ? (
+              <button type="button" disabled={busy} onClick={onComplete} style={completeButtonStyle}>
+                ✓ Complete
               </button>
             ) : null}
           </div>
@@ -529,6 +578,17 @@ const stageButtonStyle: React.CSSProperties = {
   border: "0.5px solid #d9d7cd",
   background: "#faf9f6",
   color: "#444441",
+  cursor: "pointer",
+};
+
+const completeButtonStyle: React.CSSProperties = {
+  fontSize: "10.5px",
+  fontWeight: 600,
+  padding: "3px 8px",
+  borderRadius: "6px",
+  border: "0.5px solid #1baf7a",
+  background: "#e9f9f2",
+  color: "#1a7a52",
   cursor: "pointer",
 };
 

@@ -40,7 +40,11 @@ export default async function BasStatusPage() {
     listStatuses(),
     listTaskTypes(),
   ]);
-  const basTasks = allTasks.filter((t) => t.typeId === BAS_TASK_TYPE_ID);
+  // Completed tasks are excluded -- this board is only for BAS/IAS tasks
+  // still moving through the stage pipeline. Without this, a task marked
+  // complete (BasStatusPageClient's "Complete" button) would only disappear
+  // client-side until the next page load, then reappear here forever.
+  const basTasks = allTasks.filter((t) => t.typeId === BAS_TASK_TYPE_ID && !t.statusIsComplete);
   const historyByTaskId = await getBasStageHistoryForTasks(basTasks.map((t) => t.id));
   const initialHistory = Object.fromEntries(historyByTaskId);
 
