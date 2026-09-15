@@ -26,6 +26,7 @@ const ADMIN_ONLY_ITEMS = [
   { label: "Business KPIs", href: "/personal" },
   { label: "Team", href: "/team" },
   { label: "BAS Status", href: "/bas-status" },
+  { label: "Reports", href: "/reports" },
 ];
 const EVERYONE_ITEMS = [
   { label: "Dashboard", href: "/dashboard" },
