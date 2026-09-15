@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import StaffAvatar from "./StaffAvatar";
 import CopyTaskModal from "./CopyTaskModal";
 import SaveTemplateModal from "./SaveTemplateModal";
@@ -58,6 +58,35 @@ const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
   quarterly: "Quarterly",
 };
 
+type SortColumn = "title" | "type" | "due";
+interface SortState {
+  col: SortColumn;
+  dir: 1 | -1;
+}
+
+// Sorting by Title or Type alone leaves ties in whatever order the tasks
+// happened to load in -- due date is the natural tiebreaker (soonest due
+// first) so, e.g., every "Payroll" row still reads oldest-to-newest within
+// its own group. Sorting by Due date itself has no secondary key.
+function sortTasks(rows: TaskWithDetails[], state: SortState): TaskWithDetails[] {
+  const { col, dir } = state;
+  const key = (t: TaskWithDetails): string =>
+    col === "title" ? t.title : col === "type" ? (t.typeName ?? "") : (t.dueDate ?? "");
+  return [...rows].sort((a, b) => {
+    const av = key(a);
+    const bv = key(b);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    if (col !== "due") {
+      const ad = a.dueDate ?? "";
+      const bd = b.dueDate ?? "";
+      if (ad < bd) return -1;
+      if (ad > bd) return 1;
+    }
+    return 0;
+  });
+}
+
 function fmtBytes(bytes: number | null): string {
   if (bytes == null) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -100,11 +129,56 @@ export default function TileDrawer({
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [showApplyTemplate, setShowApplyTemplate] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
+  // Completed/Recurring collapse the same way Jobs already does -- a client
+  // with a long history otherwise pushes Notes/Files off the bottom of the
+  // drawer for no reason once Overdue/In progress are the reason it's open.
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [recurringExpanded, setRecurringExpanded] = useState(false);
+  const [sortState, setSortState] = useState<Record<"overdue" | "progress", SortState>>({
+    overdue: { col: "due", dir: 1 },
+    progress: { col: "due", dir: 1 },
+  });
+  // Read-only drill-down for the Overdue/In progress tables -- deliberately
+  // NOT the full NewTaskModal editor: a set task's title/type/due date
+  // shouldn't be changed from a quick table click, only its completion
+  // state (see the "Mark complete" button below).
+  const [viewingTask, setViewingTask] = useState<TaskWithDetails | null>(null);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const completedStatusId = useMemo(() => statuses.find((s) => s.isComplete)?.id ?? null, [statuses]);
 
   async function refreshTasks() {
     if (!tile) return;
     const data = await fetch(`/api/workflow/customers/${tile.id}/tasks`).then((r) => r.json());
     setTasks(data.tasks ?? []);
+  }
+
+  // Same PATCH-the-status pattern as the BAS Status board's own "Mark
+  // complete" -- see BasStatusPageClient.tsx's completeTask.
+  async function completeTask(taskId: string) {
+    if (!completedStatusId) {
+      setError("No status is configured as complete -- check Settings.");
+      return;
+    }
+    setCompletingTaskId(taskId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workflow/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId: completedStatusId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Failed to complete task");
+        return;
+      }
+      await refreshTasks();
+      setViewingTask(null);
+    } catch {
+      setError("Failed to complete task");
+    } finally {
+      setCompletingTaskId(null);
+    }
   }
 
   async function handleReassign(newManagerId: string) {
@@ -267,7 +341,7 @@ export default function TileDrawer({
       <div
         style={{
           width: "100%",
-          maxWidth: "520px",
+          maxWidth: "760px",
           background: "white",
           height: "100%",
           overflow: "auto",
@@ -416,7 +490,19 @@ export default function TileDrawer({
               {overdue.length === 0 ? (
                 <Empty label="No overdue tasks." />
               ) : (
-                <Stack>{overdue.map((t) => <WorkItemRow key={t.id} task={t} accent="#e24b4a" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
+                <TaskTable
+                  tasks={overdue}
+                  accent="#e24b4a"
+                  sort={sortState.overdue}
+                  onSort={(col) =>
+                    setSortState((prev) => ({
+                      ...prev,
+                      overdue: { col, dir: prev.overdue.col === col ? ((prev.overdue.dir * -1) as 1 | -1) : 1 },
+                    }))
+                  }
+                  onCopy={setCopyingTask}
+                  onOpen={setViewingTask}
+                />
               )}
             </Section>
 
@@ -424,19 +510,41 @@ export default function TileDrawer({
               {inProgress.length === 0 ? (
                 <Empty label="Nothing in progress." />
               ) : (
-                <Stack>{inProgress.map((t) => <WorkItemRow key={t.id} task={t} accent="#2a78d6" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
+                <TaskTable
+                  tasks={inProgress}
+                  accent="#2a78d6"
+                  sort={sortState.progress}
+                  onSort={(col) =>
+                    setSortState((prev) => ({
+                      ...prev,
+                      progress: { col, dir: prev.progress.col === col ? ((prev.progress.dir * -1) as 1 | -1) : 1 },
+                    }))
+                  }
+                  onCopy={setCopyingTask}
+                  onOpen={setViewingTask}
+                />
               )}
             </Section>
 
-            <Section title={`Completed · ${completed.length}`}>
+            <ConcertinaSection
+              label="Completed"
+              count={completed.length}
+              expanded={completedExpanded}
+              onToggle={() => setCompletedExpanded((v) => !v)}
+            >
               {completed.length === 0 ? (
                 <Empty label="No completed tasks yet." />
               ) : (
                 <Stack>{completed.map((t) => <WorkItemRow key={t.id} task={t} accent="#1baf7a" onCopy={setCopyingTask} onOpen={setEditingTask} />)}</Stack>
               )}
-            </Section>
+            </ConcertinaSection>
 
-            <Section title={`Recurring · ${recurring.length}`}>
+            <ConcertinaSection
+              label="Recurring"
+              count={recurring.length}
+              expanded={recurringExpanded}
+              onToggle={() => setRecurringExpanded((v) => !v)}
+            >
               {recurring.length === 0 ? (
                 <Empty label="Nothing set to recur on this client." />
               ) : (
@@ -446,7 +554,7 @@ export default function TileDrawer({
                   ))}
                 </Stack>
               )}
-            </Section>
+            </ConcertinaSection>
           </>
         )}
 
@@ -599,6 +707,15 @@ export default function TileDrawer({
         </Section>
       </div>
 
+      {viewingTask ? (
+        <TaskDetailModal
+          task={viewingTask}
+          onClose={() => setViewingTask(null)}
+          onComplete={() => completeTask(viewingTask.id)}
+          completing={completingTaskId === viewingTask.id}
+        />
+      ) : null}
+
       {copyingTask ? (
         <CopyTaskModal
           task={copyingTask}
@@ -707,6 +824,210 @@ function WorkItemRow({
   );
 }
 
+const SORT_COLUMNS: { col: SortColumn; label: string }[] = [
+  { col: "title", label: "Title" },
+  { col: "type", label: "Type" },
+  { col: "due", label: "Due date" },
+];
+
+// Overdue/In progress are sortable tables (click a header to sort by it,
+// click again to reverse) rather than the card list Completed/Recurring
+// still use -- the two sections that grow the largest and get scanned by
+// due date/type most often, e.g. clients like RECS Enterprises with a
+// dozen+ open tasks. Clicking a row opens a read-only detail popup; the
+// separate Copy button next to it stays its own action either way.
+function TaskTable({
+  tasks,
+  accent,
+  sort,
+  onSort,
+  onCopy,
+  onOpen,
+}: {
+  tasks: TaskWithDetails[];
+  accent: string;
+  sort: SortState;
+  onSort: (col: SortColumn) => void;
+  onCopy: (task: TaskWithDetails) => void;
+  onOpen: (task: TaskWithDetails) => void;
+}) {
+  const sorted = sortTasks(tasks, sort);
+  return (
+    <div style={{ border: "0.5px solid #e1e0d9", borderRadius: "10px", overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+        <thead>
+          <tr>
+            {SORT_COLUMNS.map(({ col, label }) => (
+              <th key={col} style={{ textAlign: "left", padding: "8px 12px", background: "#fafaf8", borderBottom: "0.5px solid #e1e0d9" }}>
+                <button
+                  type="button"
+                  onClick={() => onSort(col)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    fontSize: "10.5px",
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: sort.col === col ? "#2a78d6" : "#888780",
+                  }}
+                >
+                  {label}
+                  <span style={{ fontSize: "9px", visibility: sort.col === col ? "visible" : "hidden" }}>
+                    {sort.dir === 1 ? "▲" : "▼"}
+                  </span>
+                </button>
+              </th>
+            ))}
+            <th style={{ background: "#fafaf8", borderBottom: "0.5px solid #e1e0d9" }} />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((t) => (
+            <tr
+              key={t.id}
+              onClick={() => onOpen(t)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") onOpen(t);
+              }}
+              style={{ cursor: "pointer", borderBottom: "0.5px solid #e1e0d9" }}
+            >
+              <td style={{ padding: "8px 12px" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 500, color: "#111111" }}>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: accent, flexShrink: 0 }} />
+                  {t.title}
+                </span>
+              </td>
+              <td style={{ padding: "8px 12px", color: "#888780" }}>{t.typeName ?? "—"}</td>
+              <td style={{ padding: "8px 12px", color: "#888780", whiteSpace: "nowrap" }}>{formatDate(t.dueDate)}</td>
+              <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCopy(t);
+                  }}
+                  style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px" }}
+                >
+                  Copy…
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Read-only drill-down opened by clicking an Overdue/In progress row -- a
+// set task's title/type/due date is deliberately not editable from here
+// (that's still the full NewTaskModal, reached via Completed/Recurring's
+// WorkItemRow or elsewhere); the only action is marking it done.
+function TaskDetailModal({
+  task,
+  onClose,
+  onComplete,
+  completing,
+}: {
+  task: TaskWithDetails;
+  onClose: () => void;
+  onComplete: () => void;
+  completing: boolean;
+}) {
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(17, 17, 17, 0.35)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "380px", maxWidth: "100%", background: "white", borderRadius: "12px", padding: "20px", boxShadow: "0 24px 60px rgba(17,17,17,0.25)" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+          <div style={{ fontSize: "16px", fontWeight: 600, color: "#111111" }}>{task.title}</div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: "18px", color: "#888780", cursor: "pointer", padding: "2px 6px", lineHeight: 1 }}>
+            ×
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+          <Field label="Type" value={task.typeName ?? "—"} />
+          <Field label="Due date" value={formatDate(task.dueDate)} />
+        </div>
+        <Field label="Assignee" value={task.assigneeName ?? "Unassigned"} />
+        <div style={{ display: "flex", gap: "8px", marginTop: "18px" }}>
+          <button type="button" disabled={completing} onClick={onComplete} style={completeButtonStyle}>
+            {completing ? "Marking complete…" : "Mark complete"}
+          </button>
+          <button type="button" onClick={onClose} style={{ ...ghostButtonStyle, borderRadius: "8px" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ marginBottom: "8px" }}>
+      <div style={{ fontSize: "10.5px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#888780", marginBottom: "3px" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: "13px", color: "#111111" }}>{value}</div>
+    </div>
+  );
+}
+
+function ConcertinaSection({
+  label,
+  count,
+  expanded,
+  onToggle,
+  children,
+}: {
+  label: string;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: "20px" }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          background: "none",
+          border: "none",
+          padding: 0,
+          marginBottom: expanded ? "10px" : 0,
+          cursor: "pointer",
+          fontSize: "11px",
+          fontWeight: 500,
+          color: "#888780",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        <span>{expanded ? "▾" : "▸"}</span>
+        <span>{label} · {count}</span>
+      </button>
+      {expanded ? children : null}
+    </div>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: "20px" }}>
@@ -734,5 +1055,20 @@ const ghostButtonStyle: React.CSSProperties = {
   background: "white",
   color: "#444441",
   border: "0.5px solid #e1e0d9",
+  cursor: "pointer",
+};
+
+// Same dark-filled convention as the BAS Status board's own "Mark complete"
+// (see BasStatusPageClient.tsx's completeButtonStyle) -- a status badge that
+// looked done was confusing there, so this drawer's version never repeats
+// that green-checkmark mistake either.
+const completeButtonStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 600,
+  padding: "7px 14px",
+  borderRadius: "8px",
+  border: "0.5px solid #111111",
+  background: "#111111",
+  color: "white",
   cursor: "pointer",
 };
