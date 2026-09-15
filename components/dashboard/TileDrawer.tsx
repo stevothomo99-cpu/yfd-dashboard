@@ -729,6 +729,7 @@ export default function TileDrawer({
         <NewTaskModal
           onClose={() => setEditingTask(null)}
           onCreated={refreshTasks}
+          onDeleted={refreshTasks}
           clients={clients}
           staff={staff}
           statuses={statuses}
