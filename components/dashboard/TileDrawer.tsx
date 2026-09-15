@@ -77,6 +77,11 @@ export default function TileDrawer({
   onManagerChanged,
 }: Props) {
   const [jobs, setJobs] = useState<JobWithManager[]>([]);
+  // Collapsed by default -- Jobs is rarely the reason anyone opens this
+  // drawer (Overdue/In progress/Notes are), and a client with several years
+  // of still-open XPM jobs (see the RECS Enterprises case) can otherwise
+  // push everything else below the fold.
+  const [jobsExpanded, setJobsExpanded] = useState(false);
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [notes, setNotes] = useState<CustomerNote[]>([]);
   const [files, setFiles] = useState<CustomerFile[]>([]);
@@ -352,23 +357,47 @@ export default function TileDrawer({
           <div style={{ fontSize: "12px", color: "#888780", padding: "12px 0" }}>Loading…</div>
         ) : (
           <>
-            <Section title={`Jobs · ${jobs.length}`}>
-              {jobs.length === 0 ? (
-                <Empty label="No jobs on this client yet." />
-              ) : (
-                <Stack>
-                  {jobs.map((j) => (
-                    <div
-                      key={j.id}
-                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafaf8", borderRadius: "8px", padding: "10px 12px" }}
-                    >
-                      <span style={{ fontSize: "13px", color: "#111111" }}>{j.name}</span>
-                      <span style={{ fontSize: "12px", color: "#888780" }}>{j.managerName ?? "Unassigned"}</span>
-                    </div>
-                  ))}
-                </Stack>
-              )}
-            </Section>
+            <div style={{ marginBottom: "20px" }}>
+              <button
+                type="button"
+                onClick={() => setJobsExpanded((v) => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  marginBottom: jobsExpanded ? "10px" : 0,
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  color: "#888780",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                <span>{jobsExpanded ? "▾" : "▸"}</span>
+                <span>Jobs · {jobs.length}</span>
+              </button>
+              {jobsExpanded ? (
+                jobs.length === 0 ? (
+                  <Empty label="No jobs on this client yet." />
+                ) : (
+                  <Stack>
+                    {jobs.map((j) => (
+                      <div
+                        key={j.id}
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafaf8", borderRadius: "8px", padding: "10px 12px" }}
+                      >
+                        <span style={{ fontSize: "13px", color: "#111111" }}>{j.name}</span>
+                        <span style={{ fontSize: "12px", color: "#888780" }}>{j.managerName ?? "Unassigned"}</span>
+                      </div>
+                    ))}
+                  </Stack>
+                )
+              ) : null}
+            </div>
 
             <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
               <button type="button" onClick={() => setShowSaveTemplate(true)} style={ghostButtonStyle}>
