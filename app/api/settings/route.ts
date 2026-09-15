@@ -36,6 +36,8 @@ export async function PATCH(request: Request) {
     partnerName?: string;
     excludedStaffIds?: string[];
     showPartnersInTimesheets?: boolean;
+    chargeRatePerHour?: number;
+    costRatePerHour?: number;
   } = {};
   if (typeof input.partnerName === "string") {
     patch.partnerName = input.partnerName.trim();
@@ -48,6 +50,12 @@ export async function PATCH(request: Request) {
   }
   if (typeof input.showPartnersInTimesheets === "boolean") {
     patch.showPartnersInTimesheets = input.showPartnersInTimesheets;
+  }
+  if (typeof input.chargeRatePerHour === "number" && input.chargeRatePerHour >= 0) {
+    patch.chargeRatePerHour = input.chargeRatePerHour;
+  }
+  if (typeof input.costRatePerHour === "number" && input.costRatePerHour >= 0) {
+    patch.costRatePerHour = input.costRatePerHour;
   }
 
   const settings = await updateSettings(patch);

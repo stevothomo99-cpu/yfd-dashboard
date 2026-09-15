@@ -20,18 +20,27 @@ export interface DashboardSettings {
   partnerName: string;
   excludedStaffIds: string[];
   showPartnersInTimesheets: boolean;
+  // Firm-wide $/hr assumptions for Reports (see migration 028) -- there's no
+  // real per-client budget or per-staff cost rate stored anywhere, so these
+  // are the single blended numbers the Revenue by Client report is built on.
+  chargeRatePerHour: number;
+  costRatePerHour: number;
 }
 
 const DEFAULTS: DashboardSettings = {
   partnerName: "",
   excludedStaffIds: [],
   showPartnersInTimesheets: true,
+  chargeRatePerHour: 80,
+  costRatePerHour: 35,
 };
 
 interface AppSettingsRow {
   partner_name: string | null;
   excluded_staff_ids: string[] | null;
   show_partners_in_timesheets: boolean | null;
+  charge_rate_per_hour: number | null;
+  cost_rate_per_hour: number | null;
 }
 
 function fromRow(row: AppSettingsRow | null): DashboardSettings {
@@ -40,6 +49,8 @@ function fromRow(row: AppSettingsRow | null): DashboardSettings {
     excludedStaffIds: row?.excluded_staff_ids ?? DEFAULTS.excludedStaffIds,
     showPartnersInTimesheets:
       row?.show_partners_in_timesheets ?? DEFAULTS.showPartnersInTimesheets,
+    chargeRatePerHour: row?.charge_rate_per_hour ?? DEFAULTS.chargeRatePerHour,
+    costRatePerHour: row?.cost_rate_per_hour ?? DEFAULTS.costRatePerHour,
   };
 }
 
@@ -47,7 +58,7 @@ async function readFromDatabase(): Promise<DashboardSettings> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("app_settings")
-    .select("partner_name, excluded_staff_ids, show_partners_in_timesheets")
+    .select("partner_name, excluded_staff_ids, show_partners_in_timesheets, charge_rate_per_hour, cost_rate_per_hour")
     .eq("id", ROW_ID)
     .maybeSingle<AppSettingsRow>();
 
@@ -71,6 +82,8 @@ export const getSettings = cache(async function getSettings(): Promise<Dashboard
       excludedStaffIds: cached.excludedStaffIds ?? DEFAULTS.excludedStaffIds,
       showPartnersInTimesheets:
         cached.showPartnersInTimesheets ?? DEFAULTS.showPartnersInTimesheets,
+      chargeRatePerHour: cached.chargeRatePerHour ?? DEFAULTS.chargeRatePerHour,
+      costRatePerHour: cached.costRatePerHour ?? DEFAULTS.costRatePerHour,
     };
   }
 
@@ -103,6 +116,8 @@ export async function updateSettings(
       partner_name: next.partnerName,
       excluded_staff_ids: next.excludedStaffIds,
       show_partners_in_timesheets: next.showPartnersInTimesheets,
+      charge_rate_per_hour: next.chargeRatePerHour,
+      cost_rate_per_hour: next.costRatePerHour,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "id" },
