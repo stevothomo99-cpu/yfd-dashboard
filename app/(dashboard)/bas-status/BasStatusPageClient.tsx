@@ -494,7 +494,7 @@ function TaskCard({
             ) : null}
             {canComplete ? (
               <button type="button" disabled={busy} onClick={onComplete} style={completeButtonStyle}>
-                ✓ Complete
+                Mark complete
               </button>
             ) : null}
           </div>
@@ -581,14 +581,18 @@ const stageButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+// Deliberately styled as a dark, filled action button (same convention as
+// the To-Do list's own "Complete" button in TodoSection.tsx) rather than a
+// green checkmark pill -- an earlier version read as a status badge saying
+// the task already was complete, not as something to click.
 const completeButtonStyle: React.CSSProperties = {
   fontSize: "10.5px",
   fontWeight: 600,
   padding: "3px 8px",
   borderRadius: "6px",
-  border: "0.5px solid #1baf7a",
-  background: "#e9f9f2",
-  color: "#1a7a52",
+  border: "0.5px solid #111111",
+  background: "#111111",
+  color: "white",
   cursor: "pointer",
 };
 
