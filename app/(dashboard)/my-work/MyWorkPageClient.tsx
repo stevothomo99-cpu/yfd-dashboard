@@ -704,6 +704,7 @@ export default function MyWorkPageClient({
         <NewTaskModal
           onClose={() => setEditingTask(null)}
           onCreated={() => refreshTasks(staffId)}
+          onDeleted={() => refreshTasks(staffId)}
           clients={clients}
           staff={staffOptions}
           statuses={statuses}

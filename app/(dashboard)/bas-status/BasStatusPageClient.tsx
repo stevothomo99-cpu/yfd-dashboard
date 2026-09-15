@@ -395,6 +395,7 @@ export default function BasStatusPageClient({
           // just saved, at the cost of a full re-fetch rather than a
           // one-row patch.
           onCreated={() => router.refresh()}
+          onDeleted={() => router.refresh()}
           clients={clients}
           staff={staff}
           statuses={statuses}

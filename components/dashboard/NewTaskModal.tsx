@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
 import { BAS_TASK_TYPE_ID } from "@/lib/workOverview";
+import DeleteTaskDialog from "./DeleteTaskDialog";
 import type {
   BasStage,
   CustomerFile,
@@ -39,6 +40,10 @@ interface NewTaskModalProps {
   // from a specific client's tile drawer). Ignored once editTask is set --
   // an edit's client comes from the task itself.
   defaultClientId?: string;
+  // Called after a successful delete, alongside onClose -- lets the caller
+  // drop the task from its own list without a full refetch. Only relevant
+  // when editTask is set; there's nothing to delete on a task not yet created.
+  onDeleted?: () => void;
 }
 
 const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
@@ -76,7 +81,7 @@ function formatCompletedAt(iso: string): string {
 // Mounted/unmounted by the parent (only rendered while the modal is open),
 // so a fresh instance -- and fresh initial state below -- is all it takes to
 // reset the form each time it's opened; no reset-on-open effect needed.
-export default function NewTaskModal({ onClose, onCreated, clients, staff, statuses, taskTypes, editTask, defaultClientId }: NewTaskModalProps) {
+export default function NewTaskModal({ onClose, onCreated, clients, staff, statuses, taskTypes, editTask, defaultClientId, onDeleted }: NewTaskModalProps) {
   const isEdit = Boolean(editTask);
 
   // If the task being edited is on a client outside the (already-scoped)
@@ -108,6 +113,8 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
   const [details, setDetails] = useState(editTask?.details ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // The BAS/IAS approval-pipeline stage (see app/(dashboard)/bas-status/)
   // has its own side effects on transition -- temp-reassignment to Steve,
@@ -212,6 +219,43 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // A one-off task keeps a plain confirm() -- two choices are enough. A
+  // recurring one needs a third: cancel, this occurrence only, or the
+  // whole linked series (see DeleteTaskDialog and lib/workflow.ts's
+  // deleteTaskSeries) -- same pattern as My Work's own row-level delete.
+  async function deleteTaskRequest(scope: "occurrence" | "series") {
+    if (!editTask) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workflow/tasks/${editTask.id}${scope === "series" ? "?scope=series" : ""}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to delete task");
+      }
+      onDeleted?.();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete task");
+    } finally {
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
+  }
+
+  function handleDeleteClick() {
+    if (!editTask) return;
+    if (editTask.recurrence === "none") {
+      if (window.confirm(`Delete "${editTask.title}"? This can't be undone.`)) {
+        deleteTaskRequest("occurrence");
+      }
+      return;
+    }
+    setConfirmingDelete(true);
   }
 
   async function handleBasStageTransition(stage: BasStage) {
@@ -497,16 +541,33 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
             <ClientReferenceSection notes={clientNotes} files={clientFiles} loading={loadingClientRefs} />
           ) : null}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>
-            <button type="button" onClick={onClose} style={secondaryButtonStyle}>
-              Cancel
-            </button>
-            <button type="submit" disabled={submitting} style={{ ...primaryButtonStyle, opacity: submitting ? 0.6 : 1 }}>
-              {submitting ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save changes" : "Create task"}
-            </button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginTop: "6px" }}>
+            {isEdit ? (
+              <button type="button" onClick={handleDeleteClick} disabled={deleting} style={{ ...deleteButtonStyle, opacity: deleting ? 0.6 : 1 }}>
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            ) : (
+              <span />
+            )}
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+                Cancel
+              </button>
+              <button type="submit" disabled={submitting} style={{ ...primaryButtonStyle, opacity: submitting ? 0.6 : 1 }}>
+                {submitting ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save changes" : "Create task"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
+
+      {confirmingDelete && editTask ? (
+        <DeleteTaskDialog
+          task={editTask}
+          onClose={() => setConfirmingDelete(false)}
+          onConfirm={(scope) => deleteTaskRequest(scope)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -641,5 +702,16 @@ const secondaryButtonStyle: React.CSSProperties = {
   background: "white",
   color: "#444441",
   border: "0.5px solid #e1e0d9",
+  cursor: "pointer",
+};
+
+const deleteButtonStyle: React.CSSProperties = {
+  fontSize: "12px",
+  fontWeight: 500,
+  padding: "8px 12px",
+  borderRadius: "999px",
+  background: "none",
+  color: "#c0392b",
+  border: "none",
   cursor: "pointer",
 };
