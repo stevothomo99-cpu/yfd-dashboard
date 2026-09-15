@@ -155,7 +155,7 @@ export default function RevenueByClientPageClient({
     <div>
       <PageHeader
         title="Revenue by Client"
-        subtitle="Hours logged (XPM) vs. hours budgeted (invoiced revenue ÷ charge rate), plus average monthly cost and average hour cost vs. income."
+        subtitle="Hours logged (XPM) vs. hours budgeted (invoiced revenue ÷ charge rate), plus average monthly cost and average hour cost vs. income. Income is real invoiced revenue from Xero Accounting, matched to each client by exact name."
       />
 
       <div
@@ -224,6 +224,7 @@ export default function RevenueByClientPageClient({
         >
           <div style={{ flex: 1 }}>Client</div>
           <ReportHeadCell>Hours logged</ReportHeadCell>
+          <ReportHeadCell>Income</ReportHeadCell>
           <ReportHeadCell>Hours budgeted</ReportHeadCell>
           <ReportHeadCell>Avg monthly cost</ReportHeadCell>
           <ReportHeadCell>Avg hour cost</ReportHeadCell>
@@ -242,6 +243,7 @@ export default function RevenueByClientPageClient({
             >
               <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{r.name}</div>
               <ReportCell>{r.hoursLogged.toFixed(1)}</ReportCell>
+              <ReportCell>{fmtCurrency(r.revenue)}</ReportCell>
               <ReportCell>{r.hoursBudgeted.toFixed(1)}</ReportCell>
               <ReportCell>{fmtCurrency(r.avgMonthlyCost)}</ReportCell>
               <ReportCell dim>{fmtCurrency(costRate)}</ReportCell>
