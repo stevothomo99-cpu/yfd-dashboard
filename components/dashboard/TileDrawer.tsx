@@ -99,6 +99,7 @@ export default function TileDrawer({
   const [editingTask, setEditingTask] = useState<TaskWithDetails | null>(null);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [showApplyTemplate, setShowApplyTemplate] = useState(false);
+  const [showNewTask, setShowNewTask] = useState(false);
 
   async function refreshTasks() {
     if (!tile) return;
@@ -400,6 +401,9 @@ export default function TileDrawer({
             </div>
 
             <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+              <button type="button" onClick={() => setShowNewTask(true)} style={ghostButtonStyle}>
+                Add task
+              </button>
               <button type="button" onClick={() => setShowSaveTemplate(true)} style={ghostButtonStyle}>
                 Save tasks as template
               </button>
@@ -613,6 +617,18 @@ export default function TileDrawer({
           statuses={statuses}
           taskTypes={taskTypes}
           editTask={editingTask}
+        />
+      ) : null}
+
+      {showNewTask && tile ? (
+        <NewTaskModal
+          onClose={() => setShowNewTask(false)}
+          onCreated={refreshTasks}
+          clients={clients}
+          staff={staff}
+          statuses={statuses}
+          taskTypes={taskTypes}
+          defaultClientId={tile.id}
         />
       ) : null}
 
