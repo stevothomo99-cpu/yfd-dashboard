@@ -160,6 +160,14 @@ function EmployeeRow({
       >
         <div style={{ fontSize: "11px", color: "#888780", width: "12px" }}>{expanded ? "▾" : "▸"}</div>
         <div style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: "#111111" }}>{staff.name}</div>
+        <Cell strong>
+          {(
+            utilisation.clientHours +
+            utilisation.internalOtherHours +
+            utilisation.leaveHours +
+            utilisation.idleHours
+          ).toFixed(1)}
+        </Cell>
         <Cell>{utilisation.clientHours.toFixed(1)}</Cell>
         <Cell dim>{utilisation.internalOtherHours.toFixed(1)}</Cell>
         <Cell dim>{utilisation.leaveHours.toFixed(1)}</Cell>
@@ -516,6 +524,7 @@ export default function TimesheetsPageClient({
         >
           <div style={{ width: "12px" }} />
           <div style={{ flex: 1 }}>Employee</div>
+          <HeadCell>Total</HeadCell>
           <HeadCell>Billable</HeadCell>
           <HeadCell>Admin/meetings</HeadCell>
           <HeadCell>Leave</HeadCell>
@@ -564,6 +573,14 @@ export default function TimesheetsPageClient({
             >
               <div style={{ width: "12px" }} />
               <div style={{ flex: 1 }}>Total</div>
+              <Cell strong>
+                {(
+                  tableTotals.clientHours +
+                  tableTotals.internalOtherHours +
+                  tableTotals.leaveHours +
+                  tableTotals.idleHours
+                ).toFixed(1)}
+              </Cell>
               <Cell>{tableTotals.clientHours.toFixed(1)}</Cell>
               <Cell>{tableTotals.internalOtherHours.toFixed(1)}</Cell>
               <Cell>{tableTotals.leaveHours.toFixed(1)}</Cell>
