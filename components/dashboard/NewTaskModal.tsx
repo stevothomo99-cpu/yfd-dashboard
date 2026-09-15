@@ -35,6 +35,10 @@ interface NewTaskModalProps {
   // pre-scoped by the caller (the server-side permission check is the real
   // boundary either way).
   editTask?: TaskWithDetails;
+  // Pre-selects the client dropdown when creating a fresh task (e.g. opened
+  // from a specific client's tile drawer). Ignored once editTask is set --
+  // an edit's client comes from the task itself.
+  defaultClientId?: string;
 }
 
 const RECURRENCE_OPTIONS: { value: RecurrenceInterval; label: string }[] = [
@@ -72,7 +76,7 @@ function formatCompletedAt(iso: string): string {
 // Mounted/unmounted by the parent (only rendered while the modal is open),
 // so a fresh instance -- and fresh initial state below -- is all it takes to
 // reset the form each time it's opened; no reset-on-open effect needed.
-export default function NewTaskModal({ onClose, onCreated, clients, staff, statuses, taskTypes, editTask }: NewTaskModalProps) {
+export default function NewTaskModal({ onClose, onCreated, clients, staff, statuses, taskTypes, editTask, defaultClientId }: NewTaskModalProps) {
   const isEdit = Boolean(editTask);
 
   // If the task being edited is on a client outside the (already-scoped)
@@ -93,7 +97,7 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
     [clientsWithCurrent],
   );
 
-  const [clientId, setClientId] = useState(editTask?.customerId ?? "");
+  const [clientId, setClientId] = useState(editTask?.customerId ?? defaultClientId ?? "");
   const [title, setTitle] = useState(editTask?.title ?? "");
   const [typeId, setTypeId] = useState(editTask?.typeId ?? "");
   const [statusId, setStatusId] = useState(() => editTask?.statusId ?? defaultStatusId(statuses));
