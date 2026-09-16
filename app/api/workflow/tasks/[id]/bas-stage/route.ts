@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { canModifyTask, getAllTasks, getStaffByEmail, getTaskById, setBasStage } from "@/lib/workflow";
+import { canModifyTask, getAllTasks, getStaffByEmail, getTaskById, listStaff, setBasStage } from "@/lib/workflow";
 import { BAS_TASK_TYPE_ID } from "@/lib/workOverview";
 import { isResendConfigured, sendEmail } from "@/lib/resend";
 import type { BasStage } from "@/types/workflow";
@@ -137,6 +137,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ].join("\n");
 
       await sendEmail({ to: APPROVER_EMAIL, subject, text, html });
+    }
+  }
+
+  // Landing on Waiting on Customer used to only ever notify the approver
+  // (Steve) via the Ready for Approval email above -- the assignee, whose
+  // job it actually is to follow up once the client responds, never heard
+  // about it. Notify them here too, same best-effort pattern as the queue
+  // email: no assignee (or no staff email on file) just means nobody to
+  // send it to, not an error.
+  if (stage === "waiting_on_customer" && updated.assigneeId) {
+    const allStaff = await listStaff();
+    const assignee = allStaff.find((s) => s.id === updated.assigneeId);
+    if (!assignee?.email) {
+      console.log(`[bas-stage] No email on file for assignee of "${updated.title}" -- skipping notification`);
+    } else if (!isResendConfigured()) {
+      console.log(
+        `[bas-stage] Resend not configured -- would have emailed ${assignee.email} that "${updated.title}" is now Waiting on Customer`
+      );
+    } else {
+      const subject = `Waiting on customer: ${updated.customerName} — ${updated.title}`;
+      const text = `${updated.customerName} — ${updated.title} (due ${formatDue(updated.dueDate)}) has been sent to the client and is now Waiting on Customer.`;
+      const html = `<p><strong>${escapeHtml(updated.customerName)} — ${escapeHtml(updated.title)}</strong> (due ${formatDue(updated.dueDate)}) has been sent to the client and is now Waiting on Customer.</p>`;
+      await sendEmail({ to: assignee.email, subject, text, html });
     }
   }
 
