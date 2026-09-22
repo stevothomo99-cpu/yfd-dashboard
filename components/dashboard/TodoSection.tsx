@@ -391,8 +391,21 @@ export default function TodoSection({ allClients, staff, currentUserEmail }: Tod
               confirmed.map((t) => {
                 const isDone = t.status === "done";
                 const isOverdue = Boolean(!isDone && t.dueDate && t.dueDate < today);
+                const openRow = () => setEditing({ todo: t, mode: "edit" });
                 return (
-                  <div key={t.id} style={rowStyle(CONFIRMED_COLUMNS, isOverdue ? "overdue" : "normal")}>
+                  <div
+                    key={t.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={openRow}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openRow();
+                      }
+                    }}
+                    style={{ ...rowStyle(CONFIRMED_COLUMNS, isOverdue ? "overdue" : "normal"), cursor: "pointer" }}
+                  >
                     <Cell>
                       <span style={nameStyle(isDone)}>{todoDisplayName(t)}</span>
                     </Cell>
@@ -410,16 +423,34 @@ export default function TodoSection({ allClients, staff, currentUserEmail }: Tod
                     <Actions>
                       <button
                         type="button"
-                        onClick={() => handleSetDone(t, !isDone)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetDone(t, !isDone);
+                        }}
                         disabled={busyId === t.id}
                         style={isDone ? ghostButtonStyle : primaryButtonStyle}
                       >
                         {isDone ? "Reopen" : "Complete"}
                       </button>
-                      <button type="button" onClick={() => setEditing({ todo: t, mode: "edit" })} style={ghostButtonStyle}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditing({ todo: t, mode: "edit" });
+                        }}
+                        style={ghostButtonStyle}
+                      >
                         Edit
                       </button>
-                      <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDiscard(t);
+                        }}
+                        disabled={busyId === t.id}
+                        style={ghostButtonStyle}
+                      >
                         Discard
                       </button>
                     </Actions>
@@ -451,24 +482,54 @@ export default function TodoSection({ allClients, staff, currentUserEmail }: Tod
                 {filtersActive ? "Nothing matches these filters." : "Nothing to confirm."}
               </EmptyRow>
             ) : (
-              pending.map((t) => (
-                <div key={t.id} style={rowStyle(PENDING_COLUMNS, "pending")}>
-                  <div style={{ minWidth: 0 }}>
-                    <span style={nameStyle(false)}>{todoDisplayName(t)}</span>
-                    <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {sourceLabel(t, currentUserEmail)} · {fmtReceived(t.createdAt)}
+              pending.map((t) => {
+                const openRow = () => setEditing({ todo: t, mode: "populate" });
+                return (
+                  <div
+                    key={t.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={openRow}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openRow();
+                      }
+                    }}
+                    style={{ ...rowStyle(PENDING_COLUMNS, "pending"), cursor: "pointer" }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <span style={nameStyle(false)}>{todoDisplayName(t)}</span>
+                      <div style={{ fontSize: "11px", color: "#888780", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {sourceLabel(t, currentUserEmail)} · {fmtReceived(t.createdAt)}
+                      </div>
                     </div>
+                    <Actions>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openRow();
+                        }}
+                        style={primaryButtonStyle}
+                      >
+                        Create
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDiscard(t);
+                        }}
+                        disabled={busyId === t.id}
+                        style={ghostButtonStyle}
+                      >
+                        Discard
+                      </button>
+                    </Actions>
                   </div>
-                  <Actions>
-                    <button type="button" onClick={() => setEditing({ todo: t, mode: "populate" })} style={primaryButtonStyle}>
-                      Create
-                    </button>
-                    <button type="button" onClick={() => handleDiscard(t)} disabled={busyId === t.id} style={ghostButtonStyle}>
-                      Discard
-                    </button>
-                  </Actions>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </Tile>
