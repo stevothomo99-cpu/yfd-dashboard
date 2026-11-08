@@ -17,13 +17,17 @@ export async function GET(request: NextRequest) {
   if (!client) {
     return NextResponse.json({ error: "?client=<name or partial name> is required" }, { status: 400 });
   }
+  // Bypasses the broken WorkItems-based client lookup (ClientName isn't
+  // filterable in this tenant -- see diagnoseClientNotes's comment) when the
+  // caller already has the client's real Karbon key.
+  const key = request.nextUrl.searchParams.get("key") ?? undefined;
 
   if (!isKarbonConfigured()) {
     return NextResponse.json({ error: "KARBON_API_KEY is not set" }, { status: 500 });
   }
 
   try {
-    const result = await diagnoseClientNotes(client);
+    const result = await diagnoseClientNotes(client, key);
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof KarbonNotConfiguredError) {
