@@ -148,11 +148,23 @@ export interface KarbonNotesDiagnostic {
 // Tries every plausible shape a live tenant might actually support, since an
 // undocumented $filter or $expand sometimes still works even when the
 // reference guide doesn't call it out.
-export async function diagnoseClientNotes(clientNameQuery: string): Promise<KarbonNotesDiagnostic> {
+//
+// knownClientKey bypasses the WorkItems-based lookup in Step 1 -- confirmed
+// live that ClientName isn't a filterable property on /WorkItems in this
+// tenant (400, code 4002), so that lookup never succeeds on its own. Pass a
+// client's real Karbon key (e.g. copied from Settings -> Karbon Import, or
+// from a WorkItem's raw ClientKey field) to test the key-based Notes/
+// Organizations attempts directly instead.
+export async function diagnoseClientNotes(
+  clientNameQuery: string,
+  knownClientKey?: string
+): Promise<KarbonNotesDiagnostic> {
   if (!isKarbonConfigured()) throw new KarbonNotConfiguredError();
 
   const escaped = clientNameQuery.replace(/'/g, "''");
-  let matchedClient: KarbonNotesDiagnostic["matchedClient"] = null;
+  let matchedClient: KarbonNotesDiagnostic["matchedClient"] = knownClientKey
+    ? { clientKey: knownClientKey, clientName: clientNameQuery }
+    : null;
   const attempts: KarbonNotesDiagnosticAttempt[] = [];
 
   async function attempt(label: string, url: string): Promise<Record<string, unknown> | null> {
@@ -173,17 +185,20 @@ export async function diagnoseClientNotes(clientNameQuery: string): Promise<Karb
 
   // Step 1: resolve the client's real Karbon key from a WorkItem, since
   // that's the only place this codebase already confirms ClientKey/ClientName
-  // pairing live (see fetchKarbonTasks/fetchKarbonWorkItems above).
-  const workItemsPage = await attempt(
-    "Find client via WorkItems",
-    `/WorkItems?$filter=${encodeURIComponent(`contains(ClientName,'${escaped}')`)}&$top=1`
-  );
-  const firstRow = (workItemsPage?.value as Record<string, unknown>[] | undefined)?.[0];
-  if (firstRow) {
-    matchedClient = {
-      clientKey: String(firstRow.ClientKey ?? ""),
-      clientName: String(firstRow.ClientName ?? ""),
-    };
+  // pairing live (see fetchKarbonTasks/fetchKarbonWorkItems above). Skipped
+  // entirely when the caller already supplied knownClientKey.
+  if (!knownClientKey) {
+    const workItemsPage = await attempt(
+      "Find client via WorkItems",
+      `/WorkItems?$filter=${encodeURIComponent(`contains(ClientName,'${escaped}')`)}&$top=1`
+    );
+    const firstRow = (workItemsPage?.value as Record<string, unknown>[] | undefined)?.[0];
+    if (firstRow) {
+      matchedClient = {
+        clientKey: String(firstRow.ClientKey ?? ""),
+        clientName: String(firstRow.ClientName ?? ""),
+      };
+    }
   }
 
   // Step 2: every plausible way a live tenant might expose notes for that
