@@ -24,6 +24,10 @@
     {
       "path": "/api/reports/timesheet-followup",
       "schedule": "0 2 * * 1"
+    },
+    {
+      "path": "/api/reports/email-domain-health",
+      "schedule": "0 20 * * *"
     }
   ]
 }
