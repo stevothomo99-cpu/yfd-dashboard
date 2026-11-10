@@ -143,6 +143,13 @@ export default function ResetPasswordPage() {
         });
       }
 
+      // This page's whole point is a short-lived Supabase Auth session in
+      // the browser to redeem the reset token -- nothing after this point
+      // needs it, and leaving it live (persistSession defaults to true)
+      // meant it sat in localStorage auto-refreshing indefinitely. Signing
+      // out clears it before redirecting to the app's own NextAuth login.
+      await client.auth.signOut();
+
       setStatus("done");
       setTimeout(() => router.push("/login"), 2000);
     } catch {
