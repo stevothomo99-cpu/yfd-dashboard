@@ -1,25 +1,21 @@
 import { NextResponse, NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { addCustomerNote, getCustomerNotes } from "@/lib/workflow";
+import { authorizeClientAccess } from "@/lib/routeAuth";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
   const { id } = await params;
+  const authz = await authorizeClientAccess(id);
+  if (authz instanceof NextResponse) return authz;
+
   const notes = await getCustomerNotes(id);
   return NextResponse.json({ notes });
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
   const { id } = await params;
+  const authz = await authorizeClientAccess(id);
+  if (authz instanceof NextResponse) return authz;
+
   const body = (await request.json()) as { body?: string; title?: string };
   const text = body.body?.trim();
   if (!text) {
@@ -27,8 +23,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
   const title = body.title?.trim() || null;
 
-  const authorName = session.user.name ?? session.user.email ?? "Unknown";
-  const note = await addCustomerNote(id, authorName, session.user.email ?? null, text, title);
+  const authorName = authz.session.user.name ?? authz.session.user.email ?? "Unknown";
+  const note = await addCustomerNote(id, authorName, authz.session.user.email ?? null, text, title);
   if (!note) {
     return NextResponse.json({ error: "Failed to save note" }, { status: 500 });
   }

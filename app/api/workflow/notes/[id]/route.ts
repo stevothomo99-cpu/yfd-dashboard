@@ -1,16 +1,21 @@
 import { NextResponse, NextRequest } from "next/server";
-import { auth } from "@/auth";
-import { setCustomerNotePinned } from "@/lib/workflow";
+import { getCustomerIdForNote, setCustomerNotePinned } from "@/lib/workflow";
+import { authorizeClientAccess } from "@/lib/routeAuth";
 
 // Toggles a note's pinned state -- keyed by note id directly (not nested
-// under a customer) since that's all this operation needs.
+// under a customer), so the scope check has to resolve which client the
+// note belongs to first (see getCustomerIdForNote) before confirming the
+// caller has access to that client.
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
   const { id } = await params;
+
+  const customerId = await getCustomerIdForNote(id);
+  if (!customerId) {
+    return NextResponse.json({ error: "Note not found" }, { status: 404 });
+  }
+  const authz = await authorizeClientAccess(customerId);
+  if (authz instanceof NextResponse) return authz;
+
   const body = (await request.json()) as { pinned?: boolean };
   if (typeof body.pinned !== "boolean") {
     return NextResponse.json({ error: "pinned (boolean) is required" }, { status: 400 });

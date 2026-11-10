@@ -608,6 +608,29 @@ export async function canModifyTask(staff: WorkflowStaff, taskId: string): Promi
   return false;
 }
 
+// Whether a non-admin staff member may access customerId's data at all
+// (notes, files, jobs, tasks) -- same Partner/Manager/Staff scoping as task
+// creation (see getClientsInScopeForStaff). Callers are responsible for
+// bypassing this entirely for admins, same convention as canModifyTask.
+export async function canAccessClient(staff: WorkflowStaff, customerId: string): Promise<boolean> {
+  const scopedClients = await getClientsInScopeForStaff(staff);
+  return scopedClients.some((c) => c.id === customerId);
+}
+
+// The customer a note belongs to, so a caller can scope-check a note-level
+// action (e.g. toggling pinned) before it touches the row -- the pin route
+// only ever receives a note id, not the client it's on.
+export async function getCustomerIdForNote(noteId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_notes")
+    .select("customer_id")
+    .eq("id", noteId)
+    .maybeSingle<{ customer_id: string }>();
+  if (error || !data) return null;
+  return data.customer_id;
+}
+
 export const listStatuses = cache(async function listStatuses(): Promise<WorkflowStatus[]> {
   const rows = await cachedStatusRows();
   return [...rows]
