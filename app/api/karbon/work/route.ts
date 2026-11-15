@@ -6,6 +6,7 @@ import {
 } from "@/lib/karbon";
 import { getSettings } from "@/lib/settings";
 import { WORK_ITEMS } from "@/lib/mock";
+import { requireSession } from "@/lib/routeAuth";
 import type { KarbonWorkItem } from "@/types/karbon";
 
 interface ResponseBody {
@@ -57,10 +58,15 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
   }
 }
 
+// Was previously reachable by anyone, logged in or not.
 export async function GET() {
+  const denied = await requireSession();
+  if (denied) return denied;
   return handle(false);
 }
 
 export async function POST() {
+  const denied = await requireSession();
+  if (denied) return denied;
   return handle(true);
 }

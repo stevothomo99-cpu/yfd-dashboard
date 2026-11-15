@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { verifyDashboardUserPassword } from "@/lib/supabase";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 interface MfaCheckRequest {
   username: string;
@@ -15,6 +16,13 @@ export async function POST(request: NextRequest) {
     const { username, password } = (await request.json()) as MfaCheckRequest;
 
     if (!username || !password) {
+      return NextResponse.json({ valid: false });
+    }
+
+    // Was previously uncapped, so this endpoint doubled as a free password
+    // oracle. Same window/limit as the login attempt itself.
+    const { limited } = await checkRateLimit(`mfa-check:${username.trim().toLowerCase()}`, 10, 15 * 60);
+    if (limited) {
       return NextResponse.json({ valid: false });
     }
 

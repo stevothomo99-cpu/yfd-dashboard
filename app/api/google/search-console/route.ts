@@ -1,33 +1,13 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getSearchConsoleMetrics } from "@/lib/google";
+import { requireAdmin } from "@/lib/routeAuth";
 
-interface ResponseBody {
-  siteMargin: {
-    clicks: number;
-    impressions: number;
-    ctr: number;
-    avgPosition: number;
-    topQueries: Array<{ query: string; clicks: number; impressions: number }>;
-  } | null;
-  focablyED: {
-    clicks: number;
-    impressions: number;
-    ctr: number;
-    avgPosition: number;
-    topQueries: Array<{ query: string; clicks: number; impressions: number }>;
-  } | null;
-  yfd: {
-    clicks: number;
-    impressions: number;
-    ctr: number;
-    avgPosition: number;
-    topQueries: Array<{ query: string; clicks: number; impressions: number }>;
-  } | null;
-  error?: string;
-  lastUpdated: string;
-}
+// Feeds the admin-only "Business KPIs" page (/personal) -- was previously
+// reachable by anyone, logged in or not.
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
 
-export async function GET(request: NextRequest): Promise<NextResponse<ResponseBody>> {
   try {
     const days = request.nextUrl.searchParams.get("days")
       ? parseInt(request.nextUrl.searchParams.get("days")!)

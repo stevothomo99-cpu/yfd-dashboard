@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHubSpotDeals, type HubSpotDeal } from "@/lib/hubspot";
+import { requireAdmin } from "@/lib/routeAuth";
 
 export interface PipelineMetrics {
   newLeads: number;
@@ -122,13 +123,19 @@ async function loadMetrics(): Promise<NextResponse<ResponseBody>> {
   }
 }
 
-export async function GET(): Promise<NextResponse<ResponseBody>> {
+// Feeds the admin-only "Business KPIs" page (/personal) -- was previously
+// reachable by anyone, logged in or not.
+export async function GET(): Promise<NextResponse> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   return loadMetrics();
 }
 
 // The dashboard's "Refresh" button POSTs here -- there was previously no
 // handler for that at all (a plain 405), since HubSpot is fetched live on
 // every call anyway and there's nothing to invalidate.
-export async function POST(): Promise<NextResponse<ResponseBody>> {
+export async function POST(): Promise<NextResponse> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   return loadMetrics();
 }

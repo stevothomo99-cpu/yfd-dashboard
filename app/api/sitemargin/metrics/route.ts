@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSiteMarginSubscriptionMetrics } from "@/lib/sitemargin";
+import { requireAdmin } from "@/lib/routeAuth";
 import type { ChurnRange } from "@/lib/utils";
 
 const VALID_RANGES: ChurnRange[] = ["all", "12m", "fy", "month", "week", "24h"];
 
-interface ResponseBody {
-  totalOrganizations: number;
-  activeTrials: number;
-  activeSubscriptions: number;
-  trialConversionRate: number;
-  canceledOrganizations: number;
-  pastDueOrganizations: number;
-  paidChurnInPeriod: number;
-  untrialChurnInPeriod: number;
-  lastUpdated: string;
-  note?: string;
-  error?: string;
-}
+// Feeds the admin-only "Business KPIs" page (/personal) -- was previously
+// reachable by anyone, logged in or not.
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
 
-export async function GET(request: NextRequest): Promise<NextResponse<ResponseBody>> {
   const rangeParam = request.nextUrl.searchParams.get("range");
   const range: ChurnRange = VALID_RANGES.includes(rangeParam as ChurnRange)
     ? (rangeParam as ChurnRange)

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getXpmTimesheets, isXpmConfigured, XpmNotConfiguredError } from "@/lib/xpm";
 import { getSettings } from "@/lib/settings";
 import { TIMESHEETS } from "@/lib/mock";
+import { requireSession } from "@/lib/routeAuth";
 import type { XpmTimesheet } from "@/types/xpm";
 
 // Same reasoning as the workflow sync: a cold timesheet fetch is the
@@ -57,10 +58,15 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
   }
 }
 
+// Was previously reachable by anyone, logged in or not.
 export async function GET() {
+  const denied = await requireSession();
+  if (denied) return denied;
   return handle(false);
 }
 
 export async function POST() {
+  const denied = await requireSession();
+  if (denied) return denied;
   return handle(true);
 }

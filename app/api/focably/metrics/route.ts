@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFocablySubscriptionMetrics } from "@/lib/focably";
+import { requireAdmin } from "@/lib/routeAuth";
 import type { ChurnRange } from "@/lib/utils";
 
 const VALID_RANGES: ChurnRange[] = ["all", "12m", "fy", "month", "week", "24h"];
 
-interface ResponseBody {
-  totalUsers: number;
-  paidUsers: number;
-  freemiumUsers: number;
-  nonActiveUsers: number;
-  paidChurnInPeriod: number;
-  unpaidChurnInPeriod: number;
-  totalChurnInPeriod: number;
-  churnRate: number;
-  winBackCandidates: number;
-  lastUpdated: string;
-  error?: string;
-}
+// Feeds the admin-only "Business KPIs" page (/personal) -- was previously
+// reachable by anyone, logged in or not.
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
 
-export async function GET(request: NextRequest): Promise<NextResponse<ResponseBody>> {
   const rangeParam = request.nextUrl.searchParams.get("range");
   const range: ChurnRange = VALID_RANGES.includes(rangeParam as ChurnRange)
     ? (rangeParam as ChurnRange)

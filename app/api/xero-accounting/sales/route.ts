@@ -5,6 +5,7 @@ import { getSettings } from "@/lib/settings";
 import { listStaff } from "@/lib/workflow";
 import { computeTotalClientHoursInRange } from "@/lib/workOverview";
 import { fyYearFor, fyRange } from "@/lib/utils";
+import { requireAdmin } from "@/lib/routeAuth";
 
 interface ResponseBody {
   monthTotal: number;
@@ -75,10 +76,16 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
   return NextResponse.json({ monthTotal, fyTotal, monthHours, fyHours, error });
 }
 
+// Feeds the admin-only "Business KPIs" page (/personal) -- was previously
+// reachable by anyone, logged in or not.
 export async function GET() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   return handle(false);
 }
 
 export async function POST() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   return handle(true);
 }

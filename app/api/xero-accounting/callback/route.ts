@@ -50,9 +50,33 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Confirms this code actually came from a flow this app started (see
+  // /api/xero-accounting/authorize), not one an attacker started elsewhere
+  // and lured an admin into completing here -- state was previously
+  // generated at /authorize but never checked, which made it cosmetic
+  // rather than real CSRF protection. Single-use: cleared either way once
+  // checked.
+  const expectedState = request.cookies.get("xero_accounting_oauth_state")?.value;
+  const returnedState = params.get("state");
+  const stateOk = Boolean(expectedState) && expectedState === returnedState;
+  const clearStateCookie = (response: Response): Response => {
+    response.headers.append("Set-Cookie", "xero_accounting_oauth_state=; Path=/api/xero-accounting/callback; Max-Age=0");
+    return response;
+  };
+  if (!stateOk) {
+    return clearStateCookie(
+      htmlPage(
+        "Invalid state",
+        `<h1>Invalid or missing OAuth state</h1><p class="err">This authorization response didn't match a flow started from this app. Start again from Settings instead of reusing an old link.</p>`,
+      ),
+    );
+  }
+
   const code = params.get("code");
   if (!code) {
-    return htmlPage("Missing code", `<h1>Missing authorization code</h1><p class="err">No ?code= param -- this route should only ever be hit by Xero's redirect after consent.</p>`);
+    return clearStateCookie(
+      htmlPage("Missing code", `<h1>Missing authorization code</h1><p class="err">No ?code= param -- this route should only ever be hit by Xero's redirect after consent.</p>`),
+    );
   }
 
   const redirectUri = `${request.nextUrl.origin}/api/xero-accounting/callback`;
@@ -67,9 +91,10 @@ export async function GET(request: NextRequest) {
       ? connections.map((c) => `<li><code>${c.tenantId}</code> — ${c.tenantName}</li>`).join("")
       : "<li>No connections returned -- did you select an organisation during consent?</li>";
 
-    return htmlPage(
-      "Xero Accounting connected",
-      `
+    return clearStateCookie(
+      htmlPage(
+        "Xero Accounting connected",
+        `
       <h1>Connected to Xero Accounting</h1>
       <p class="ok">Tokens exchanged and cached. Revenue reporting will start working as soon as <code>XERO_ACCOUNTING_TENANT_ID</code> is set below and the app redeploys.</p>
 
@@ -83,9 +108,10 @@ export async function GET(request: NextRequest) {
 
       <div class="warn">This refresh token is shown once and not logged anywhere else. Copy it now if you want the env var fallback.</div>
       `,
+      ),
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return htmlPage("Exchange failed", `<h1>Token exchange failed</h1><p class="err">${message}</p>`);
+    return clearStateCookie(htmlPage("Exchange failed", `<h1>Token exchange failed</h1><p class="err">${message}</p>`));
   }
 }

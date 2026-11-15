@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getKarbonTasks, isKarbonConfigured, KarbonNotConfiguredError } from "@/lib/karbon";
 import { getSettings } from "@/lib/settings";
 import { TASKS } from "@/lib/mock";
+import { requireSession } from "@/lib/routeAuth";
 import type { KarbonTask } from "@/types/karbon";
 
 interface ResponseBody {
@@ -48,10 +49,15 @@ async function handle(forceRefresh: boolean): Promise<NextResponse<ResponseBody>
   }
 }
 
+// Was previously reachable by anyone, logged in or not.
 export async function GET() {
+  const denied = await requireSession();
+  if (denied) return denied;
   return handle(false);
 }
 
 export async function POST() {
+  const denied = await requireSession();
+  if (denied) return denied;
   return handle(true);
 }

@@ -1,30 +1,13 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getAnalyticsMetrics } from "@/lib/google";
+import { requireAdmin } from "@/lib/routeAuth";
 
-interface ResponseBody {
-  siteMargin: {
-    sessions: number;
-    users: number;
-    pageviews: number;
-    bounceRate: number;
-  } | null;
-  focablyED: {
-    sessions: number;
-    users: number;
-    pageviews: number;
-    bounceRate: number;
-  } | null;
-  yfd: {
-    sessions: number;
-    users: number;
-    pageviews: number;
-    bounceRate: number;
-  } | null;
-  error?: string;
-  lastUpdated: string;
-}
+// Feeds the admin-only "Business KPIs" page (/personal) -- was previously
+// reachable by anyone, logged in or not.
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
 
-export async function GET(request: NextRequest): Promise<NextResponse<ResponseBody>> {
   try {
     const days = request.nextUrl.searchParams.get("days")
       ? parseInt(request.nextUrl.searchParams.get("days")!)
