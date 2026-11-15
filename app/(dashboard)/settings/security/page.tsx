@@ -16,6 +16,8 @@ export default function SecuritySettingsPage() {
   const [setup, setSetup] = useState<SetupResponse | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [disabling, setDisabling] = useState(false);
+  const [disablePassword, setDisablePassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -88,17 +90,24 @@ export default function SecuritySettingsPage() {
     }
   }
 
-  async function handleDisable() {
+  async function handleDisable(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/auth/mfa/disable", { method: "POST" });
+      const res = await fetch("/api/auth/mfa/disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: disablePassword }),
+      });
       const data = await res.json();
       if (!res.ok) {
         setMessage({ type: "error", text: data.error || "Failed to disable MFA." });
         return;
       }
       setMfaEnabled(false);
+      setDisabling(false);
+      setDisablePassword("");
       setMessage({ type: "success", text: "Two-factor authentication has been disabled." });
     } catch (err) {
       setMessage({ type: "error", text: "Failed to disable MFA." });
@@ -163,13 +172,48 @@ export default function SecuritySettingsPage() {
                 Two-factor authentication is enabled
               </span>
             </div>
-            <button
-              onClick={handleDisable}
-              disabled={busy}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-            >
-              {busy ? "Disabling…" : "Disable"}
-            </button>
+            {disabling ? (
+              <form onSubmit={handleDisable} className="space-y-4 max-w-xs">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Confirm your current password</label>
+                  <input
+                    type="password"
+                    value={disablePassword}
+                    onChange={(e) => setDisablePassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={busy || !disablePassword}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {busy ? "Disabling…" : "Confirm disable"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDisabling(false);
+                      setDisablePassword("");
+                    }}
+                    disabled={busy}
+                    className="px-4 py-2 bg-gray-100 text-gray-900 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                onClick={() => setDisabling(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Disable
+              </button>
+            )}
           </div>
         ) : enrolling && setup ? (
           <div>

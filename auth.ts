@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { authConfig } from "./auth.config";
 import { verifyDashboardUserPassword, getMfaSecret, recordDashboardUserLogin } from "./lib/supabase";
 import { verifyMfaCode } from "./lib/mfa";
+import { checkRateLimit } from "./lib/rateLimit";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -20,6 +21,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const submittedTotpCode = typeof creds?.totpCode === "string" ? creds.totpCode : "";
 
         if (!submittedUser || !submittedPass) return null;
+
+        // Unlimited login attempts previously had no cooldown at all.
+        // Keyed by submitted username, not IP -- this app sits behind
+        // shared office/VPN egress IPs.
+        const { limited } = await checkRateLimit(`login:${submittedUser.trim().toLowerCase()}`, 10, 15 * 60);
+        if (limited) return null;
 
         // Any user provisioned via /settings/users, backed by Supabase Auth
         // + the dashboard_users table.

@@ -26,3 +26,26 @@ export async function authorizeClientAccess(customerId: string): Promise<{ sessi
   }
   return { session };
 }
+
+// Shared by every route gated to admins only (the business-metrics routes
+// behind the admin-only "Business KPIs" page) -- same check several routes
+// in this codebase already duplicate per-file (app/api/settings/route.ts,
+// app/api/workflow/staff/route.ts, etc.), centralised here since this file
+// is already the home for route-level auth helpers.
+export async function requireAdmin(): Promise<NextResponse | null> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "admin") {
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+  }
+  return null;
+}
+
+// Shared by routes that only need "is someone logged in" -- no role or
+// per-client scoping, just not wide open to the internet.
+export async function requireSession(): Promise<NextResponse | null> {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+  return null;
+}

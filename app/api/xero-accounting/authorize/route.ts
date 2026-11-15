@@ -38,11 +38,25 @@ export async function GET(request: NextRequest) {
 
   const redirectUri = `${request.nextUrl.origin}/api/xero-accounting/callback`;
   const authorizeUrl = new URL("https://login.xero.com/identity/connect/authorize");
+  const state = crypto.randomUUID();
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("client_id", clientId);
   authorizeUrl.searchParams.set("redirect_uri", redirectUri);
   authorizeUrl.searchParams.set("scope", XERO_ACCOUNTING_SCOPES);
-  authorizeUrl.searchParams.set("state", crypto.randomUUID());
+  authorizeUrl.searchParams.set("state", state);
 
-  return NextResponse.redirect(authorizeUrl.toString());
+  // state was previously generated but never stored or checked at the
+  // callback -- cosmetic, not real CSRF protection. Stashed here in an
+  // httpOnly cookie so the callback can confirm the code it's exchanging
+  // actually came from a flow this app started, not one an attacker
+  // started and lured an admin into completing against this callback URL.
+  const response = NextResponse.redirect(authorizeUrl.toString());
+  response.cookies.set("xero_accounting_oauth_state", state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    maxAge: 600,
+    path: "/api/xero-accounting/callback",
+  });
+  return response;
 }

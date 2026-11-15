@@ -123,6 +123,36 @@ export function isKvConfigured(): boolean {
   return isConfigured();
 }
 
+// Fixed-window counter for rate limiting (INCR+EXPIRE). Fails open on a
+// Redis error -- returning 0 tells the caller "not limited" rather than
+// blocking every request while Redis is unreachable, same fail-open stance
+// as the rest of this module's Redis error handling.
+export async function incrementRateLimitCounter(key: string, windowSeconds: number): Promise<number> {
+  const k = nsKey(`ratelimit:${key}`);
+  if (!isConfigured()) {
+    const now = Date.now();
+    const entry = memory.get(k);
+    if (!entry || (entry.expiresAt !== null && entry.expiresAt < now)) {
+      memory.set(k, { value: 1, expiresAt: now + windowSeconds * 1000 });
+      return 1;
+    }
+    const count = (entry.value as number) + 1;
+    memory.set(k, { value: count, expiresAt: entry.expiresAt });
+    return count;
+  }
+  try {
+    const c = client();
+    const count = await c.incr(k);
+    if (count === 1) {
+      await c.expire(k, windowSeconds);
+    }
+    return count;
+  } catch (err) {
+    console.error(`[cache] Redis INCR failed for rate limit "${k}", failing open:`, err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
 // ─── Stale-while-revalidate ────────────────────────────────────────────
 // A plain TTL cache makes every expiry somebody's problem: the unlucky user
 // who arrives first after it lapses pays the full upstream cost (for XPM
