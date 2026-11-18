@@ -37,6 +37,10 @@ interface Props {
   // synced back to XPM -- see setCustomerManager's comment in lib/workflow.ts.
   isAdmin?: boolean;
   onManagerChanged?: (customerId: string, managerId: string | null, managerName: string | null) => void;
+  // Admin-only "Archive"/"Unarchive" control next to the close button --
+  // see setCustomerArchived's comment in lib/workflow.ts for what archiving
+  // does and doesn't affect.
+  onArchiveChanged?: (customerId: string, archived: boolean) => void;
 }
 
 function todayIso(): string {
@@ -104,6 +108,7 @@ export default function TileDrawer({
   clients,
   isAdmin,
   onManagerChanged,
+  onArchiveChanged,
 }: Props) {
   const [jobs, setJobs] = useState<JobWithManager[]>([]);
   // Collapsed by default -- Jobs is rarely the reason anyone opens this
@@ -118,6 +123,7 @@ export default function TileDrawer({
   const [reassigning, setReassigning] = useState(false);
   const [savingManager, setSavingManager] = useState(false);
   const [managerError, setManagerError] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
@@ -201,6 +207,27 @@ export default function TileDrawer({
       setManagerError(err instanceof Error ? err.message : "Failed to reassign client");
     } finally {
       setSavingManager(false);
+    }
+  }
+
+  async function handleArchiveToggle() {
+    if (!tile) return;
+    const nextArchived = !tile.archived;
+    setArchiving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workflow/customers/${tile.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: nextArchived }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update client");
+      onArchiveChanged?.(tile.id, nextArchived);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update client");
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -412,14 +439,37 @@ export default function TileDrawer({
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: "transparent", border: "none", fontSize: "22px", color: "#888780", cursor: "pointer", lineHeight: 1, padding: "4px 8px" }}
-            aria-label="Close"
-          >
-            ×
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={handleArchiveToggle}
+                disabled={archiving}
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  color: tile.archived ? "#0e7a4d" : "#888780",
+                  background: tile.archived ? "#e7f6ee" : "#f5f4f0",
+                  border: "0.5px solid " + (tile.archived ? "#1baf7a" : "#e1e0d9"),
+                  borderRadius: "999px",
+                  padding: "5px 11px",
+                  cursor: archiving ? "default" : "pointer",
+                  opacity: archiving ? 0.6 : 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {archiving ? "Saving…" : tile.archived ? "Unarchive" : "Archive"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ background: "transparent", border: "none", fontSize: "22px", color: "#888780", cursor: "pointer", lineHeight: 1, padding: "4px 8px" }}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         {error ? (

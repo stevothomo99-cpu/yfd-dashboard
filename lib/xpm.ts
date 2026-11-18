@@ -508,6 +508,22 @@ async function fetchActiveXpmClientsForPartner(partnerName: string): Promise<Xpm
   return clients.filter((c) => isActiveXpmClient(c) && c.accountManager?.name === partnerName);
 }
 
+function isDeletedXpmClient(c: XpmClientRecord): boolean {
+  return c.isDeleted === "Yes";
+}
+
+// Active OR archived (but not deleted) clients for the Partner -- used only
+// by the staff/customers/jobs sync (xpmSync.ts), which needs to see archived
+// clients too so it can mark them archived in the portal rather than quietly
+// deleting them the way it used to when they just dropped out of the
+// (active-only) list above. A client that's genuinely deleted in XPM is
+// still excluded here, same as fetchActiveXpmClientsForPartner.
+async function fetchNonDeletedXpmClientsForPartner(partnerName: string): Promise<XpmClientRecord[]> {
+  if (!partnerName) return [];
+  const clients = await fetchAllXpmClientRecords();
+  return clients.filter((c) => !isDeletedXpmClient(c) && c.accountManager?.name === partnerName);
+}
+
 function formatYyyyMmDd(d: Date): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -597,19 +613,28 @@ export async function fetchXpmClientsForPartner(partnerName: string): Promise<Xp
 // too -- exported (not just used internally) so the staff/customers/jobs
 // sync can assign a job to its client's manager when the job itself
 // doesn't set one directly (several automated/ad-hoc jobs have no manager
-// field at all).
+// field at all). Deliberately includes archived (not deleted) clients,
+// flagged via `archived` -- see fetchNonDeletedXpmClientsForPartner. This is
+// the one client-roster function the sync itself uses; every other caller
+// above stays on the active-only roster.
 export interface XpmClientWithManager {
   id: string;
   name: string;
   managerId: string | null;
+  archived: boolean;
 }
 
 export async function fetchXpmClientsWithManagerForPartner(
   partnerName: string,
 ): Promise<XpmClientWithManager[]> {
   if (!isXpmConfigured()) throw new XpmNotConfiguredError();
-  const clients = await fetchActiveXpmClientsForPartner(partnerName);
-  return clients.map((c) => ({ id: c.uuid, name: c.name, managerId: c.jobManager?.uuid ?? null }));
+  const clients = await fetchNonDeletedXpmClientsForPartner(partnerName);
+  return clients.map((c) => ({
+    id: c.uuid,
+    name: c.name,
+    managerId: c.jobManager?.uuid ?? null,
+    archived: c.isArchived === "Yes",
+  }));
 }
 
 // Whoever appears as a Partner-filtered client's `jobManager` -- this is

@@ -47,12 +47,15 @@ export default async function ClientsPage() {
   // needs (id/xpmClientId/name) except partnerId, which the modal's own
   // code never reads (only used to satisfy the type), so it's safe to
   // synthesize as null rather than fetching a second, full client list.
-  const clientsForModal: WorkflowCustomer[] = tiles.map((t) => ({
-    id: t.id,
-    xpmClientId: t.xpmClientId,
-    name: t.name,
-    partnerId: null,
-  }));
+  const clientsForModal: WorkflowCustomer[] = tiles
+    .filter((t) => !t.archived)
+    .map((t) => ({
+      id: t.id,
+      xpmClientId: t.xpmClientId,
+      name: t.name,
+      partnerId: null,
+      archived: false,
+    }));
 
   const clientNamesById: Record<string, string> = {};
   for (const t of tiles) {

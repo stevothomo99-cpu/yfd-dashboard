@@ -25,6 +25,7 @@ export interface WorkflowCustomer {
   xpmClientId: string | null;
   name: string;
   partnerId: string | null;
+  archived: boolean;
 }
 
 export interface WorkflowJob {
@@ -191,6 +192,10 @@ export interface ClientSummary {
   // Count of customer_notes rows against this client -- lets the tile grid
   // colour its "Notes" shortcut to show at a glance whether any exist.
   notesCount: number;
+  // "This client has moved on" -- hidden from the /clients grid and from
+  // new-task client pickers by default, but its existing jobs/tasks/notes/
+  // files are untouched. See setCustomerArchived in lib/workflow.ts.
+  archived: boolean;
 }
 
 export interface CustomerNote {

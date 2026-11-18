@@ -28,7 +28,9 @@ import {
 // the client roster from jobs instead (the original approach) missed
 // clients whose jobs happened to fall outside job.api/list's date window,
 // and 225 archived/deleted clients get returned by client.api/list
-// alongside the ~90 real active ones, so both flags are filtered out too.
+// alongside the ~90 real active ones -- deleted ones are filtered out
+// (fetchXpmClientsWithManagerForPartner), archived ones are kept and synced
+// with customers.archived set to true rather than being pruned below.
 
 export interface WorkflowSyncResult {
   partnerName: string;
@@ -36,6 +38,10 @@ export interface WorkflowSyncResult {
   staffRemoved: number;
   customersUpserted: number;
   customersRemoved: number;
+  // Of customersUpserted, how many are currently archived (per XPM's own
+  // isArchived flag) -- not a delta, just this sync's current count, so an
+  // admin can see at a glance whether something just got archived.
+  customersArchived: number;
   jobsUpserted: number;
   jobsRemoved: number;
 }
@@ -123,15 +129,19 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   const partnerLocalId = staffIdByXpmId.get(partnerRecord.uuid);
   if (!partnerLocalId) throw new Error("Partner staff upsert did not return an id.");
 
-  // -- Customers: every active client whose accountManager is the Partner
-  // (deduped by xpm_client_id, same reasoning as staff above) --
-  // manager_id is the client's own XPM jobManager -- stored on the client
-  // rather than only used as a per-job fallback, so /clients can show "who
-  // manages this client" without inferring it from the client's job list
-  // (which conflates service-line splits and stale legacy jobs).
+  // -- Customers: every client (active or archived, not deleted) whose
+  // accountManager is the Partner (deduped by xpm_client_id, same reasoning
+  // as staff above) -- manager_id is the client's own XPM jobManager --
+  // stored on the client rather than only used as a per-job fallback, so
+  // /clients can show "who manages this client" without inferring it from
+  // the client's job list (which conflates service-line splits and stale
+  // legacy jobs). `archived` mirrors the client's own isArchived flag in
+  // XPM -- see fetchXpmClientsWithManagerForPartner's comment -- so a client
+  // archived there gets archived here too instead of hard-deleted by the
+  // stale-customer prune below.
   const customerById = new Map<
     string,
-    { xpm_client_id: string; name: string; partner_id: string; manager_id: string | null }
+    { xpm_client_id: string; name: string; partner_id: string; manager_id: string | null; archived: boolean }
   >();
   for (const c of clients) {
     if (customerById.has(c.id)) continue;
@@ -140,6 +150,7 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
       name: c.name,
       partner_id: partnerLocalId,
       manager_id: c.managerId ? staffIdByXpmId.get(c.managerId) ?? null : null,
+      archived: c.archived,
     });
   }
   const customerUpserts = Array.from(customerById.values());
@@ -217,7 +228,11 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   // client that genuinely isn't in XPM yet), and that client needs to
   // survive every future resync, not get silently deleted by the next one.
   // Only prune a customer that WAS XPM-synced (has an xpm_client_id) but has
-  // since dropped out of the Partner's current active-client list.
+  // since dropped out of customerUpserts above -- which, since that list
+  // now includes archived clients too, only happens when a client is
+  // genuinely deleted in XPM or reassigned to a different Partner. An
+  // archived-in-XPM client is never in this set; it was upserted with
+  // archived: true instead.
   const staleCustomerIds = (existingCustomers ?? [])
     .filter((c) => c.xpm_client_id && !keepCustomerXpmIds.has(c.xpm_client_id))
     .map((c) => c.id);
@@ -267,6 +282,7 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     staffRemoved: staleStaffIds.length,
     customersUpserted: customerUpserts.length,
     customersRemoved: staleCustomerIds.length,
+    customersArchived: customerUpserts.filter((c) => c.archived).length,
     jobsUpserted: jobUpserts.length,
     jobsRemoved: staleJobIds.length,
   };
