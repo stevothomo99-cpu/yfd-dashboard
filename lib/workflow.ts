@@ -345,8 +345,9 @@ export async function setCustomerManager(
 // (searchClientsForPartner/getClientsForManager/listAllCustomers below).
 export async function setCustomerArchived(
   customerId: string,
-  archived: boolean
-): Promise<{ id: string; archived: boolean } | null> {
+  archived: boolean,
+  actorStaffId: string | null = null
+): Promise<{ id: string; archived: boolean; tasksCompleted: number } | null> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
     .from("customers")
@@ -359,8 +360,14 @@ export async function setCustomerArchived(
     console.error("[workflow] setCustomerArchived failed:", error.message);
     return null;
   }
+
+  // Only on the way into archived -- unarchiving deliberately does NOT
+  // reopen anything, since there's no way to tell which of those now-
+  // completed tasks genuinely still need doing vs. were legitimately done.
+  const tasksCompleted = archived ? await completeOpenTasksForCustomer(customerId, actorStaffId) : 0;
+
   await invalidateWorkflowReferenceCache();
-  return { id: data.id, archived: data.archived };
+  return { id: data.id, archived: data.archived, tasksCompleted };
 }
 
 // Clients attached to a Partner, optionally narrowed by a search string
@@ -1597,6 +1604,54 @@ export async function defaultOpenStatusId(): Promise<string | null> {
   const statuses = await listStatuses();
   const openStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => !s.isComplete);
   return openStatus?.id ?? statuses[0]?.id ?? null;
+}
+
+// The counterpart to defaultOpenStatusId above, for setCustomerArchived's
+// bulk-complete -- this system has exactly one is_complete status today
+// ("Completed"), but picked by sortOrder rather than assumed singular in
+// case that ever changes.
+async function defaultCompleteStatusId(): Promise<string | null> {
+  const statuses = await listStatuses();
+  const completeStatus = [...statuses].sort((a, b) => a.sortOrder - b.sortOrder).find((s) => s.isComplete);
+  return completeStatus?.id ?? null;
+}
+
+// Archiving a client ("they've moved on") shouldn't leave its outstanding
+// tasks sitting open forever -- they'd keep counting toward Overdue/In
+// progress tallies and the dashboard/daily-digest/BAS pipeline even though
+// nobody's meant to be working the client any more. Bulk-completes every
+// not-already-complete task directly (status + completion stamp only) --
+// deliberately NOT going through updateTask/generateNextOccurrence, since a
+// recurring task being archived away must not spawn its next occurrence.
+// actorStaffId is null for the automated XPM-resync path (see xpmSync.ts);
+// the manual archive button passes the admin's own staff id when it has one.
+export async function completeOpenTasksForCustomer(
+  customerId: string,
+  actorStaffId: string | null
+): Promise<number> {
+  const completeStatusId = await defaultCompleteStatusId();
+  if (!completeStatusId) {
+    console.error("[workflow] completeOpenTasksForCustomer: no complete status configured");
+    return 0;
+  }
+
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("tasks")
+    .update({
+      status_id: completeStatusId,
+      completed_at: new Date().toISOString(),
+      completed_by_staff_id: actorStaffId,
+    })
+    .eq("customer_id", customerId)
+    .neq("status_id", completeStatusId)
+    .select("id");
+
+  if (error) {
+    console.error("[workflow] completeOpenTasksForCustomer failed:", error.message);
+    return 0;
+  }
+  return data?.length ?? 0;
 }
 
 // Copies a task onto a (usually different) client: same title/type/

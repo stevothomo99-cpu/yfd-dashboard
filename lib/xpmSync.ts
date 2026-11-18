@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "./supabase";
 import { getSettings } from "./settings";
-import { invalidateWorkflowReferenceCache } from "./workflow";
+import { completeOpenTasksForCustomer, invalidateWorkflowReferenceCache } from "./workflow";
 import {
   fetchXpmJobsForPartner,
   fetchXpmClientsWithManagerForPartner,
@@ -42,6 +42,9 @@ export interface WorkflowSyncResult {
   // isArchived flag) -- not a delta, just this sync's current count, so an
   // admin can see at a glance whether something just got archived.
   customersArchived: number;
+  // How many outstanding tasks got auto-completed this sync because their
+  // client just crossed into archived -- see completeOpenTasksForCustomer.
+  tasksCompletedForNewlyArchived: number;
   jobsUpserted: number;
   jobsRemoved: number;
 }
@@ -155,6 +158,21 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   }
   const customerUpserts = Array.from(customerById.values());
 
+  // Fetched before the upsert below overwrites it -- needed to tell "just
+  // archived this sync" apart from "was already archived last sync", so a
+  // client's outstanding tasks only get swept once, right when it crosses
+  // over, not re-checked (harmlessly, but needlessly) on every future sync.
+  const { data: customersBeforeSync, error: customersBeforeSyncError } = await admin
+    .from("customers")
+    .select("id, xpm_client_id, archived")
+    .returns<(IdXpmIdRow & { archived: boolean })[]>();
+  if (customersBeforeSyncError) throw new Error(`Customer lookup failed: ${customersBeforeSyncError.message}`);
+  const wasArchivedByXpmId = new Map(
+    (customersBeforeSync ?? [])
+      .filter((c): c is typeof c & { xpm_client_id: string } => Boolean(c.xpm_client_id))
+      .map((c) => [c.xpm_client_id, c.archived]),
+  );
+
   const { data: upsertedCustomers, error: customerUpsertError } = await admin
     .from("customers")
     .upsert(customerUpserts, { onConflict: "xpm_client_id" })
@@ -164,6 +182,20 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   const customerIdByXpmId = new Map(
     (upsertedCustomers ?? []).map((c) => [c.xpm_client_id as string, c.id as string]),
   );
+
+  // Same reasoning as the manual Archive button (setCustomerArchived in
+  // lib/workflow.ts) -- a client that just became archived this sync
+  // shouldn't leave outstanding tasks sitting open, counting toward
+  // Overdue/In progress and the dashboard, now that nobody's meant to be
+  // working it.
+  const newlyArchivedLocalIds = clients
+    .filter((c) => c.archived && wasArchivedByXpmId.get(c.id) !== true)
+    .map((c) => customerIdByXpmId.get(c.id))
+    .filter((id): id is string => Boolean(id));
+  let tasksCompletedForNewlyArchived = 0;
+  for (const customerId of newlyArchivedLocalIds) {
+    tasksCompletedForNewlyArchived += await completeOpenTasksForCustomer(customerId, null);
+  }
 
   // -- Jobs (deduped by xpm_job_id, same reasoning as staff above). Manager
   // falls back to the job's client's jobManager when the job itself
@@ -216,11 +248,6 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   }
 
   const keepCustomerXpmIds = new Set(customerUpserts.map((c) => c.xpm_client_id));
-  const { data: existingCustomers, error: existingCustomersError } = await admin
-    .from("customers")
-    .select("id, xpm_client_id")
-    .returns<IdXpmIdRow[]>();
-  if (existingCustomersError) throw new Error(`Customer lookup failed: ${existingCustomersError.message}`);
 
   // A null xpm_client_id no longer means "leftover dummy trial data" -- the
   // Karbon Import mapping page can now create a bare client with no XPM
@@ -232,8 +259,9 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
   // now includes archived clients too, only happens when a client is
   // genuinely deleted in XPM or reassigned to a different Partner. An
   // archived-in-XPM client is never in this set; it was upserted with
-  // archived: true instead.
-  const staleCustomerIds = (existingCustomers ?? [])
+  // archived: true instead. Reuses customersBeforeSync (fetched above,
+  // before the upsert) rather than a second identical query.
+  const staleCustomerIds = (customersBeforeSync ?? [])
     .filter((c) => c.xpm_client_id && !keepCustomerXpmIds.has(c.xpm_client_id))
     .map((c) => c.id);
 
@@ -283,6 +311,7 @@ export async function syncWorkflowFromXpm(): Promise<WorkflowSyncResult> {
     customersUpserted: customerUpserts.length,
     customersRemoved: staleCustomerIds.length,
     customersArchived: customerUpserts.filter((c) => c.archived).length,
+    tasksCompletedForNewlyArchived,
     jobsUpserted: jobUpserts.length,
     jobsRemoved: staleJobIds.length,
   };

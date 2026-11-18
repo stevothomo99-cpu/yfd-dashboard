@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { setCustomerArchived, setCustomerManager } from "@/lib/workflow";
+import { getStaffByEmail, setCustomerArchived, setCustomerManager } from "@/lib/workflow";
 
 // Admin-only client edits: reassigning a client's Manager (a quick fix
 // tool, not synced back to XPM and not protected from the next "Save &
@@ -30,7 +30,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const archived = Boolean(body.archived);
-  const result = await setCustomerArchived(id, archived);
+  // Best-effort: an admin login with no linked staff row (not required to
+  // archive a client) just means tasksCompleted below gets stamped with no
+  // completed_by_staff_id, same as elsewhere in this file.
+  const actorStaff = session.user.email ? await getStaffByEmail(session.user.email) : null;
+  const result = await setCustomerArchived(id, archived, actorStaff?.id ?? null);
   if (!result) {
     return NextResponse.json({ error: "Failed to update client" }, { status: 500 });
   }
