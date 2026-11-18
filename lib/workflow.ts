@@ -1405,6 +1405,10 @@ interface CustomerNoteRow {
   created_at: string;
 }
 
+// file defaults to null -- the only caller that constructs a note without
+// immediately attaching its real file list is addCustomerNote (a single
+// fresh insert), which the notes route itself fills in right after if a
+// file was uploaded alongside it.
 function mapCustomerNote(row: CustomerNoteRow): CustomerNote {
   return {
     id: row.id,
@@ -1415,12 +1419,15 @@ function mapCustomerNote(row: CustomerNoteRow): CustomerNote {
     body: row.body,
     pinned: row.pinned,
     createdAt: row.created_at,
+    file: null,
   };
 }
 
 // Pinned notes first (most-recently-pinned first among those), then
 // everything else newest-first -- lets a Partner/Manager keep an important
-// note visible at the top of a growing list without it aging out.
+// note visible at the top of a growing list without it aging out. Each
+// note's attached file (if any) is fetched in the same pass, rather than
+// the drawer needing a second round trip per note.
 export async function getCustomerNotes(customerId: string): Promise<CustomerNote[]> {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
@@ -1435,7 +1442,25 @@ export async function getCustomerNotes(customerId: string): Promise<CustomerNote
     console.error("[workflow] getCustomerNotes failed:", error.message);
     return [];
   }
-  return (data ?? []).map(mapCustomerNote);
+  const notes = (data ?? []).map(mapCustomerNote);
+  if (notes.length === 0) return notes;
+
+  const { data: fileRows, error: filesError } = await admin
+    .from("customer_files")
+    .select("*")
+    .in(
+      "note_id",
+      notes.map((n) => n.id)
+    )
+    .returns<CustomerFileRow[]>();
+  if (filesError) {
+    console.error("[workflow] getCustomerNotes (attached files) failed:", filesError.message);
+    return notes;
+  }
+
+  const filesWithUrls = await attachSignedUrls((fileRows ?? []).map(mapCustomerFile));
+  const fileByNoteId = new Map(filesWithUrls.filter((f) => f.noteId).map((f) => [f.noteId as string, f]));
+  return notes.map((n) => ({ ...n, file: fileByNoteId.get(n.id) ?? null }));
 }
 
 export async function addCustomerNote(
@@ -1472,7 +1497,30 @@ export async function setCustomerNotePinned(noteId: string, pinned: boolean): Pr
     console.error("[workflow] setCustomerNotePinned failed:", error.message);
     return null;
   }
-  return mapCustomerNote(data);
+  // mapCustomerNote always defaults file to null -- re-attached here so
+  // toggling Pin doesn't make an existing attachment disappear from the
+  // caller's optimistic update (both drawers just splice this object
+  // straight into their notes list in place of the old one).
+  return { ...mapCustomerNote(data), file: await getFileForNote(data.id) };
+}
+
+// Single-note counterpart to getCustomerNotes' batched file lookup -- used
+// by setCustomerNotePinned, where only one note is ever in play.
+async function getFileForNote(noteId: string): Promise<CustomerFile | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_files")
+    .select("*")
+    .eq("note_id", noteId)
+    .maybeSingle<CustomerFileRow>();
+
+  if (error) {
+    console.error("[workflow] getFileForNote failed:", error.message);
+    return null;
+  }
+  if (!data) return null;
+  const [withUrl] = await attachSignedUrls([mapCustomerFile(data)]);
+  return withUrl;
 }
 
 interface CustomerFileRow {
@@ -1485,6 +1533,7 @@ interface CustomerFileRow {
   uploaded_by_name: string | null;
   uploaded_by_email: string | null;
   created_at: string;
+  note_id: string | null;
 }
 
 const FILES_BUCKET = "client-files";
@@ -1501,49 +1550,35 @@ function mapCustomerFile(row: CustomerFileRow): CustomerFile {
     uploadedByName: row.uploaded_by_name,
     uploadedByEmail: row.uploaded_by_email,
     createdAt: row.created_at,
+    noteId: row.note_id,
   };
 }
 
-// Lists a customer's files with a fresh, time-limited signed download URL
-// on each -- the bucket is private, so nothing is ever served unsigned.
-export async function getCustomerFiles(customerId: string): Promise<CustomerFile[]> {
+// One batched call instead of one createSignedUrl round trip per file -- a
+// client with many uploads used to fire that many separate Storage API
+// calls on every /clients drawer open. Shared by getCustomerFiles and
+// getCustomerNotes (for notes' attached files) so both get a usable,
+// fresh download link without duplicating this.
+async function attachSignedUrls(files: CustomerFile[]): Promise<CustomerFile[]> {
+  if (files.length === 0) return files;
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin
-    .from("customer_files")
-    .select("*")
-    .eq("customer_id", customerId)
-    .order("created_at", { ascending: false })
-    .returns<CustomerFileRow[]>();
-
-  if (error) {
-    console.error("[workflow] getCustomerFiles failed:", error.message);
-    return [];
-  }
-
-  const rows = data ?? [];
-  if (rows.length === 0) return [];
-
-  // One batched call instead of one createSignedUrl round trip per file --
-  // a client with many uploads used to fire that many separate Storage API
-  // calls on every /clients drawer open.
   const { data: signedUrls, error: signedError } = await admin.storage
     .from(FILES_BUCKET)
     .createSignedUrls(
-      rows.map((row) => row.storage_path),
+      files.map((f) => f.storagePath),
       SIGNED_URL_TTL_SECONDS
     );
   if (signedError) {
     console.error("[workflow] createSignedUrls failed:", signedError.message);
-    return rows.map(mapCustomerFile);
+    return files;
   }
 
   const signedUrlByPath = new Map((signedUrls ?? []).map((s) => [s.path, s]));
-  return rows.map((row) => {
-    const file = mapCustomerFile(row);
-    const signed = signedUrlByPath.get(row.storage_path);
+  return files.map((file) => {
+    const signed = signedUrlByPath.get(file.storagePath);
     if (!signed || signed.error) {
       if (signed?.error) {
-        console.error("[workflow] createSignedUrls failed for", row.storage_path, signed.error);
+        console.error("[workflow] createSignedUrls failed for", file.storagePath, signed.error);
       }
       return file;
     }
@@ -1551,15 +1586,40 @@ export async function getCustomerFiles(customerId: string): Promise<CustomerFile
   });
 }
 
+// Lists a customer's STANDALONE files (uploaded via the Files section, not
+// as a note's attachment -- see migration 031) with a fresh, time-limited
+// signed download URL on each. The bucket is private, so nothing is ever
+// served unsigned.
+export async function getCustomerFiles(customerId: string): Promise<CustomerFile[]> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customer_files")
+    .select("*")
+    .eq("customer_id", customerId)
+    .is("note_id", null)
+    .order("created_at", { ascending: false })
+    .returns<CustomerFileRow[]>();
+
+  if (error) {
+    console.error("[workflow] getCustomerFiles failed:", error.message);
+    return [];
+  }
+  return attachSignedUrls((data ?? []).map(mapCustomerFile));
+}
+
 // Uploads the file's bytes to Storage, then records its metadata. Returns
 // null (and logs) if either step fails -- callers should treat that as a
 // failed upload, not a partial one, since an orphaned storage object with
-// no metadata row is harmless (just unreachable dead weight).
+// no metadata row is harmless (just unreachable dead weight). noteId
+// attaches the file to a note (customer_notes's row id) instead of leaving
+// it standalone -- see getCustomerFiles/getCustomerNotes above for what
+// that changes about where the file shows up.
 export async function uploadCustomerFile(
   customerId: string,
   file: File,
   uploadedByName: string,
-  uploadedByEmail: string | null
+  uploadedByEmail: string | null,
+  noteId: string | null = null
 ): Promise<CustomerFile | null> {
   const admin = getSupabaseAdmin();
   const storagePath = `${customerId}/${crypto.randomUUID()}-${file.name}`;
@@ -1584,6 +1644,7 @@ export async function uploadCustomerFile(
       size_bytes: file.size,
       uploaded_by_name: uploadedByName,
       uploaded_by_email: uploadedByEmail,
+      note_id: noteId,
     })
     .select("*")
     .single<CustomerFileRow>();
@@ -1592,7 +1653,8 @@ export async function uploadCustomerFile(
     console.error("[workflow] uploadCustomerFile (metadata) failed:", error.message);
     return null;
   }
-  return mapCustomerFile(data);
+  const [withUrl] = await attachSignedUrls([mapCustomerFile(data)]);
+  return withUrl;
 }
 
 // The status a fresh, unstarted task should land in -- lowest sort_order
