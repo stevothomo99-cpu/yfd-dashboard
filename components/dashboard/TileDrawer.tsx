@@ -127,6 +127,7 @@ export default function TileDrawer({
   const [archiveNote, setArchiveNote] = useState<string | null>(null);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
+  const [noteFile, setNoteFile] = useState<File | null>(null);
   const [submittingNote, setSubmittingNote] = useState(false);
   const [togglingPinId, setTogglingPinId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -253,6 +254,7 @@ export default function TileDrawer({
       setReassigning(false);
       setManagerError(null);
       setArchiveNote(null);
+      setNoteFile(null);
       try {
         const [jobData, taskData, noteData, fileData] = await Promise.all([
           fetch(`/api/workflow/customers/${tile.id}/jobs`).then((r) => r.json()),
@@ -303,11 +305,11 @@ export default function TileDrawer({
     setSubmittingNote(true);
     setError(null);
     try {
-      const res = await fetch(`/api/workflow/customers/${tile.id}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: noteTitle.trim() || undefined, body: noteText.trim() }),
-      });
+      const formData = new FormData();
+      formData.append("body", noteText.trim());
+      if (noteTitle.trim()) formData.append("title", noteTitle.trim());
+      if (noteFile) formData.append("file", noteFile);
+      const res = await fetch(`/api/workflow/customers/${tile.id}/notes`, { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save note");
       // New notes are never pinned, so they always land after any existing
@@ -316,6 +318,10 @@ export default function TileDrawer({
       setNotes((prev) => [...prev.filter((n) => n.pinned), data.note, ...prev.filter((n) => !n.pinned)]);
       setNoteTitle("");
       setNoteText("");
+      setNoteFile(null);
+      // The note saved fine even if its attachment didn't -- surfaced as a
+      // warning, not thrown, so it doesn't look like the note itself failed.
+      if (data.warning) setError(data.warning);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save note");
     } finally {
@@ -658,25 +664,57 @@ export default function TileDrawer({
                 fontFamily: "inherit",
               }}
             />
-            <button
-              type="button"
-              onClick={handleAddNote}
-              disabled={submittingNote || !noteText.trim()}
-              style={{
-                alignSelf: "flex-end",
-                fontSize: "12px",
-                fontWeight: 500,
-                padding: "6px 14px",
-                borderRadius: "999px",
-                background: "#111111",
-                color: "white",
-                border: "none",
-                cursor: submittingNote ? "default" : "pointer",
-                opacity: submittingNote || !noteText.trim() ? 0.6 : 1,
-              }}
-            >
-              {submittingNote ? "Saving…" : "Add note"}
-            </button>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+              {noteFile ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "#444441", minWidth: 0 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📎 {noteFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setNoteFile(null)}
+                    style={{ background: "none", border: "none", color: "#888780", cursor: "pointer", fontSize: "13px", padding: 0, flexShrink: 0 }}
+                    aria-label="Remove attachment"
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : (
+                <label
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    color: "#444441",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  + Attach file (optional)
+                  <input
+                    type="file"
+                    onChange={(e) => setNoteFile(e.target.files?.[0] ?? null)}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              )}
+              <button
+                type="button"
+                onClick={handleAddNote}
+                disabled={submittingNote || !noteText.trim()}
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  padding: "6px 14px",
+                  borderRadius: "999px",
+                  background: "#111111",
+                  color: "white",
+                  border: "none",
+                  cursor: submittingNote ? "default" : "pointer",
+                  opacity: submittingNote || !noteText.trim() ? 0.6 : 1,
+                  flexShrink: 0,
+                }}
+              >
+                {submittingNote ? "Saving…" : "Add note"}
+              </button>
+            </div>
           </div>
 
           {notes.length === 0 ? (
@@ -722,6 +760,30 @@ export default function TileDrawer({
                       {n.pinned ? "Pinned" : "Pin"}
                     </button>
                   </div>
+                  {n.file ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "8px",
+                        marginTop: "8px",
+                        background: "white",
+                        border: "0.5px solid #e1e0d9",
+                        borderRadius: "6px",
+                        padding: "6px 10px",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", color: "#444441", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        📎 {n.file.fileName} <span style={{ color: "#888780" }}>({fmtBytes(n.file.sizeBytes)})</span>
+                      </div>
+                      {n.file.downloadUrl ? (
+                        <a href={n.file.downloadUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: "#2a78d6", fontWeight: 500, flexShrink: 0 }}>
+                          Download
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div style={{ fontSize: "11px", color: "#888780", marginTop: "6px" }}>
                     {n.authorName} · {new Date(n.createdAt).toLocaleString("en-AU")}
                   </div>

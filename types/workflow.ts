@@ -207,6 +207,11 @@ export interface CustomerNote {
   body: string;
   pinned: boolean;
   createdAt: string;
+  // The one file attached to this note, if any -- set at creation time only
+  // (see addCustomerNote's route). A standalone upload via the Files
+  // section always has this null on the file itself (noteId) and never
+  // appears here.
+  file: CustomerFile | null;
 }
 
 export interface CustomerFile {
@@ -222,6 +227,10 @@ export interface CustomerFile {
   // Only populated when listing -- a fresh, time-limited signed URL, not
   // stored anywhere (the bucket is private).
   downloadUrl?: string;
+  // Set when this file was uploaded as a note's attachment rather than
+  // standalone via the Files section -- see migration 031. getCustomerFiles
+  // excludes these; they only ever show up via their note.
+  noteId: string | null;
 }
 
 // A reusable, named set of tasks (title/type/recurrence only -- see
