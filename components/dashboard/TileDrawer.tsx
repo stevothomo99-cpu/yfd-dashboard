@@ -124,6 +124,7 @@ export default function TileDrawer({
   const [savingManager, setSavingManager] = useState(false);
   const [managerError, setManagerError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [archiveNote, setArchiveNote] = useState<string | null>(null);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
@@ -215,6 +216,7 @@ export default function TileDrawer({
     const nextArchived = !tile.archived;
     setArchiving(true);
     setError(null);
+    setArchiveNote(null);
     try {
       const res = await fetch(`/api/workflow/customers/${tile.id}`, {
         method: "PATCH",
@@ -224,6 +226,16 @@ export default function TileDrawer({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update client");
       onArchiveChanged?.(tile.id, nextArchived);
+      const tasksCompleted: number = data.customer?.tasksCompleted ?? 0;
+      if (tasksCompleted > 0) {
+        setArchiveNote(
+          `Archived — ${tasksCompleted} outstanding task${tasksCompleted === 1 ? "" : "s"} marked complete.`,
+        );
+      }
+      // Overdue/In progress/Recurring just changed under this same tile --
+      // the drawer's own task list was last fetched before this archive,
+      // so it's now showing tasks that are no longer open.
+      await refreshTasks();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update client");
     } finally {
@@ -240,6 +252,7 @@ export default function TileDrawer({
       setError(null);
       setReassigning(false);
       setManagerError(null);
+      setArchiveNote(null);
       try {
         const [jobData, taskData, noteData, fileData] = await Promise.all([
           fetch(`/api/workflow/customers/${tile.id}/jobs`).then((r) => r.json()),
@@ -475,6 +488,12 @@ export default function TileDrawer({
         {error ? (
           <div style={{ fontSize: "12px", color: "#501313", background: "#FCEBEB", border: "0.5px solid #f0b8b8", borderRadius: "10px", padding: "8px 12px", marginBottom: "16px" }}>
             {error}
+          </div>
+        ) : null}
+
+        {archiveNote ? (
+          <div style={{ fontSize: "12px", color: "#0d4a2f", background: "#e3f6ec", border: "0.5px solid #b8e6cd", borderRadius: "10px", padding: "8px 12px", marginBottom: "16px" }}>
+            {archiveNote}
           </div>
         ) : null}
 

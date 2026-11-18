@@ -14,6 +14,7 @@ interface WorkflowSyncResult {
   customersUpserted: number;
   customersRemoved: number;
   customersArchived: number;
+  tasksCompletedForNewlyArchived: number;
   jobsUpserted: number;
   jobsRemoved: number;
 }
@@ -223,6 +224,11 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
             Clients {workflowResult.customersUpserted} synced ({workflowResult.customersArchived} archived) /{" "}
             {workflowResult.customersRemoved} removed &middot; Jobs {workflowResult.jobsUpserted} synced /{" "}
             {workflowResult.jobsRemoved} removed
+            {workflowResult.tasksCompletedForNewlyArchived > 0
+              ? ` · ${workflowResult.tasksCompletedForNewlyArchived} outstanding task${
+                  workflowResult.tasksCompletedForNewlyArchived === 1 ? "" : "s"
+                } auto-completed for newly archived clients`
+              : ""}
           </div>
         ) : null}
       </div>
