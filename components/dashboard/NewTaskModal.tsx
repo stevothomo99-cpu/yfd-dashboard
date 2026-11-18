@@ -92,7 +92,7 @@ export default function NewTaskModal({ onClose, onCreated, clients, staff, statu
   const clientsWithCurrent = useMemo(
     () =>
       editTask && !clients.some((c) => c.id === editTask.customerId)
-        ? [...clients, { id: editTask.customerId, xpmClientId: null, name: editTask.customerName, partnerId: null } satisfies WorkflowCustomer]
+        ? [...clients, { id: editTask.customerId, xpmClientId: null, name: editTask.customerName, partnerId: null, archived: false } satisfies WorkflowCustomer]
         : clients,
     [clients, editTask],
   );

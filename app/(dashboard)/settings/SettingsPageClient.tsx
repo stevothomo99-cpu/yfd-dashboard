@@ -13,6 +13,7 @@ interface WorkflowSyncResult {
   staffRemoved: number;
   customersUpserted: number;
   customersRemoved: number;
+  customersArchived: number;
   jobsUpserted: number;
   jobsRemoved: number;
 }
@@ -219,8 +220,9 @@ export default function SettingsPageClient({ initial }: { initial: SettingsSnaps
         {workflowResult ? (
           <div style={{ fontSize: "11px", color: "#27500A", marginTop: "10px" }}>
             ✓ Staff {workflowResult.staffUpserted} synced / {workflowResult.staffRemoved} removed &middot;
-            Clients {workflowResult.customersUpserted} synced / {workflowResult.customersRemoved} removed
-            &middot; Jobs {workflowResult.jobsUpserted} synced / {workflowResult.jobsRemoved} removed
+            Clients {workflowResult.customersUpserted} synced ({workflowResult.customersArchived} archived) /{" "}
+            {workflowResult.customersRemoved} removed &middot; Jobs {workflowResult.jobsUpserted} synced /{" "}
+            {workflowResult.jobsRemoved} removed
           </div>
         ) : null}
       </div>

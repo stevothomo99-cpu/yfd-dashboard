@@ -47,6 +47,7 @@ interface CustomerRow {
   // partner_id is its accountManager, manager_id its jobManager.
   partner_id: string | null;
   manager_id: string | null;
+  archived: boolean;
 }
 
 interface JobRow {
@@ -125,6 +126,7 @@ function mapCustomer(row: CustomerRow): WorkflowCustomer {
     xpmClientId: row.xpm_client_id,
     name: row.name,
     partnerId: row.partner_id,
+    archived: row.archived,
   };
 }
 
@@ -244,7 +246,7 @@ function cachedCustomerRows(): Promise<CustomerRow[]> {
     const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from("customers")
-      .select("id, xpm_client_id, name, partner_id, manager_id")
+      .select("id, xpm_client_id, name, partner_id, manager_id, archived")
       .returns<CustomerRow[]>();
     if (error) {
       console.error("[workflow] fetchAllCustomerRows failed:", error.message);
@@ -296,7 +298,7 @@ export async function createCustomer(name: string, partnerId: string): Promise<W
   const { data, error } = await admin
     .from("customers")
     .insert({ name, partner_id: partnerId })
-    .select("id, xpm_client_id, name, partner_id, manager_id")
+    .select("id, xpm_client_id, name, partner_id, manager_id, archived")
     .single<CustomerRow>();
 
   if (error) {
@@ -333,8 +335,41 @@ export async function setCustomerManager(
   return { id: data.id, managerId: data.manager_id };
 }
 
+// Admin-only "hide this client" toggle -- unlike setCustomerManager above,
+// this IS meant to survive the next XPM resync: a client archived here stays
+// archived until either an admin unarchives it or the client's own isArchived
+// flag in XPM changes (see xpmSync.ts, which now sets this column from XPM's
+// own archived state instead of hard-deleting the row). Archiving never
+// touches the client's existing jobs/tasks/notes/files -- it only drops the
+// client out of the default /clients grid and out of new-task client pickers
+// (searchClientsForPartner/getClientsForManager/listAllCustomers below).
+export async function setCustomerArchived(
+  customerId: string,
+  archived: boolean
+): Promise<{ id: string; archived: boolean } | null> {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from("customers")
+    .update({ archived })
+    .eq("id", customerId)
+    .select("id, archived")
+    .single<{ id: string; archived: boolean }>();
+
+  if (error) {
+    console.error("[workflow] setCustomerArchived failed:", error.message);
+    return null;
+  }
+  await invalidateWorkflowReferenceCache();
+  return { id: data.id, archived: data.archived };
+}
+
 // Clients attached to a Partner, optionally narrowed by a search string
 // (case-insensitive match on name) for the searchable client picker.
+// Archived clients are excluded -- this (and getClientsForManager/
+// listAllCustomers below) feeds both the new-task client pickers and, via
+// getClientsInScopeForStaff, canAccessClient/canModifyTask's scope checks,
+// so an archived client's existing work becomes admin-only once archived,
+// consistent with "this client has moved on."
 export async function searchClientsForPartner(
   partnerId: string,
   search?: string
@@ -342,8 +377,9 @@ export async function searchClientsForPartner(
   const admin = getSupabaseAdmin();
   let query = admin
     .from("customers")
-    .select("id, xpm_client_id, name, partner_id, manager_id")
+    .select("id, xpm_client_id, name, partner_id, manager_id, archived")
     .eq("partner_id", partnerId)
+    .eq("archived", false)
     .order("name");
 
   if (search?.trim()) {
@@ -358,14 +394,17 @@ export async function searchClientsForPartner(
   return (data ?? []).map(mapCustomer);
 }
 
-// Every client practice-wide, regardless of partner -- for admin-only "see
-// everything" pickers (e.g. My Work's "+ New Task" client dropdown). Reuses
-// the same cached customer rows fetchLookupMaps draws from instead of
-// looping searchClientsForPartner once per partner, which used to fire one
-// extra `customers` query per partner on every admin page load.
+// Every active (non-archived) client practice-wide, regardless of partner --
+// for admin-only "see everything" pickers (e.g. My Work's "+ New Task" client
+// dropdown). Reuses the same cached customer rows fetchLookupMaps draws from
+// instead of looping searchClientsForPartner once per partner, which used to
+// fire one extra `customers` query per partner on every admin page load.
 export async function listAllCustomers(): Promise<WorkflowCustomer[]> {
   const rows = await cachedCustomerRows();
-  return [...rows].sort((a, b) => a.name.localeCompare(b.name)).map(mapCustomer);
+  return [...rows]
+    .filter((r) => !r.archived)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(mapCustomer);
 }
 
 // Clients attached to a Manager, optionally narrowed by a search string --
@@ -380,8 +419,9 @@ export async function getClientsForManager(
   const admin = getSupabaseAdmin();
   let query = admin
     .from("customers")
-    .select("id, xpm_client_id, name, partner_id, manager_id")
+    .select("id, xpm_client_id, name, partner_id, manager_id, archived")
     .eq("manager_id", managerId)
+    .eq("archived", false)
     .order("name");
 
   if (search?.trim()) {
@@ -1226,7 +1266,7 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
     { data: allNotes, error: notesError },
     lookups,
   ] = await Promise.all([
-    admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id").order("name").returns<CustomerRow[]>(),
+    admin.from("customers").select("id, xpm_client_id, name, partner_id, manager_id, archived").order("name").returns<CustomerRow[]>(),
     // Only the four columns the tallies below actually read. This used to
     // be select("*"), which pulled every task body over the wire purely to
     // count them.
@@ -1307,6 +1347,7 @@ export const getClientSummaries = cache(async function getClientSummaries(): Pro
       overdueBasCount: tally?.overdueBasCount ?? 0,
       nextDueDate: tally?.nextDueDate ?? null,
       notesCount: notesCountByCustomerId.get(c.id) ?? 0,
+      archived: c.archived,
     };
   });
 });

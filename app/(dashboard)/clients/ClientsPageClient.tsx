@@ -84,6 +84,10 @@ export default function ClientsPageClient({
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [staffId, setStaffId] = useState("");
+  // Admin-only -- off by default, since most people never want to see
+  // clients who've moved on in the regular grid. The archive/unarchive
+  // action itself (TileDrawer) is gated the same way.
+  const [showArchived, setShowArchived] = useState(false);
   const [activeTile, setActiveTile] = useState<ClientSummary | null>(null);
   // Client whose notes-only sidebar (NotesDrawer) is open -- separate from
   // activeTile/TileDrawer so the "Notes" shortcut on a tile (ClientTile.tsx)
@@ -101,6 +105,12 @@ export default function ClientsPageClient({
     const managerIds = managerId ? [managerId] : [];
     setAllTiles((prev) => prev.map((t) => (t.id === customerId ? { ...t, managerIds, managerName } : t)));
     setActiveTile((prev) => (prev && prev.id === customerId ? { ...prev, managerIds, managerName } : prev));
+  }
+  // Same immediate-sync pattern as handleManagerChanged above, for
+  // TileDrawer's "Archive"/"Unarchive" control.
+  function handleArchiveChanged(customerId: string, archived: boolean) {
+    setAllTiles((prev) => prev.map((t) => (t.id === customerId ? { ...t, archived } : t)));
+    setActiveTile((prev) => (prev && prev.id === customerId ? { ...prev, archived } : prev));
   }
   // Revenue for the four fixed periods is prefetched server-side, which is
   // what makes those buttons instant. A custom range can't be prefetched, so
@@ -194,13 +204,14 @@ export default function ClientsPageClient({
   const tiles = useMemo(() => {
     return allTiles
       .filter((t) => {
+        if (t.archived && !(isAdmin && showArchived)) return false;
         if (filter !== "all" && statusOf(t) !== filter) return false;
         if (staffId && !t.managerIds.includes(staffId)) return false;
         if (search.trim() && !t.name.toLowerCase().includes(search.trim().toLowerCase())) return false;
         return true;
       })
       .sort((a, b) => FILTER_ORDER[statusOf(a)] - FILTER_ORDER[statusOf(b)] || a.name.localeCompare(b.name));
-  }, [allTiles, filter, staffId, search]);
+  }, [allTiles, filter, staffId, search, isAdmin, showArchived]);
 
   const totalHoursLogged = useMemo(
     () => tiles.reduce((acc, t) => acc + (t.xpmClientId ? hoursByClientId[t.xpmClientId] ?? 0 : 0), 0),
@@ -219,7 +230,11 @@ export default function ClientsPageClient({
   // matching the current filter/search, so those actions aren't limited by
   // whatever the grid happens to be showing right now.
   const allClientOptions = useMemo(
-    () => allTiles.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    () =>
+      allTiles
+        .filter((t) => !t.archived)
+        .map((t) => ({ id: t.id, name: t.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [allTiles],
   );
 
@@ -365,6 +380,25 @@ export default function ClientsPageClient({
             minWidth: "200px",
           }}
         />
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            style={{
+              marginLeft: "8px",
+              fontSize: "12px",
+              fontWeight: 500,
+              padding: "6px 12px",
+              borderRadius: "999px",
+              background: showArchived ? "#111111" : "white",
+              color: showArchived ? "white" : "#444441",
+              border: "0.5px solid " + (showArchived ? "#111111" : "#e1e0d9"),
+              cursor: "pointer",
+            }}
+          >
+            {showArchived ? "Hide archived" : "Show archived"}
+          </button>
+        ) : null}
       </div>
 
       {tiles.length === 0 ? (
@@ -407,6 +441,7 @@ export default function ClientsPageClient({
         clients={clientsForModal}
         isAdmin={isAdmin}
         onManagerChanged={handleManagerChanged}
+        onArchiveChanged={handleArchiveChanged}
       />
 
       <NotesDrawer tile={notesTile} onClose={() => setNotesTile(null)} />

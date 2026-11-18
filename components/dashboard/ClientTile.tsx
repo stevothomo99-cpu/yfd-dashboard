@@ -55,9 +55,9 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenu
         }
       }}
       style={{
-        background: "white",
+        background: tile.archived ? "#faf9f6" : "white",
         border: "0.5px solid #e1e0d9",
-        borderTop: "3px solid " + TOP_BORDER[status],
+        borderTop: "3px solid " + (tile.archived ? "#c9c7bd" : TOP_BORDER[status]),
         borderRadius: "14px",
         padding: "1rem 1.1rem",
         textAlign: "left",
@@ -66,11 +66,19 @@ export default function ClientTile({ tile, hoursLogged, hoursPeriodLabel, revenu
         display: "flex",
         flexDirection: "column",
         gap: "12px",
+        opacity: tile.archived ? 0.7 : 1,
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
         <div>
-          <div style={{ fontSize: "14px", fontWeight: 600, color: "#111111" }}>{tile.name}</div>
+          <div style={{ fontSize: "14px", fontWeight: 600, color: "#111111", display: "flex", alignItems: "center", gap: "6px" }}>
+            {tile.name}
+            {tile.archived ? (
+              <span style={{ fontSize: "9px", fontWeight: 600, color: "#888780", background: "#eeede7", borderRadius: "999px", padding: "2px 7px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                Archived
+              </span>
+            ) : null}
+          </div>
           {tile.managerName ? (
             <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
               <StaffAvatar initials={initialsOf(tile.managerName)} size={20} />
