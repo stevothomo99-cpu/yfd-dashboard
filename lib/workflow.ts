@@ -782,6 +782,49 @@ async function generateNextOccurrence(completed: TaskRow, lookups: Awaited<Retur
   if (error) console.error("[workflow] generateNextOccurrence (insert) failed:", error.message);
 }
 
+// The flip side of generateNextOccurrence: reopening an occurrence that had
+// already rolled the series forward leaves its generated successor sitting
+// open alongside it -- a second open member of the same series, always with
+// no start date (every generated occurrence gets one), which is exactly
+// what shows up to staff as an unexplained duplicate recurring task. Only
+// retracted when the successor is still exactly as generateNextOccurrence
+// left it (pristine: expected due date, same assignee/title/type, still on
+// the default open status, start date still null, never itself completed,
+// and created at/after the moment this task was completed) -- if a user has
+// since touched it, it's left alone rather than risking real work.
+async function retractOrphanedSuccessor(
+  reopened: TaskRow,
+  previousCompletedAt: string | null
+): Promise<void> {
+  if (reopened.recurrence === "none" || !previousCompletedAt || !reopened.due_date) return;
+
+  const seriesRootId = seriesRootIdOf(reopened);
+  const members = await getSeriesMembers(seriesRootId);
+  const openStatusId = await defaultOpenStatusId();
+  if (!openStatusId) return;
+
+  const expectedDueDate = advanceDueDate(reopened.due_date, reopened.recurrence);
+
+  const successor = members.find(
+    (m) =>
+      m.id !== reopened.id &&
+      m.recurrence_parent_id === seriesRootId &&
+      m.status_id === openStatusId &&
+      m.start_date === null &&
+      m.completed_at === null &&
+      m.due_date === expectedDueDate &&
+      m.assignee_id === reopened.assignee_id &&
+      m.title === reopened.title &&
+      m.type_id === reopened.type_id &&
+      m.created_at >= previousCompletedAt
+  );
+  if (!successor) return;
+
+  const admin = getSupabaseAdmin();
+  const { error } = await admin.from("tasks").delete().eq("id", successor.id);
+  if (error) console.error("[workflow] retractOrphanedSuccessor failed:", error.message);
+}
+
 // Edits an existing task -- only fields present on patch are touched (see
 // UpdateTaskInput's comment), so e.g. reassigning just the assignee doesn't
 // require re-sending the client/title/etc. Returns the freshly-hydrated task
@@ -808,6 +851,23 @@ export async function updateTask(
 ): Promise<TaskWithDetails | null> {
   const admin = getSupabaseAdmin();
   const lookups = await fetchLookupMaps();
+
+  // Needed before the update below overwrites it -- only relevant when the
+  // status is actually changing, to detect a reopen (was complete, isn't
+  // anymore) for retractOrphanedSuccessor.
+  let previousStatusWasComplete = false;
+  let previousCompletedAt: string | null = null;
+  if (patch.statusId !== undefined) {
+    const { data: existing } = await admin
+      .from("tasks")
+      .select("status_id, completed_at")
+      .eq("id", taskId)
+      .maybeSingle<{ status_id: string; completed_at: string | null }>();
+    if (existing) {
+      previousStatusWasComplete = lookups.statusesById.get(existing.status_id)?.is_complete ?? false;
+      previousCompletedAt = existing.completed_at;
+    }
+  }
 
   const update: Record<string, unknown> = {};
   if (patch.customerId !== undefined) update.customer_id = patch.customerId;
@@ -857,6 +917,8 @@ export async function updateTask(
 
   if (lookups.statusesById.get(data.status_id)?.is_complete) {
     await generateNextOccurrence(data, lookups);
+  } else if (previousStatusWasComplete) {
+    await retractOrphanedSuccessor(data, previousCompletedAt);
   }
 
   return hydrateTask(data, lookups);
