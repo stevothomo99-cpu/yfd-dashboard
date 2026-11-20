@@ -623,11 +623,16 @@ export default function TileDrawer({
               {recurring.length === 0 ? (
                 <Empty label="Nothing set to recur on this client." />
               ) : (
-                <Stack>
-                  {recurring.map((t) => (
-                    <WorkItemRow key={t.id} task={t} accent="#8a5ea8" onCopy={setCopyingTask} onOpen={setEditingTask} showRecurrence />
-                  ))}
-                </Stack>
+                <>
+                  <div style={{ fontSize: "11px", color: "#888780", marginBottom: "8px" }}>
+                    Reference only -- to edit or complete one of these, open it from Overdue, In progress, or Completed above.
+                  </div>
+                  <Stack>
+                    {recurring.map((t) => (
+                      <WorkItemRow key={t.id} task={t} accent="#8a5ea8" showRecurrence readOnly />
+                    ))}
+                  </Stack>
+                </>
               )}
             </ConcertinaSection>
           </>
@@ -908,26 +913,38 @@ function WorkItemRow({
   onCopy,
   onOpen,
   showRecurrence,
+  readOnly,
 }: {
   task: TaskWithDetails;
   accent: string;
-  onCopy: (task: TaskWithDetails) => void;
-  onOpen: (task: TaskWithDetails) => void;
+  onCopy?: (task: TaskWithDetails) => void;
+  onOpen?: (task: TaskWithDetails) => void;
   // Recurring is a cross-cutting list, not a status bucket -- the frequency
   // is the useful thing to see there, in place of the due date every other
   // section already shows (a recurring task's due date is just whichever
   // occurrence happens to be open right now, not the interesting fact).
   showRecurrence?: boolean;
+  // Recurring is reference-only: it was a second, confusing place to open
+  // and act on the exact same task row that Overdue/In progress/Completed
+  // already show -- staff editing/completing it from there (instead of
+  // wherever it's actually sitting) is what led to the manual-duplicate
+  // habit this whole fix is for. No onClick, no Copy -- every task is
+  // always reachable from its real status section instead.
+  readOnly?: boolean;
 }) {
   return (
     <div
-      onClick={() => onOpen(task)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onOpen(task);
-      }}
-      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px", cursor: "pointer" }}
+      onClick={readOnly ? undefined : () => onOpen?.(task)}
+      role={readOnly ? undefined : "button"}
+      tabIndex={readOnly ? undefined : 0}
+      onKeyDown={
+        readOnly
+          ? undefined
+          : (e) => {
+              if (e.key === "Enter" || e.key === " ") onOpen?.(task);
+            }
+      }
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px", cursor: readOnly ? "default" : "pointer" }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -941,16 +958,18 @@ function WorkItemRow({
             : ` · Due ${formatDate(task.dueDate)}`}
         </div>
       </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onCopy(task);
-        }}
-        style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", flexShrink: 0, marginLeft: "8px" }}
-      >
-        Copy…
-      </button>
+      {readOnly ? null : (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopy?.(task);
+          }}
+          style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", flexShrink: 0, marginLeft: "8px" }}
+        >
+          Copy…
+        </button>
+      )}
       <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: accent, marginLeft: "8px", flexShrink: 0 }} />
     </div>
   );

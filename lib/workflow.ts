@@ -899,22 +899,19 @@ export async function updateTask(
   const admin = getSupabaseAdmin();
   const lookups = await fetchLookupMaps();
 
-  // Needed before the update below overwrites it -- only relevant when the
-  // status is actually changing, to detect a reopen (was complete, isn't
-  // anymore) for retractOrphanedSuccessor.
-  let previousStatusWasComplete = false;
-  let previousCompletedAt: string | null = null;
-  if (patch.statusId !== undefined) {
-    const { data: existing } = await admin
-      .from("tasks")
-      .select("status_id, completed_at")
-      .eq("id", taskId)
-      .maybeSingle<{ status_id: string; completed_at: string | null }>();
-    if (existing) {
-      previousStatusWasComplete = lookups.statusesById.get(existing.status_id)?.is_complete ?? false;
-      previousCompletedAt = existing.completed_at;
-    }
-  }
+  // Needed before the update below overwrites it -- to tell a genuine
+  // transition (into or out of complete) apart from a resave that leaves
+  // the task's complete-ness unchanged. Fetched unconditionally, not just
+  // when patch.statusId is present: a patch that only touches e.g. typeId
+  // still needs the correct "was this already complete" answer, since
+  // data.status_id below is otherwise whatever it already was.
+  const { data: existing } = await admin
+    .from("tasks")
+    .select("status_id, completed_at")
+    .eq("id", taskId)
+    .maybeSingle<{ status_id: string; completed_at: string | null }>();
+  const previousStatusWasComplete = existing ? (lookups.statusesById.get(existing.status_id)?.is_complete ?? false) : false;
+  const previousCompletedAt = existing?.completed_at ?? null;
 
   const update: Record<string, unknown> = {};
   if (patch.customerId !== undefined) update.customer_id = patch.customerId;
@@ -962,9 +959,19 @@ export async function updateTask(
     }
   }
 
-  if (lookups.statusesById.get(data.status_id)?.is_complete) {
+  // Only a genuine transition rolls the series forward or retracts a
+  // successor -- a resave that leaves the task's complete-ness unchanged
+  // (e.g. fixing a typo on an already-completed occurrence) must not
+  // re-trigger generateNextOccurrence. Previously this checked only
+  // "is it complete now", which fired on every single resave of an
+  // already-complete task -- harmless for a properly linked series (its
+  // already-open successor makes generateNextOccurrence's own guard bail),
+  // but for a task whose history had fragmented into unlinked one-off rows
+  // (no successor to find), every such resave spawned yet another one.
+  const isCompleteNow = lookups.statusesById.get(data.status_id)?.is_complete ?? false;
+  if (isCompleteNow && !previousStatusWasComplete) {
     await generateNextOccurrence(data, lookups);
-  } else if (previousStatusWasComplete) {
+  } else if (!isCompleteNow && previousStatusWasComplete) {
     await retractOrphanedSuccessor(data, previousCompletedAt);
   }
 
