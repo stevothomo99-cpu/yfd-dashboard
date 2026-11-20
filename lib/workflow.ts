@@ -822,7 +822,13 @@ async function generateNextOccurrence(completed: TaskRow, lookups: Awaited<Retur
     type_id: completed.type_id,
     recurrence: completed.recurrence,
     due_date: advanceDueDate(completed.due_date ?? new Date().toISOString().slice(0, 10), completed.recurrence),
-    start_date: null,
+    // Advanced the same way due_date is, when the completed occurrence had
+    // one -- start_date drives My Work's Overdue/Today/This week/This month
+    // grouping (startBucketOf in MyWorkPageClient.tsx), so silently
+    // dropping it on every future occurrence left each one invisible to
+    // that view ("Other" bucket) forever after the first. Null stays null
+    // if there was nothing to advance from (nothing lost either way).
+    start_date: completed.start_date ? advanceDueDate(completed.start_date, completed.recurrence) : null,
     status_id: statusId,
     recurrence_parent_id: seriesRootId,
   });
