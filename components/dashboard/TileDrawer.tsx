@@ -53,6 +53,34 @@ function toneOf(t: TaskWithDetails, today: string): "overdue" | "normal" | "comp
   return "normal";
 }
 
+// One row per distinct recurring commitment (by series root), not one per
+// historical occurrence ever created -- Overdue/In progress/Completed
+// already show every occurrence; Recurring is meant to answer "what's set
+// up to recur here at all," which is a count of series, not of rows. Picks
+// one representative per root: whichever member is currently open (the
+// live occurrence), or for a dormant series with nothing open right now,
+// whichever has the latest due date.
+function recurringSeriesOf(tasks: TaskWithDetails[]): TaskWithDetails[] {
+  const byRoot = new Map<string, TaskWithDetails>();
+  for (const t of tasks) {
+    if (t.recurrence === "none") continue;
+    const root = t.recurrenceParentId ?? t.id;
+    const existing = byRoot.get(root);
+    if (!existing) {
+      byRoot.set(root, t);
+      continue;
+    }
+    const existingOpen = !existing.statusIsComplete;
+    const candidateOpen = !t.statusIsComplete;
+    if (candidateOpen !== existingOpen) {
+      if (candidateOpen) byRoot.set(root, t);
+    } else if ((t.dueDate ?? "") > (existing.dueDate ?? "")) {
+      byRoot.set(root, t);
+    }
+  }
+  return Array.from(byRoot.values());
+}
+
 const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
   none: "One-off",
   daily: "Daily",
@@ -296,9 +324,9 @@ export default function TileDrawer({
   const inProgress = tasks.filter((t) => toneOf(t, today) === "normal");
   const completed = tasks.filter((t) => toneOf(t, today) === "completed");
   // A cross-cutting view, not a status bucket -- what's currently set to
-  // recur against this client at all, regardless of where any one
-  // occurrence sits in Overdue/In progress/Completed above.
-  const recurring = tasks.filter((t) => t.recurrence !== "none");
+  // recur against this client at all, deduped to one row per series (see
+  // recurringSeriesOf) rather than one per occurrence ever created.
+  const recurring = recurringSeriesOf(tasks);
 
   async function handleAddNote() {
     if (!tile || !noteText.trim()) return;
