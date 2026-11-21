@@ -53,6 +53,34 @@ function toneOf(t: TaskWithDetails, today: string): "overdue" | "normal" | "comp
   return "normal";
 }
 
+// One row per distinct recurring commitment (by series root), not one per
+// historical occurrence ever created -- Overdue/In progress/Completed
+// already show every occurrence; Recurring is meant to answer "what's set
+// up to recur here at all," which is a count of series, not of rows. Picks
+// one representative per root: whichever member is currently open (the
+// live occurrence), or for a dormant series with nothing open right now,
+// whichever has the latest due date.
+function recurringSeriesOf(tasks: TaskWithDetails[]): TaskWithDetails[] {
+  const byRoot = new Map<string, TaskWithDetails>();
+  for (const t of tasks) {
+    if (t.recurrence === "none") continue;
+    const root = t.recurrenceParentId ?? t.id;
+    const existing = byRoot.get(root);
+    if (!existing) {
+      byRoot.set(root, t);
+      continue;
+    }
+    const existingOpen = !existing.statusIsComplete;
+    const candidateOpen = !t.statusIsComplete;
+    if (candidateOpen !== existingOpen) {
+      if (candidateOpen) byRoot.set(root, t);
+    } else if ((t.dueDate ?? "") > (existing.dueDate ?? "")) {
+      byRoot.set(root, t);
+    }
+  }
+  return Array.from(byRoot.values());
+}
+
 const RECURRENCE_LABEL: Record<TaskWithDetails["recurrence"], string> = {
   none: "One-off",
   daily: "Daily",
@@ -296,9 +324,9 @@ export default function TileDrawer({
   const inProgress = tasks.filter((t) => toneOf(t, today) === "normal");
   const completed = tasks.filter((t) => toneOf(t, today) === "completed");
   // A cross-cutting view, not a status bucket -- what's currently set to
-  // recur against this client at all, regardless of where any one
-  // occurrence sits in Overdue/In progress/Completed above.
-  const recurring = tasks.filter((t) => t.recurrence !== "none");
+  // recur against this client at all, deduped to one row per series (see
+  // recurringSeriesOf) rather than one per occurrence ever created.
+  const recurring = recurringSeriesOf(tasks);
 
   async function handleAddNote() {
     if (!tile || !noteText.trim()) return;
@@ -623,11 +651,16 @@ export default function TileDrawer({
               {recurring.length === 0 ? (
                 <Empty label="Nothing set to recur on this client." />
               ) : (
-                <Stack>
-                  {recurring.map((t) => (
-                    <WorkItemRow key={t.id} task={t} accent="#8a5ea8" onCopy={setCopyingTask} onOpen={setEditingTask} showRecurrence />
-                  ))}
-                </Stack>
+                <>
+                  <div style={{ fontSize: "11px", color: "#888780", marginBottom: "8px" }}>
+                    Reference only -- to edit or complete one of these, open it from Overdue, In progress, or Completed above.
+                  </div>
+                  <Stack>
+                    {recurring.map((t) => (
+                      <WorkItemRow key={t.id} task={t} accent="#8a5ea8" showRecurrence readOnly />
+                    ))}
+                  </Stack>
+                </>
               )}
             </ConcertinaSection>
           </>
@@ -908,26 +941,38 @@ function WorkItemRow({
   onCopy,
   onOpen,
   showRecurrence,
+  readOnly,
 }: {
   task: TaskWithDetails;
   accent: string;
-  onCopy: (task: TaskWithDetails) => void;
-  onOpen: (task: TaskWithDetails) => void;
+  onCopy?: (task: TaskWithDetails) => void;
+  onOpen?: (task: TaskWithDetails) => void;
   // Recurring is a cross-cutting list, not a status bucket -- the frequency
   // is the useful thing to see there, in place of the due date every other
   // section already shows (a recurring task's due date is just whichever
   // occurrence happens to be open right now, not the interesting fact).
   showRecurrence?: boolean;
+  // Recurring is reference-only: it was a second, confusing place to open
+  // and act on the exact same task row that Overdue/In progress/Completed
+  // already show -- staff editing/completing it from there (instead of
+  // wherever it's actually sitting) is what led to the manual-duplicate
+  // habit this whole fix is for. No onClick, no Copy -- every task is
+  // always reachable from its real status section instead.
+  readOnly?: boolean;
 }) {
   return (
     <div
-      onClick={() => onOpen(task)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onOpen(task);
-      }}
-      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px", cursor: "pointer" }}
+      onClick={readOnly ? undefined : () => onOpen?.(task)}
+      role={readOnly ? undefined : "button"}
+      tabIndex={readOnly ? undefined : 0}
+      onKeyDown={
+        readOnly
+          ? undefined
+          : (e) => {
+              if (e.key === "Enter" || e.key === " ") onOpen?.(task);
+            }
+      }
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#fafaf8", borderRadius: "8px", cursor: readOnly ? "default" : "pointer" }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: "13px", fontWeight: 500, color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -941,16 +986,18 @@ function WorkItemRow({
             : ` · Due ${formatDate(task.dueDate)}`}
         </div>
       </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onCopy(task);
-        }}
-        style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", flexShrink: 0, marginLeft: "8px" }}
-      >
-        Copy…
-      </button>
+      {readOnly ? null : (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopy?.(task);
+          }}
+          style={{ fontSize: "11px", color: "#888780", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", flexShrink: 0, marginLeft: "8px" }}
+        >
+          Copy…
+        </button>
+      )}
       <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: accent, marginLeft: "8px", flexShrink: 0 }} />
     </div>
   );
